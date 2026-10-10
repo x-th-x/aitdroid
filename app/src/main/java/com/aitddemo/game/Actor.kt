@@ -120,7 +120,7 @@ class Actor(
     val animated: Boolean get() = animData != null
 
     /** Animation starten wie ANIM_ONCE (type 0), ANIM_REPEAT (1) oder ANIM_ALL_ONCE (2) im Skript; [info] = Folgeanimation; -1 beendet die Animation. */
-    fun playAnim(num: Int, type: Int, info: Int) {
+    fun playAnim(num: Int, type: Int, info: Int): Boolean {
         if (num < 0) {
             if (anim != -1 || animData != null) {
                 anim = -1
@@ -130,9 +130,9 @@ class Actor(
                 newAnimInfo = -1
                 flagEndAnim = true
             }
-            return
+            return true
         }
-        initAnim(num, type, info)
+        return initAnim(num, type, info)
     }
 
     /** Aktueller (interpolierter) Zustand der Gruppen und der Ausgangszustand der laufenden Keyframe. */
@@ -635,20 +635,22 @@ class Actor(
         }
     }
 
-    private fun initAnim(num: Int, type: Int, info: Int) {
+    /** InitAnim des Originals: true, wenn die Animation neu angefordert wurde; false, wenn sie schon läuft (dann ändern sich nur Art und Folgeanimation) oder gesperrt ist. */
+    private fun initAnim(num: Int, type: Int, info: Int): Boolean {
         stopPending = false
         if (num == anim) {
             animType = type
             animInfo = info
-            return
+            return false
         }
         // AITD1: eine nicht unterbrechbare Animation (ANIM_ALL_ONCE) lässt jede neue Anforderung verfallen
-        if (animType and 2 != 0) return
-        if (newAnimType and 2 != 0) return
+        if (animType and 2 != 0) return false
+        if (newAnimType and 2 != 0) return false
         newAnim = num
         newAnimType = type
         newAnimInfo = info
         frame = 0
+        return true
     }
 
     // ---------------------------------------------------------------- Animation und Bewegung (GereAnim)
@@ -882,7 +884,8 @@ class Actor(
         if (oldPos == 5 || oldPos == 9 || oldPos == 6 || oldPos == 10) {
             oldType = 2
         } else if (oldPos == 0) {
-            return intArrayOf(0, 0)
+            // Already inside the box (the original stops him dead here). A creature that came in through the window would never get out again, so it may walk on.
+            return intArrayOf(stepX, stepZ)
         } else {
             oldType = 1
         }

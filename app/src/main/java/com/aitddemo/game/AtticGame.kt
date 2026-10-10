@@ -18,6 +18,14 @@ interface GameUi {
 
 /** An object of the world with its actor (animation, position, collision box) while it is part of the scene. */
 class GameObject(val w: WorldObject) {
+    /** A blow or a shot in progress (animActionType of the original): 0 none, 1 waits for the animation, 10 for its frame, 2 hits, 4/5 shot. */
+    var actionType = 0
+    var actionAnim = -1
+    var actionFrame = 0
+    var actionRange = 0
+    var actionGroup = -1
+    var actionForce = 0
+
     /** Box of an object whose box is a collider of the room (OBJETS type 4, "hard ZV"); such objects are invisible helpers of the furniture scripts. */
     var fixedZv: IntArray? = null
     var actor: Actor? = null
@@ -215,6 +223,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                 }
             }
             if (w.flags and AF_TRIGGER != 0 && a.triggersOn) checkZones(g)
+            if (g.actionType != 0) processAction(g)
         }
 
         // the life scripts of all active objects
@@ -472,9 +481,111 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         a.chooseMoveAnim(MoveAnims(anims[0], anims[1], anims[2], anims[3], anims[4], anims[5], anims[6]))
     }
 
-    /** HIT: a punch or weapon swing starts its animation (the damage to what it hits comes with the creatures). */
+    /** HIT: a punch or weapon swing starts its animation; at the given frame the zone around the hand (the bone group's base point) hits what stands in it. */
     override fun hit(obj: Int, anim: Int, frame: Int, group: Int, size: Int, force: Int, nextAnim: Int) {
-        objects.getOrNull(obj)?.actor?.playAnim(anim, 0, nextAnim)
+        val g = objects.getOrNull(obj) ?: return
+        if (g.actor?.playAnim(anim, 0, nextAnim) != true) return // only a newly started blow arms the hit zone
+        g.actionType = 1
+        g.actionAnim = anim; g.actionFrame = frame; g.actionGroup = group; g.actionRange = size; g.actionForce = force
+    }
+
+    /** FIRE: a shot; the animation cannot be interrupted, at its frame a line is traced from the weapon along the heading (animAction.cpp DO_TIR). */
+    override fun fire(obj: Int, anim: Int, frame: Int, hotPoint: Int, range: Int, force: Int, nextAnim: Int) {
+        val g = objects.getOrNull(obj) ?: return
+        if (g.actor?.playAnim(anim, 2, nextAnim) != true) return
+        g.actionType = 4
+        g.actionAnim = anim; g.actionFrame = frame; g.actionGroup = hotPoint; g.actionRange = range; g.actionForce = force
+    }
+
+    /** The point of the bone group [group] in the object's space (its base vertex, turned by the heading); null when the body has no such group. */
+    private fun hotPoint(g: GameObject, group: Int): IntArray? {
+        val parts = g.asset?.parts ?: return null
+        val a = g.actor ?: return null
+        if (group < 0 || group >= parts.groups.size / 12) return null
+        val posed = BodyPose.pose(parts.vertices, parts.groups, parts.groupOrder, a.state)
+        val v = parts.groups[group * 12 + 2]
+        if (v * 3 + 2 >= posed.size) return null
+        val ang = (a.beta and 0x3FF) * 2.0 * Math.PI / 1024.0
+        val c = Math.cos(ang)
+        val sn = Math.sin(ang)
+        val x = posed[v * 3]
+        val z = posed[v * 3 + 2]
+        return intArrayOf((x * c - z * sn).toInt(), posed[v * 3 + 1].toInt(), (x * sn + z * c).toInt())
+    }
+
+    /** GereFrappe: the state machine of blows and shots of one object, once per tick after its animation. */
+    private fun processAction(g: GameObject) {
+        val w = g.w
+        when (g.actionType) {
+            1, 10 -> {
+                if (g.actionType == 1 && w.anim == g.actionAnim) g.actionType = 10
+                if (g.actionType == 10) {
+                    if (w.anim != g.actionAnim) {
+                        g.actionType = 0
+                    } else if (w.frame == g.actionFrame) {
+                        g.actionType = 2
+                    }
+                }
+            }
+            2 -> {
+                if (w.anim != g.actionAnim) g.actionType = 0
+                val hot = hotPoint(g, g.actionGroup) ?: intArrayOf(0, 0, 0)
+                val a = g.actor ?: return
+                val x = a.renderX + hot[0]
+                val y = a.renderY + hot[1]
+                val z = a.renderZ + hot[2]
+                val r = g.actionRange
+                for (other in objects) {
+                    if (other === g || !other.w.active) continue
+                    val zv = other.actor?.zv ?: continue
+                    if (!(zv[0] < x + r && x - r < zv[1] && zv[2] < y + r && y - r < zv[3] && zv[4] < z + r && z - r < zv[5])) continue
+                    w.hit = other.w.index
+                    other.w.hitBy = w.index
+                    other.w.hitForce = g.actionForce
+                    if (other.actor?.animated == true) {
+                        g.actionType = 0
+                        return
+                    }
+                }
+            }
+            4 -> {
+                if (w.anim != g.actionAnim || w.frame != g.actionFrame) return
+                g.actionType = 5
+                shoot(g)
+                g.actionType = 0
+            }
+        }
+    }
+
+    /** DO_TIR: a line from the weapon's point along the heading; the first object on it (before a wall) is hit. */
+    private fun shoot(g: GameObject) {
+        val a = g.actor ?: return
+        val hot = hotPoint(g, g.actionGroup) ?: intArrayOf(0, 0, 0)
+        var x = a.renderX + hot[0]
+        val y = a.renderY + hot[1]
+        var z = a.renderZ + hot[2]
+        val step = g.actionRange.coerceAtLeast(10) * 2
+        val ang = ((a.beta and 0x3FF) - 0x100) * 2.0 * Math.PI / 1024.0
+        // walkStep(step, 0, beta - 0x100): the step turned by the heading
+        val dx = (step * Math.cos(ang)).toInt()
+        val dz = (step * Math.sin(ang)).toInt()
+        val p = g.actionRange.coerceAtLeast(10)
+        repeat(200) {
+            x += dx
+            z += dz
+            if (x > 20000 || x < -20000 || z > 20000 || z < -20000) return
+            if (roomView.hardcols.any { h -> h.x1 < x + p && x - p < h.x2 && h.y1 < y + p && y - p < h.y2 && h.z1 < z + p && z - p < h.z2 }) return // a wall stops the shot
+            for (other in objects) {
+                if (other === g || !other.w.active) continue
+                val zv = other.actor?.zv ?: continue
+                if (zv[0] < x + p && x - p < zv[1] && zv[2] < y + p && y - p < zv[3] && zv[4] < z + p && z - p < zv[5]) {
+                    g.w.hit = other.w.index
+                    other.w.hitBy = g.w.index
+                    other.w.hitForce = g.actionForce
+                    return
+                }
+            }
+        }
     }
 
     override fun trackMode(obj: Int, mode: Int, number: Int) {
