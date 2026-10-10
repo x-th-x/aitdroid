@@ -170,7 +170,41 @@ private fun GameObject.toActor(minX: Int, maxX: Int, minZ: Int, maxZ: Int): Atti
 }
 
 /** A short lived effect as particles: points with a radius and a colour that change with the age of the effect (drawn as the body's spheres). */
+/** One frame of the original (the evaporation is stepped per frame of the main loop) in engine ticks; the original ran as fast as the machine allowed, 20 per second is typical. */
+private const val SPECIAL_FRAME_TICKS = 3
+
+/**
+ * The evaporation of a creature as the original builds and draws it (InitSpecialObjet mode 0 and the flow routine): 30 bubbles at random places in the box of the
+ * object, each with a size (150 to 300 units, 5 less every frame) and a rise (30 to 80 units every frame); the whole cloud turns by 8 every frame. The colour is
+ * one of four palette banks (144, 192, 48, 112), a ramp of 16 colours from light to dark that runs across each bubble.
+ */
+private fun evaporationActor(e: Effect, now: Int, palette: IntArray): AtticActor {
+    val frame = (now - e.born).coerceAtLeast(0) / SPECIAL_FRAME_TICKS
+    val rnd = java.util.Random(e.born * 31L + e.kind)
+    val bank = intArrayOf(144, 192, 48, 112)[rnd.nextInt(4)]
+    val key = (palette.getOrElse(bank) { 0xFFFFFFFF.toInt() } and 0xFFFFFF) or (0xFB shl 24)
+    BodyRamps.ramps[key] = IntArray(16) { palette.getOrElse(bank + it) { 0xFFFFFFFF.toInt() } }
+    val rot = initRot(e.alpha, (e.beta + 8 * (frame + 1)) and 0x3FF, e.gamma)
+    val box = e.box
+    val count = 30
+    val verts = FloatArray(count * 3)
+    val spheres = ArrayList<Int>(count * 3)
+    for (i in 0 until count) {
+        val rx = if (box != null) (box[0] - e.x) + rnd.nextFloat() * (box[1] - box[0]) else 0f
+        val ry = if (box != null) (box[2] - e.y) + rnd.nextFloat() * (box[3] - box[2]) else 0f
+        val rz = if (box != null) (box[4] - e.z) + rnd.nextFloat() * (box[5] - box[4]) else 0f
+        val size = 150 + rnd.nextInt(150)
+        val rise = 30 + rnd.nextInt(50)
+        val radius = size - 5 * frame
+        val (px, py, pz) = rotatePoint(rx, ry - rise * frame, rz, rot)
+        verts[i * 3] = e.x + px; verts[i * 3 + 1] = e.y + py; verts[i * 3 + 2] = e.z + pz
+        if (radius > 0) { spheres.add(i); spheres.add(radius); spheres.add(key) }
+    }
+    return AtticActor(verts, IntArray(0), e.x.toFloat(), e.y.toFloat(), e.z.toFloat(), e.x / 10 - 5, e.x / 10 + 5, e.z / 10 - 5, e.z / 10 + 5, IntArray(0), spheres.toIntArray())
+}
+
 private fun effectActor(e: Effect, now: Int, palette: IntArray): AtticActor {
+    if (e.kind == 0) return evaporationActor(e, now, palette)
     val age = (now - e.born).coerceAtLeast(0)
     val life = AtticGame.EFFECT_TICKS
     val rnd = java.util.Random(e.born * 31L + e.kind)
@@ -178,8 +212,6 @@ private fun effectActor(e: Effect, now: Int, palette: IntArray): AtticActor {
     val verts = FloatArray(count * 3)
     val spheres = ArrayList<Int>(count * 3)
     val fade = (1f - age.toFloat() / life).coerceIn(0f, 1f)
-    // the evaporation colour is one of three palette entries (specialTable of the original: 144, 192, 48), the same for all its bubbles
-    val bubbleColor = palette.getOrElse(intArrayOf(144, 192, 48)[rnd.nextInt(3)]) { 0xFFFFFFFF.toInt() }
     for (i in 0 until count) {
         var x = e.x.toFloat(); var y = e.y.toFloat(); var z = e.z.toFloat()
         val box = e.box
@@ -188,20 +220,12 @@ private fun effectActor(e: Effect, now: Int, palette: IntArray): AtticActor {
             y = box[3] + (box[2] - box[3]) * rnd.nextFloat()
             z = box[4] + rnd.nextFloat() * (box[5] - box[4])
         }
-        // each bubble of the evaporation has its own size (150 to 300 units across) and lifetime (30 to 80 ticks), as the original stores them per point
-        val size = (150 + rnd.nextInt(150)) / 2
-        val lifeTicks = 30 + rnd.nextInt(50)
         val vx = (rnd.nextFloat() - 0.5f) * (if (e.kind == 1) 40f else 8f)
         val vz = (rnd.nextFloat() - 0.5f) * (if (e.kind == 1) 40f else 8f)
         val vy = when (e.kind) { 1 -> -10f + rnd.nextFloat() * 6f; 4 -> -(3f + rnd.nextFloat() * 4f); else -> -(4f + rnd.nextFloat() * 6f) }
         val g = if (e.kind == 1) 1.1f * age else 0f
         x += vx * age; z += vz * age; y += vy * age + g * age / 2f
         verts[i * 3] = x; verts[i * 3 + 1] = y; verts[i * 3 + 2] = z
-        if (e.kind == 0) {
-            if (age > lifeTicks) continue // this bubble is gone
-            spheres.add(i); spheres.add(size); spheres.add((bubbleColor and 0xFFFFFF) or (0xFC shl 24)) // alpha 0xFC: drawn as a shaded ball
-            continue
-        }
         val shade = (255 * fade).toInt().coerceIn(0, 255)
         val color = when (e.kind) {
             1 -> (0xFF shl 24) or ((150 * fade + 60).toInt().coerceIn(0, 255) shl 16) or (20 shl 8) or 20

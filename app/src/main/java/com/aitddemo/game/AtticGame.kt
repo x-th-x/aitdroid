@@ -35,7 +35,7 @@ interface GameUi {
 }
 
 /** A short lived visual effect (SPECIAL): 0 evaporation, 1 blood or dust at a blow, 4 smoke. */
-class Effect(val kind: Int, val x: Int, val y: Int, val z: Int, val born: Int, val box: IntArray?)
+class Effect(val kind: Int, val x: Int, val y: Int, val z: Int, val born: Int, val box: IntArray?, val alpha: Int = 0, val beta: Int = 0, val gamma: Int = 0)
 
 /** An object of the world with its actor (animation, position, collision box) while it is part of the scene. */
 class GameObject(val w: WorldObject) {
@@ -281,7 +281,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             if (g.flightTicks >= 0) processFlight(g)
         }
 
-        effects.removeAll { time - it.born > EFFECT_TICKS }
+        effects.removeAll { time - it.born > (if (it.kind == 0) EVAPORATION_TICKS else EFFECT_TICKS) }
 
         // the life scripts of all active objects
         for (g in objects) {
@@ -849,7 +849,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         val g = objects.getOrNull(obj) ?: return
         val a = g.actor
         when (kind) {
-            0 -> if (a != null) effects.add(Effect(0, a.renderX, a.renderY, a.renderZ, time, a.zv.copyOf()))
+            0 -> if (a != null) effects.add(Effect(0, a.renderX, a.renderY, a.renderZ, time, a.zv.copyOf(), g.w.alpha, a.beta and 0x3FF, g.w.gamma))
             1 -> { // flow at the hand of the one that hit this object
                 val by = objects.getOrNull(g.w.hitBy)
                 val h = by?.let { b -> b.shotPoint?.also { b.shotPoint = null } ?: hotPoint(b, b.actionGroup) }
@@ -1199,6 +1199,9 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         const val AF_MOVABLE = 0x10
         const val AF_FALLABLE = 0x100
         const val EFFECT_TICKS = 80
+
+        /** The evaporation lasts until its largest bubble (300 units, 5 less every frame) is gone: 60 frames of the original, 3 engine ticks each. */
+        const val EVAPORATION_TICKS = 190
         /** Positions in the CVars (DEFINES.ITD): the sound of an impact, the weight limit, the object that sends a thrown item back. */
         const val CVAR_SAMPLE_CHOC = 9
         const val CVAR_REVERSE_OBJECT = 11

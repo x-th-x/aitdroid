@@ -69,6 +69,7 @@ class AtticProjector(private val cam: AtticCameraDef) {
 
     /** Horizontal focal length (pixels per unit at depth 1) for sizing round parts. */
     val focalX: Float get() = cam.focal2
+    val focalY: Float get() = cam.focal3
 
     /** Screen position (320x200 plate units) of a camera-space point with depth z > 0. */
     fun screen(x: Float, y: Float, z: Float, out: FloatArray) {
@@ -233,8 +234,10 @@ class AtticSceneRenderer {
                 radius == -6 -> S.toFloat()
                 else -> S * 0.75f
             }
-            tris.add(Tri(cz[ic] - 0.5f, sx, sy, pr, 0f, 0f, 0f, col, 2))
-            l = min(l, sx - pr); r = max(r, sx + pr); t = min(t, sy - pr); b = max(b, sy + pr)
+            // the evaporation bubbles (alpha code 0xFB) are ellipses: the vertical radius uses the vertical focal length
+            val pry = if (col ushr 24 == 0xFB) pr * proj.focalY / proj.focalX else 0f
+            tris.add(Tri(cz[ic] - 0.5f, sx, sy, pr, pry, 0f, 0f, col, 2))
+            l = min(l, sx - pr); r = max(r, sx + pr); t = min(t, sy - max(pr, pry)); b = max(b, sy + max(pr, pry))
         }
         if (tris.isEmpty()) return null
         tris.sortByDescending { it.depth }
@@ -271,16 +274,14 @@ class AtticSceneRenderer {
                     paint.style = Paint.Style.FILL
                 }
                 else -> {
-                    if (tri.color ushr 24 == 0xFC) {
-                        // shaded ball (the evaporation bubbles): a highlight up and to the left, the colour in the middle, a darker rim, so it looks round
-                        val r = tri.bx
-                        val base = tri.color or (0xFF shl 24)
-                        paint.shader = android.graphics.RadialGradient(
-                            tri.ax - r * 0.35f, tri.ay - r * 0.4f, r * 1.35f,
-                            intArrayOf(mix(base, 0xFFFFFFFF.toInt(), 0.75f), mix(base, 0xFFFFFFFF.toInt(), 0.3f), base, mix(base, 0xFF000000.toInt(), 0.55f)),
-                            floatArrayOf(0f, 0.25f, 0.6f, 1f), android.graphics.Shader.TileMode.CLAMP,
-                        )
-                        canvas.drawCircle(tri.ax, tri.ay, r, paint)
+                    val ramp = if (tri.color ushr 24 == 0xFB) BodyRamps.ramps[tri.color] else null
+                    if (ramp != null) {
+                        // a bubble of the evaporation: an ellipse filled with the 16 colours of its palette bank from left (light) to right (dark), polygon type 3 of the original
+                        val colors = IntArray(32); val positions = FloatArray(32)
+                        for (q in 0 until 16) { colors[q * 2] = ramp[q]; colors[q * 2 + 1] = ramp[q]; positions[q * 2] = q / 16f; positions[q * 2 + 1] = (q + 1) / 16f }
+                        positions[31] = 1f
+                        paint.shader = android.graphics.LinearGradient(tri.ax - tri.bx, 0f, tri.ax + tri.bx, 0f, colors, positions, android.graphics.Shader.TileMode.CLAMP)
+                        canvas.drawOval(tri.ax - tri.bx, tri.ay - tri.by, tri.ax + tri.bx, tri.ay + tri.by, paint)
                         paint.shader = null
                     } else {
                         canvas.drawCircle(tri.ax, tri.ay, tri.bx, paint)
@@ -336,12 +337,6 @@ class AtticSceneRenderer {
             0xFC -> android.graphics.LinearGradient(0f, minY, 0f, minY + 16f * S, colors, positions, android.graphics.Shader.TileMode.CLAMP)
             else -> android.graphics.LinearGradient(0f, minY, 0f, minY + 32f * S, colors, positions, android.graphics.Shader.TileMode.CLAMP)
         }
-    }
-
-    /** [a] mixed with [b] ([t] of b), both opaque ARGB. */
-    private fun mix(a: Int, b: Int, t: Float): Int {
-        fun ch(shift: Int) = (((a shr shift) and 0xFF) * (1 - t) + ((b shr shift) and 0xFF) * t).toInt().coerceIn(0, 255)
-        return (0xFF shl 24) or (ch(16) shl 16) or (ch(8) shl 8) or ch(0)
     }
 
     /** Noise fill of the original's dither material: a small tile of the colour with random brightness per pixel (fixed seed, so it does not flicker). */
