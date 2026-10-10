@@ -1198,7 +1198,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         const val AF_FOUNDABLE = 0x80
         const val AF_MOVABLE = 0x10
         const val AF_FALLABLE = 0x100
-        const val EFFECT_TICKS = 70
+        const val EFFECT_TICKS = 80
         /** Positions in the CVars (DEFINES.ITD): the sound of an impact, the weight limit, the object that sends a thrown item back. */
         const val CVAR_SAMPLE_CHOC = 9
         const val CVAR_REVERSE_OBJECT = 11

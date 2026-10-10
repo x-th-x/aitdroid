@@ -170,14 +170,16 @@ private fun GameObject.toActor(minX: Int, maxX: Int, minZ: Int, maxZ: Int): Atti
 }
 
 /** A short lived effect as particles: points with a radius and a colour that change with the age of the effect (drawn as the body's spheres). */
-private fun effectActor(e: Effect, now: Int): AtticActor {
+private fun effectActor(e: Effect, now: Int, palette: IntArray): AtticActor {
     val age = (now - e.born).coerceAtLeast(0)
     val life = AtticGame.EFFECT_TICKS
     val rnd = java.util.Random(e.born * 31L + e.kind)
     val count = when (e.kind) { 0 -> 30; 1 -> 14; else -> 10 }
     val verts = FloatArray(count * 3)
-    val spheres = IntArray(count * 3)
+    val spheres = ArrayList<Int>(count * 3)
     val fade = (1f - age.toFloat() / life).coerceIn(0f, 1f)
+    // the evaporation colour is one of three palette entries (specialTable of the original: 144, 192, 48), the same for all its bubbles
+    val bubbleColor = palette.getOrElse(intArrayOf(144, 192, 48)[rnd.nextInt(3)]) { 0xFFFFFFFF.toInt() }
     for (i in 0 until count) {
         var x = e.x.toFloat(); var y = e.y.toFloat(); var z = e.z.toFloat()
         val box = e.box
@@ -186,23 +188,29 @@ private fun effectActor(e: Effect, now: Int): AtticActor {
             y = box[3] + (box[2] - box[3]) * rnd.nextFloat()
             z = box[4] + rnd.nextFloat() * (box[5] - box[4])
         }
+        // each bubble of the evaporation has its own size (150 to 300 units across) and lifetime (30 to 80 ticks), as the original stores them per point
+        val size = (150 + rnd.nextInt(150)) / 2
+        val lifeTicks = 30 + rnd.nextInt(50)
         val vx = (rnd.nextFloat() - 0.5f) * (if (e.kind == 1) 40f else 8f)
         val vz = (rnd.nextFloat() - 0.5f) * (if (e.kind == 1) 40f else 8f)
-        val vy = when (e.kind) { 1 -> -10f + rnd.nextFloat() * 6f; 4 -> -(3f + rnd.nextFloat() * 4f); else -> -(8f + rnd.nextFloat() * 14f) }
+        val vy = when (e.kind) { 1 -> -10f + rnd.nextFloat() * 6f; 4 -> -(3f + rnd.nextFloat() * 4f); else -> -(4f + rnd.nextFloat() * 6f) }
         val g = if (e.kind == 1) 1.1f * age else 0f
         x += vx * age; z += vz * age; y += vy * age + g * age / 2f
         verts[i * 3] = x; verts[i * 3 + 1] = y; verts[i * 3 + 2] = z
+        if (e.kind == 0) {
+            if (age > lifeTicks) continue // this bubble is gone
+            spheres.add(i); spheres.add(size); spheres.add(bubbleColor)
+            continue
+        }
         val shade = (255 * fade).toInt().coerceIn(0, 255)
         val color = when (e.kind) {
             1 -> (0xFF shl 24) or ((150 * fade + 60).toInt().coerceIn(0, 255) shl 16) or (20 shl 8) or 20
             4 -> (0xFF shl 24) or (shade / 2 + 60 shl 16) or (shade / 2 + 60 shl 8) or (shade / 2 + 60)
             else -> (0xFF shl 24) or (shade shl 16) or (shade shl 8) or shade
         }
-        spheres[i * 3] = i
-        spheres[i * 3 + 1] = if (e.kind == 1) 14 else 24
-        spheres[i * 3 + 2] = color
+        spheres.add(i); spheres.add(if (e.kind == 1) 14 else 24); spheres.add(color)
     }
-    return AtticActor(verts, IntArray(0), e.x.toFloat(), e.y.toFloat(), e.z.toFloat(), e.x / 10 - 5, e.x / 10 + 5, e.z / 10 - 5, e.z / 10 + 5, IntArray(0), spheres)
+    return AtticActor(verts, IntArray(0), e.x.toFloat(), e.y.toFloat(), e.z.toFloat(), e.x / 10 - 5, e.x / 10 + 5, e.z / 10 - 5, e.z / 10 + 5, IntArray(0), spheres.toIntArray())
 }
 
 /** Entry point: reads the room from the original game files, shows an error message when that is not possible. */
@@ -238,6 +246,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
         devPos?.let { p -> g.player?.actor?.teleport(p[0], 0, p[1], p[2]) }
         for ((i, v) in DevOptions.vars) if (i in g.vm.vars.indices) g.vm.vars[i] = v.toShort()
         if (DevOptions.vars.any { it.first == 19 }) g.objects[9].w.chronoStart = g.time
+        if (DevOptions.vars.any { it.first == 999 }) g.special(1, 0) // shows the evaporation effect around the player (for testing)
         if (loadSlot != null) SaveStore.load(context, loadSlot, g)
     } }
     // the room behind the attic stairs is read in the background, so the change of floor does not stop the game
@@ -361,7 +370,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     // one frame of the room: photo, objects and player through the camera matrix, masks over them (AtticSceneRenderer)
     val roomImage = run {
         frameTick // the poses change every frame
-        val actors = game.objects.mapNotNull { it.toActor(view.bounds[0], view.bounds[1], view.bounds[2], view.bounds[3]) } + game.effects.map { effectActor(it, game.time) }
+        val actors = game.objects.mapNotNull { it.toActor(view.bounds[0], view.bounds[1], view.bounds[2], view.bounds[3]) } + game.effects.map { effectActor(it, game.time, world.game.palette) }
         val dark = game.lightOff
         renderer.render(camera, if (showBackground && !dark) backgrounds[camera.index.coerceIn(0, backgrounds.size - 1)] else blackBackground, actors, if (dark) emptyList() else view.masks.getOrNull(camera.index) ?: emptyList())
         renderer.bitmap.asImageBitmap()
