@@ -35,7 +35,7 @@ interface GameUi {
 }
 
 /** A short lived visual effect (SPECIAL): 0 evaporation, 1 blood or dust at a blow, 4 smoke. */
-class Effect(val kind: Int, val x: Int, val y: Int, val z: Int, val born: Int, val box: IntArray?, val alpha: Int = 0, val beta: Int = 0, val gamma: Int = 0)
+class Effect(val kind: Int, val x: Int, val y: Int, val z: Int, val born: Int, val box: IntArray?, val alpha: Int = 0, val beta: Int = 0, val gamma: Int = 0, val body: Int = -1)
 
 /** An object of the world with its actor (animation, position, collision box) while it is part of the scene. */
 class GameObject(val w: WorldObject) {
@@ -281,7 +281,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             if (g.flightTicks >= 0) processFlight(g)
         }
 
-        effects.removeAll { time - it.born > (if (it.kind == 0) EVAPORATION_TICKS else EFFECT_TICKS) }
+        effects.removeAll { time - it.born > (when (it.kind) { 0 -> EVAPORATION_TICKS; 3 -> 3; 4 -> SMOKE_TICKS; else -> EFFECT_TICKS }) }
 
         // the life scripts of all active objects
         for (g in objects) {
@@ -657,17 +657,23 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         var x = a.renderX + hot[0]
         val y = a.renderY + hot[1]
         var z = a.renderZ + hot[2]
+        // the flash of the gun: the body BODY_FLAMME at the hand for one frame (mode 3 of InitSpecialObjet), turned like the shooter
+        effects.add(Effect(3, x, y, z, time, null, 0, a.beta and 0x3FF, 0, vm.cvars[CVAR_BODY_FLAMME].toInt()))
         val step = g.actionRange.coerceAtLeast(10) * 2
         val ang = ((a.beta and 0x3FF) - 0x100) * 2.0 * Math.PI / 1024.0
         // walkStep(step, 0, beta - 0x100): the step turned by the heading
         val dx = (step * Math.cos(ang)).toInt()
         val dz = (step * Math.sin(ang)).toInt()
         val p = g.actionRange.coerceAtLeast(10)
-        repeat(200) {
+        // the impact: white dots (mode 2) where the ray was last (before the step that stopped it), whether it touched something or not
+        fun impact(px: Int, pz: Int) { effects.add(Effect(2, px, y, pz, time, null, 0, (-a.beta) and 0x3FF, 0)) }
+        while (true) {
+            val prevX = x
+            val prevZ = z
             x += dx
             z += dz
-            if (x > 20000 || x < -20000 || z > 20000 || z < -20000) return
-            if (roomView.hardcols.any { h -> h.x1 < x + p && x - p < h.x2 && h.y1 < y + p && y - p < h.y2 && h.z1 < z + p && z - p < h.z2 }) return // a wall stops the shot
+            if (x > 20000 || x < -20000 || z > 20000 || z < -20000) { impact(prevX, prevZ); return }
+            if (roomView.hardcols.any { h -> h.x1 < x + p && x - p < h.x2 && h.y1 < y + p && y - p < h.y2 && h.z1 < z + p && z - p < h.z2 }) { impact(prevX, prevZ); return } // a wall stops the shot
             for (other in objects) {
                 if (other === g || !other.w.active || other.w.flags and AF_SPECIAL != 0) continue // (effects cannot be hit)
                 val zv = other.actor?.zv ?: continue
@@ -676,8 +682,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                     other.w.hitBy = g.w.index
                     other.w.hitForce = g.actionForce
                     // the place of the impact is the hot point from now on (the hit effect appears there)
-                    g.shotPoint = intArrayOf(x - a.renderX, y - a.renderY, z - a.renderZ)
-                    effects.add(Effect(2, x, y, z, time, null, 0, (-a.beta) and 0x3FF, 0))
+                    g.shotPoint = intArrayOf(prevX - a.renderX, y - a.renderY, prevZ - a.renderZ)
+                    impact(prevX, prevZ)
                     return
                 }
             }
@@ -857,7 +863,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                 val b = by?.actor
                 if (b != null) effects.add(Effect(1, b.renderX + (h?.get(0) ?: 0), b.renderY + (h?.get(1) ?: 0), b.renderZ + (h?.get(2) ?: 0), time, null, 0, (-b.beta) and 0x3FF, 0))
             }
-            4 -> if (a != null) effects.add(Effect(4, a.renderX, a.renderY, a.renderZ, time, a.zv.copyOf()))
+            4 -> if (a != null) effects.add(Effect(4, a.renderX, a.renderY, a.renderZ, time, null, g.w.alpha, a.beta and 0x3FF, g.w.gamma))
         }
     }
 
@@ -1203,9 +1209,13 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
         /** The evaporation lasts until its largest bubble (300 units, 5 less every frame) is gone: 60 frames of the original, 3 engine ticks each. */
         const val EVAPORATION_TICKS = 190
+
+        /** The smoke of a cigar (mode 4) lasts 660 ticks of the 60 per second timer. */
+        const val SMOKE_TICKS = 660
         /** Positions in the CVars (DEFINES.ITD): the sound of an impact, the weight limit, the object that sends a thrown item back. */
         const val CVAR_SAMPLE_CHOC = 9
         const val CVAR_REVERSE_OBJECT = 11
+        const val CVAR_BODY_FLAMME = 1
         const val ACTION_CLICK = 0x2000
         const val ACTION_TAKE = 0x800
         const val MAX_WEIGHT_CVAR = 2

@@ -170,6 +170,46 @@ private fun GameObject.toActor(minX: Int, maxX: Int, minZ: Int, maxZ: Int): Atti
 }
 
 /** A short lived effect as particles: points with a radius and a colour that change with the age of the effect (drawn as the body's spheres). */
+/**
+ * The smoke of a cigar (mode 4): 20 puffs of grey, half transparent (palette colour 176), at 20 cm height. Each puff has a random place within 2000 units; it moves
+ * out from the centre in a straight line as the time t (ticks of 60 per second) runs to 600, so it is at place * t / 600. The radius of the puffs equals t up to 540,
+ * then 5 * (660 - t) down to nothing at 660. The cloud turns by 4 every frame.
+ */
+private fun smokeActor(e: Effect, now: Int, palette: IntArray): AtticActor {
+    val t = (now - e.born).coerceAtLeast(0)
+    val frames = t / SPECIAL_FRAME_TICKS
+    val rnd = java.util.Random(e.born * 31L + e.kind)
+    val rot = initRot(e.alpha, (e.beta + 4 * (frames + 1)) and 0x3FF, e.gamma)
+    val key = (palette.getOrElse(176) { 0xFFFFFFFF.toInt() } and 0xFFFFFF) or (0xFA shl 24)
+    val radius = if (t <= 540) t else (660 - t) * 5
+    val count = 20
+    val verts = FloatArray(count * 3)
+    val spheres = ArrayList<Int>(count * 3)
+    for (i in 0 until count) {
+        val px = rnd.nextInt(4000) - 2000
+        val pz = rnd.nextInt(4000) - 2000
+        val (rx, ry, rz) = rotatePoint(px * t / 600f, -200f, pz * t / 600f, rot)
+        verts[i * 3] = e.x + rx; verts[i * 3 + 1] = e.y + ry; verts[i * 3 + 2] = e.z + rz
+        if (radius > 0) { spheres.add(i); spheres.add(radius); spheres.add(key) }
+    }
+    return AtticActor(verts, IntArray(0), e.x.toFloat(), e.y.toFloat(), e.z.toFloat(), e.x / 10 - 5, e.x / 10 + 5, e.z / 10 - 5, e.z / 10 + 5, IntArray(0), spheres.toIntArray())
+}
+
+/** The flash of a gun (mode 3): the body BODY_FLAMME at the muzzle, turned like the shooter; the original shows it for one frame. */
+private fun flashActor(e: Effect, data: com.aitddemo.game.GameData): AtticActor {
+    val asset = data.body(e.body)
+    val local = asset?.vertices
+    if (asset == null || local == null) return AtticActor(FloatArray(0), IntArray(0), e.x.toFloat(), e.y.toFloat(), e.z.toFloat(), 0, 0, 0, 0)
+    val rot = initRot(e.alpha, e.beta, e.gamma)
+    val n = local.size / 3
+    val out = FloatArray(n * 3)
+    for (i in 0 until n) {
+        val (rx, ry, rz) = rotatePoint(local[i * 3], local[i * 3 + 1], local[i * 3 + 2], rot)
+        out[i * 3] = rx + e.x; out[i * 3 + 1] = ry + e.y; out[i * 3 + 2] = rz + e.z
+    }
+    return AtticActor(out, asset.triangles, e.x.toFloat(), e.y.toFloat(), e.z.toFloat(), e.x / 10 - 5, e.x / 10 + 5, e.z / 10 - 5, e.z / 10 + 5, asset.lines, asset.spheres)
+}
+
 /** One frame of the original (the evaporation is stepped per frame of the main loop) in engine ticks; the original ran as fast as the machine allowed, 20 per second is typical. */
 private const val SPECIAL_FRAME_TICKS = 3
 
@@ -242,7 +282,9 @@ private fun dotsActor(e: Effect, now: Int, palette: IntArray): AtticActor {
     return AtticActor(verts, IntArray(0), e.x.toFloat(), e.y.toFloat(), e.z.toFloat(), e.x / 10 - 5, e.x / 10 + 5, e.z / 10 - 5, e.z / 10 + 5, IntArray(0), spheres.toIntArray())
 }
 
-private fun effectActor(e: Effect, now: Int, palette: IntArray): AtticActor {
+private fun effectActor(e: Effect, now: Int, palette: IntArray, data: com.aitddemo.game.GameData): AtticActor {
+    if (e.kind == 3) return flashActor(e, data)
+    if (e.kind == 4) return smokeActor(e, now, palette)
     if (e.kind == 0) return evaporationActor(e, now, palette)
     if (e.kind == 1 || e.kind == 2) return dotsActor(e, now, palette)
     val age = (now - e.born).coerceAtLeast(0)
@@ -311,6 +353,8 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
         for ((i, v) in DevOptions.vars) if (i in g.vm.vars.indices) g.vm.vars[i] = v.toShort()
         if (DevOptions.vars.any { it.first == 19 }) g.objects[9].w.chronoStart = g.time
         if (DevOptions.vars.any { it.first == 999 }) g.special(1, 0) // shows the evaporation effect around the player (for testing)
+        if (DevOptions.vars.any { it.first == 996 }) g.player?.actor?.let { g.effects.add(Effect(4, it.renderX, it.renderY, it.renderZ, g.time, null, 0, 0, 0)) } // the smoke of a cigar around the player (for testing)
+        if (DevOptions.vars.any { it.first == 997 }) g.player?.actor?.let { g.effects.add(Effect(3, it.renderX, it.renderY - 1000, it.renderZ, g.time + 300, null, 0, 0, 0, g.vm.cvars[1].toInt())) } // the flash of a gun in front of the player for 5 seconds (for testing)
         if (DevOptions.vars.any { it.first == 998 }) g.player?.actor?.let { g.effects.add(Effect(1, it.renderX, it.renderY - 1000, it.renderZ, g.time, null)) } // the dots of a hit in front of the player (for testing)
         if (loadSlot != null) SaveStore.load(context, loadSlot, g)
     } }
@@ -435,7 +479,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     // one frame of the room: photo, objects and player through the camera matrix, masks over them (AtticSceneRenderer)
     val roomImage = run {
         frameTick // the poses change every frame
-        val actors = game.objects.mapNotNull { it.toActor(view.bounds[0], view.bounds[1], view.bounds[2], view.bounds[3]) } + game.effects.map { effectActor(it, game.time, world.game.palette) }
+        val actors = game.objects.mapNotNull { it.toActor(view.bounds[0], view.bounds[1], view.bounds[2], view.bounds[3]) } + game.effects.map { effectActor(it, game.time, world.game.palette, world.game) }
         val dark = game.lightOff
         renderer.render(camera, if (showBackground && !dark) backgrounds[camera.index.coerceIn(0, backgrounds.size - 1)] else blackBackground, actors, if (dark) emptyList() else view.masks.getOrNull(camera.index) ?: emptyList())
         renderer.bitmap.asImageBitmap()

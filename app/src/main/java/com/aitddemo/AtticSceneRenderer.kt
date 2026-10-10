@@ -234,8 +234,8 @@ class AtticSceneRenderer {
                 radius == -6 -> S.toFloat()
                 else -> S * 0.75f
             }
-            // the evaporation bubbles (alpha code 0xFB) are ellipses: the vertical radius uses the vertical focal length
-            val pry = if (col ushr 24 == 0xFB) pr * proj.focalY / proj.focalX else 0f
+            // the evaporation bubbles (alpha code 0xFB) and the smoke (0xFA, half transparent) are ellipses: the vertical radius uses the vertical focal length
+            val pry = if (col ushr 24 == 0xFB || col ushr 24 == 0xFA) pr * proj.focalY / proj.focalX else 0f
             tris.add(Tri(cz[ic] - 0.5f, sx, sy, pr, pry, 0f, 0f, col, 2))
             l = min(l, sx - pr); r = max(r, sx + pr); t = min(t, sy - max(pr, pry)); b = max(b, sy + max(pr, pry))
         }
@@ -283,6 +283,8 @@ class AtticSceneRenderer {
                         paint.shader = android.graphics.LinearGradient(tri.ax - tri.bx, 0f, tri.ax + tri.bx, 0f, colors, positions, android.graphics.Shader.TileMode.CLAMP)
                         canvas.drawOval(tri.ax - tri.bx, tri.ay - tri.by, tri.ax + tri.bx, tri.ay + tri.by, paint)
                         paint.shader = null
+                    } else if (tri.by > 0f) {
+                        canvas.drawOval(tri.ax - tri.bx, tri.ay - tri.by, tri.ax + tri.bx, tri.ay + tri.by, paint)
                     } else {
                         canvas.drawCircle(tri.ax, tri.ay, tri.bx, paint)
                     }
