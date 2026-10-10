@@ -226,7 +226,14 @@ class OriginalBody private constructor(
         for (p in prims) {
             if (p.points.size < 3) continue
             // material 1 is the original's "dither" fill (noisy, for stone and cloth): marked by an alpha of 0xFE for the renderer
-            val c = if (p.material == 1) (palette[p.color] and 0x00FFFFFF) or (0xFE shl 24) else palette[p.color]
+            val c = when (p.material) {
+                1 -> (palette[p.color] and 0x00FFFFFF) or (0xFE shl 24)
+                // materials 3, 4 and 5 run through the 16 colours of the palette bank: left to right ("marble"), top to bottom ("copper"), the same at two scanlines per colour
+                3, 4, 5 -> ((palette[p.color] and 0x00FFFFFF) or ((0xFE - p.material + 2) shl 24)).also { key ->
+                    BodyRamps.ramps[key] = IntArray(16) { palette[(p.color and 0xF0) + it] }
+                }
+                else -> palette[p.color]
+            }
             for (i in 1 until p.points.size - 1) {
                 tris.add(p.points[0]); tris.add(p.points[i]); tris.add(p.points[i + 1]); tris.add(c)
             }
@@ -295,4 +302,9 @@ class OriginalBody private constructor(
             return OriginalBody(IntArray(6) { d.s16(2 + it * 2) }, x, y, z, groups, order, prims)
         }
     }
+}
+
+/** The colour ramps of the polygon materials 3 to 5, by the colour (with the material in its alpha byte) the mesh gives such a polygon. */
+object BodyRamps {
+    val ramps = java.util.concurrent.ConcurrentHashMap<Int, IntArray>()
 }

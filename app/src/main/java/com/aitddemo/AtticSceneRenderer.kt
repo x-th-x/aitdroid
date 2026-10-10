@@ -249,9 +249,13 @@ class AtticSceneRenderer {
                     paint.shader = null
                 }
                 3 -> {
-                    paint.shader = if (tri.color ushr 24 == 0xFE) ditherShader(tri.color or (0xFF shl 24)) else null
-                    path.reset()
                     val q = tri.pts!!
+                    paint.shader = when (tri.color ushr 24) {
+                        0xFE -> ditherShader(tri.color or (0xFF shl 24))
+                        0xFD, 0xFC, 0xFB -> rampShader(tri.color, q)
+                        else -> null
+                    }
+                    path.reset()
                     path.moveTo(q[0], q[1])
                     var i = 2
                     while (i + 1 < q.size) { path.lineTo(q[i], q[i + 1]); i += 2 }
@@ -295,6 +299,29 @@ class AtticSceneRenderer {
     }
 
     /** Clips the triangle (ia, ib, ic) in camera space against the near plane; writes up to four (x, y, z) points to [out], returns their count. */
+    /**
+     * Colour ramp of the polygon materials 3 ("marble", left to right over the width of the polygon), 4 ("copper", one colour per scanline from the top) and 5
+     * (two scanlines per colour); the ramp is the 16 colours of the palette bank, the last one stays.
+     */
+    private fun rampShader(color: Int, pts: FloatArray): android.graphics.Shader {
+        val ramp = BodyRamps.ramps[color] ?: return android.graphics.LinearGradient(0f, 0f, 1f, 0f, color or (0xFF shl 24), color or (0xFF shl 24), android.graphics.Shader.TileMode.CLAMP)
+        var minX = Float.MAX_VALUE; var maxX = -Float.MAX_VALUE; var minY = Float.MAX_VALUE
+        var i = 0
+        while (i + 1 < pts.size) { minX = min(minX, pts[i]); maxX = max(maxX, pts[i]); minY = min(minY, pts[i + 1]); i += 2 }
+        val colors = IntArray(32)
+        val positions = FloatArray(32)
+        for (k in 0 until 16) {
+            colors[k * 2] = ramp[k]; colors[k * 2 + 1] = ramp[k]
+            positions[k * 2] = k / 16f; positions[k * 2 + 1] = (k + 1) / 16f
+        }
+        positions[31] = 1f
+        return when (color ushr 24) {
+            0xFD -> android.graphics.LinearGradient(minX, 0f, maxX.coerceAtLeast(minX + 1f), 0f, colors, positions, android.graphics.Shader.TileMode.CLAMP)
+            0xFC -> android.graphics.LinearGradient(0f, minY, 0f, minY + 16f * S, colors, positions, android.graphics.Shader.TileMode.CLAMP)
+            else -> android.graphics.LinearGradient(0f, minY, 0f, minY + 32f * S, colors, positions, android.graphics.Shader.TileMode.CLAMP)
+        }
+    }
+
     /** Noise fill of the original's dither material: a small tile of the colour with random brightness per pixel (fixed seed, so it does not flicker). */
     private val dither = HashMap<Int, android.graphics.BitmapShader>()
 
