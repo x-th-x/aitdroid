@@ -259,6 +259,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                     }
                 }
             }
+            if (g !== player && a.trackMode != 0) touchObjects(g, a)
             if (w.flags and AF_TRIGGER != 0 && a.triggersOn) checkZones(g)
             if (g.actionType != 0) processAction(g)
             if (w.flags and AF_FALLABLE != 0) processFall(g)
@@ -273,6 +274,22 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             if (!w.active) continue
             if (w.life != -1 && w.lifeMode != -1) vm.runObject(w.index)
             if (pendingFound >= 0 || pendingRead != null || exited || gameOver) break
+        }
+    }
+
+    /**
+     * A creature on its way touches other objects (checkCollision of the original reports every box it overlaps, it does not need to be blocked): the creature gets
+     * COL and the touched object COL_BY, which is how the scripts notice it, for example the window that cracks when a creature breaks through.
+     */
+    private fun touchObjects(g: GameObject, a: Actor) {
+        val z = a.zv
+        for (o in objects) {
+            if (o === g || o === player || !o.w.active) continue
+            val b = o.actor?.zv ?: continue
+            if (z[0] < b[1] && b[0] < z[1] && z[2] < b[3] && b[2] < z[3] && z[4] < b[5] && b[4] < z[5]) {
+                o.w.colBy = g.w.index
+                if (g.w.col == -1) g.w.col = o.w.index
+            }
         }
     }
 

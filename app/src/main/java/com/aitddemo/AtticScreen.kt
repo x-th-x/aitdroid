@@ -112,7 +112,8 @@ private fun GameObject.toActor(minX: Int, maxX: Int, minZ: Int, maxZ: Int): Atti
     val y = act.renderY
     val z = act.renderZ
     // creatures that appear later by script are parked outside the room (below the floor, beyond the walls)
-    if (x < minX || x > maxX || z < minZ || z > maxZ || y > 500) return null
+    // (a creature on its way in walks outside the room first and is seen all the time)
+    if (w.trackMode != 3 && (x < minX || x > maxX || z < minZ || z > maxZ) || y > 500) return null
     val rot = initRot(w.alpha, act.beta and 0x3FF, w.gamma)
     val n = local.size / 3
     val out = FloatArray(n * 3)

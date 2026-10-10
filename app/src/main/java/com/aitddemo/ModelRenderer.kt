@@ -328,6 +328,7 @@ private class ModelRaster {
             val shadedB = (baseB * lambert).toInt().coerceIn(0, 255)
             val shadedColor = (0xFF shl 24) or (shadedR shl 16) or (shadedG shl 8) or shadedB
             val material = colorInt ushr 24
+            val glass = material == 0xFA // transparent material: half of the colour over what is already there, nothing written to the depth buffer
             val ramp = if (material in 0xFB..0xFD) BodyRamps.ramps[colorInt] else null
             val shadedRamp = ramp?.let { r ->
                 IntArray(16) {
@@ -353,7 +354,15 @@ private class ModelRaster {
 
                     val z = w1 * za + w2 * zb + w3 * zc
                     val idx = rowBase + px
-                    if (z < depth[idx]) {
+                    if (glass) {
+                        if (z < depth[idx]) {
+                            val under = pixels[idx]
+                            pixels[idx] = if (under ushr 24 == 0) (shadedColor and 0xFFFFFF) or (0x80 shl 24) else {
+                                val r = (((under shr 16) and 0xFF) + shadedR) / 2; val g = (((under shr 8) and 0xFF) + shadedG) / 2; val b = ((under and 0xFF) + shadedB) / 2
+                                (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+                            }
+                        }
+                    } else if (z < depth[idx]) {
                         depth[idx] = z
                         pixels[idx] = if (shadedRamp == null) shadedColor else shadedRamp[
                             when (material) {

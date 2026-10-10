@@ -239,7 +239,8 @@ class AtticSceneRenderer {
         if (tris.isEmpty()) return null
         tris.sortByDescending { it.depth }
         for (tri in tris) {
-            paint.color = tri.color
+            // transparent material (alpha code 0xFA, window glass): half covering
+            paint.color = if (tri.color ushr 24 == 0xFA) (tri.color and 0xFFFFFF) or (0x80 shl 24) else tri.color
             when (tri.kind) {
                 0 -> {
                     paint.shader = if (tri.color ushr 24 == 0xFE) ditherShader(tri.color or (0xFF shl 24)) else null

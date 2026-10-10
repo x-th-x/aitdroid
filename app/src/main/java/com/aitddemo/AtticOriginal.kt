@@ -228,6 +228,8 @@ class OriginalBody private constructor(
             // material 1 is the original's "dither" fill (noisy, for stone and cloth): marked by an alpha of 0xFE for the renderer
             val c = when (p.material) {
                 1 -> (palette[p.color] and 0x00FFFFFF) or (0xFE shl 24)
+                // material 2 is transparent (window glass): the renderers blend it over what is behind
+                2 -> (palette[p.color] and 0x00FFFFFF) or (0xFA shl 24)
                 // materials 3, 4 and 5 run through the 16 colours of the palette bank: left to right ("marble"), top to bottom ("copper"), the same at two scanlines per colour
                 3, 4, 5 -> ((palette[p.color] and 0x00FFFFFF) or ((0xFE - p.material + 2) shl 24)).also { key ->
                     BodyRamps.ramps[key] = IntArray(16) { palette[(p.color and 0xF0) + it] }
