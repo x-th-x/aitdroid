@@ -7,8 +7,8 @@ import kotlin.math.sin
  * Poses an articulated body of the 1992 format from the state of an animation (the original's AnimNuage): every bone group, in the file's
  * processing order, is rotated (with its child groups), moved or zoomed by its state; finally each group moves to its pivot vertex.
  *
- * The animation's group i drives body group i + 1 (body group 0 only carries the figure's heading); body groups beyond the animation keep the
- * rest state stored in the body file.
+ * The animation's slot i drives body group i (group 0 is only the root: the figure's heading is applied by the caller); body groups beyond the animation keep
+ * the rest state stored in the body file.
  */
 object BodyPose {
     /** [rest]: unposed vertices (x, y, z each); [groupsRaw]: 12 values per body group (start, count, base vertex, parent, own number, rest type, rest x, y, z); [state]: the animation's group states. */
@@ -24,10 +24,9 @@ object BodyPose {
         val dy = FloatArray(groupCount)
         val dz = FloatArray(groupCount)
         for (g in 0 until groupCount) {
-            val a = g - 1
-            if (a in 0 until state.size - 1) {
-                type[g] = state[a].type
-                dx[g] = state[a].x.toFloat(); dy[g] = state[a].y.toFloat(); dz[g] = state[a].z.toFloat()
+            if (g in 1 until state.size) {
+                type[g] = state[g].type
+                dx[g] = state[g].x.toFloat(); dy[g] = state[g].y.toFloat(); dz[g] = state[g].z.toFloat()
             } else {
                 type[g] = groupsRaw[g * 12 + 5]
                 dx[g] = groupsRaw[g * 12 + 6].toFloat(); dy[g] = groupsRaw[g * 12 + 7].toFloat(); dz[g] = groupsRaw[g * 12 + 8].toFloat()

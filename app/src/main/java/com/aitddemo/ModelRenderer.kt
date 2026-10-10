@@ -37,6 +37,26 @@ private const val MAX_RASTER_DIM = 480
  * overlapping thin geometry (e.g. Emily's fingers), because no single whole-triangle draw order
  * is correct for every pixel at once.
  */
+/** A body drawn at a given turning [angle] (radians), for views the player turns by hand: no animation of its own. */
+@Composable
+fun ModelView(
+    vertices: FloatArray,
+    triangles: IntArray,
+    angle: Float,
+    modifier: Modifier = Modifier,
+    zoom: Float = 1f,
+    panX: Float = 0f,
+    panY: Float = 0f,
+) {
+    val raster = remember { ModelRaster() }
+    Canvas(modifier = modifier.fillMaxSize()) {
+        if (size.width > 0f && size.height > 0f) {
+            raster.render(vertices, triangles, angle, size.width, size.height, zoom, panX, panY)
+            drawImage(image = raster.bitmap.asImageBitmap(), dstSize = IntSize(size.width.toInt(), size.height.toInt()))
+        }
+    }
+}
+
 @Composable
 fun ModelSpinner(
     vertices: FloatArray,

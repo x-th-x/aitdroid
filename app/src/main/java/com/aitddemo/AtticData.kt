@@ -23,7 +23,5 @@ object AtticData {
     fun install(data: AtticOriginal) {
         HARDCOLS = data.hardcols
         MASKS = data.masks
-        AtticCollision.configure(data.player.halfWidth, data.player.height)
-        AtticCollision.reset()
     }
 }

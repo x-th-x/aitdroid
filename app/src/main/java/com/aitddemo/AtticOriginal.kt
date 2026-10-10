@@ -1,8 +1,9 @@
 package com.aitddemo
 
-import com.aitddemo.game.AnimData
+import com.aitddemo.game.GameData
+import com.aitddemo.game.GameTexts
+import com.aitddemo.game.Zone
 import com.aitddemo.original.GameFiles
-import com.aitddemo.original.VocSample
 import com.aitddemo.original.Pak
 import com.aitddemo.original.s16
 import com.aitddemo.original.u16
@@ -12,65 +13,26 @@ import com.aitddemo.original.u8
 /** Thrown when the original game files are missing or not in the expected format; the message is shown to the player. */
 class OriginalFilesException(message: String) : Exception(message)
 
-/** A static body (furniture) placed in the room: posed vertices (x, y, z per vertex), triangles (a, b, c, ARGB) and its OBJETS.ITD placement. */
-class AtticProp(
-    val objectIndex: Int,
-    val body: Int,
-    val vertices: FloatArray,
-    val triangles: IntArray,
-    val x: Int,
-    val y: Int,
-    val z: Int,
-    val alpha: Int,
-    val beta: Int,
-    val gamma: Int,
-    val lines: IntArray = IntArray(0),
-    val spheres: IntArray = IntArray(0),
-)
-
-/** The player's animated body: unposed per-group vertices, 12 ints per group, group processing order, triangles, and his walk animation. */
-class AtticPlayer(
-    val vertices: FloatArray,
-    val groups: IntArray,
-    val groupOrder: IntArray,
-    val triangles: IntArray,
-    val walkFrames: IntArray,
-    val walkGroups: Int,
-    val spawnX: Int,
-    val spawnZ: Int,
-    /** Half width and height of the body box (ZV) from the body header. */
-    val halfWidth: Int,
-    val height: Int,
-    val lines: IntArray = IntArray(0),
-    val spheres: IntArray = IntArray(0),
-    /** Where he starts: heading (engine angle), kind of collision box (OBJETS typeZv) and body box (x1, x2, y1, y2, z1, z2). */
-    val spawnBeta: Int = 0,
-    val typeZv: Int = 2,
-    val zv: IntArray = IntArray(6),
-    /** His movement animations (stand, walk, run, back, turn) by number, as the actor plays them. */
-    val anims: Map<Int, AnimData> = emptyMap(),
-)
-
 /** Everything the attic needs, parsed from the original files. [photos] are the 320x200 camera pictures as ARGB. */
 class AtticOriginal(
     val cameras: List<AtticCameraDef>,
     val hardcols: IntArray,
     val masks: List<List<AtticData.Mask>>,
-    val props: List<AtticProp>,
-    val player: AtticPlayer,
     val photos: List<IntArray>,
     /** Scene zones of the room (x1, x2, y1, y2, z1, z2, parameter, type; 8 values each): exits, triggers and floor kinds. */
     val zones: IntArray,
-    /** Sounds of the room (footsteps), by sample number. */
-    val samples: Map<Int, VocSample>,
     /** The attic music: AdLib track (ADLM file) of LISTMUS.PAK. */
     val music: ByteArray,
+    /** Objects, scripts, bodies, animations, sounds and texts of the game logic. */
+    val game: GameData,
+    /** Music tracks of LISTMUS.PAK by number (the scripts start music by number). */
+    val musicTrack: (Int) -> ByteArray?,
 )
 
 /**
  * Reads the attic (stage 0, room 0) of Alone in the Dark directly from the original files:
  * ETAGE00.PAK (room, hard colliders, cameras, masks), CAMERA00.PAK (pictures), ITD_RESS.PAK (palette),
- * OBJETS.ITD (placements), LISTBODY.PAK (bodies) and LISTANIM.PAK (walk animation).
+ * OBJETS.ITD, LISTLIFE.PAK (scripts), LISTBODY.PAK, LISTANIM.PAK, LISTSAMP.PAK and ENGLISH.PAK (the game logic).
  */
 object AtticOriginalReader {
     const val STAGE_FILE = "ETAGE00.PAK"
@@ -79,22 +41,19 @@ object AtticOriginalReader {
     const val OBJECT_FILE = "OBJETS.ITD"
     const val BODY_FILE = "LISTBODY.PAK"
     const val ANIM_FILE = "LISTANIM.PAK"
-    val REQUIRED = listOf(STAGE_FILE, CAMERA_FILE, RESOURCE_FILE, OBJECT_FILE, BODY_FILE, ANIM_FILE, MusicOriginalReader.FILE, SAMPLE_FILE)
+    val REQUIRED = listOf(STAGE_FILE, CAMERA_FILE, RESOURCE_FILE, OBJECT_FILE, BODY_FILE, ANIM_FILE, MusicOriginalReader.FILE, SAMPLE_FILE, LIFE_FILE, VARS_FILE, TEXT_FILE)
 
     private const val STAGE = 0
     private const val ROOM = 0
-    private const val PLAYER_BODY = 12
-    private const val WALK_ANIM = 254
     private const val PALETTE_ENTRY = 4 // ITD_RESS.PAK: the 768 byte colour table
-    private const val OBJECT_SIZE = 52
 
     /** The attic plays the first track stored in LISTMUS.PAK (music number 0 = entry 1). */
     const val ATTIC_MUSIC = 0
     const val SAMPLE_FILE = "LISTSAMP.PAK"
+    const val LIFE_FILE = "LISTLIFE.PAK"
+    const val VARS_FILE = "VARS.ITD"
+    const val TEXT_FILE = "ENGLISH.PAK"
 
-    /** Movement animations of the player body (life script 549: ANIM_MOVE 4, 254, 255, 4, 256, 257, 258) and the footstep samples (wood 30/31, carpet 46/47). */
-    private val MOVE_ANIMS = intArrayOf(4, 254, 255, 256, 257, 258)
-    private val ROOM_SAMPLES = intArrayOf(30, 31, 46, 47)
 
     fun missingFiles(files: GameFiles): List<String> = REQUIRED.filter { !files.exists(it) }
 
@@ -117,87 +76,26 @@ object AtticOriginalReader {
         val stage = OriginalStage.open(files, STAGE)
         val room = stage.rooms.firstOrNull { it.index == ROOM } ?: throw OriginalFilesException("$STAGE_FILE: Raum $ROOM fehlt")
         val hardcols = room.hardcols
-        val count = hardcols.size / AtticData.HARDCOL_STRIDE
-        var minX = Int.MAX_VALUE
-        var maxX = Int.MIN_VALUE
-        var minZ = Int.MAX_VALUE
-        var maxZ = Int.MIN_VALUE
-        for (i in 0 until count) {
-            minX = minOf(minX, hardcols[i * AtticData.HARDCOL_STRIDE])
-            maxX = maxOf(maxX, hardcols[i * AtticData.HARDCOL_STRIDE + 1])
-            minZ = minOf(minZ, hardcols[i * AtticData.HARDCOL_STRIDE + 4])
-            maxZ = maxOf(maxZ, hardcols[i * AtticData.HARDCOL_STRIDE + 5])
-        }
         val roomCameras = room.cameraIds.map { stage.camera(ROOM, it) }
         val cameras = roomCameras.mapIndexed { index, c -> c.camera.copy(index = index) }
         val masks = roomCameras.map { it.masks }
         val photos = room.cameraIds.map { stage.picture(it, palette) }
 
-        // ---- OBJETS.ITD + LISTBODY.PAK
-        val objects = files.read(OBJECT_FILE)!!
-        val bodies = Pak(files.read(BODY_FILE)!!)
-        val total = objects.u16(0)
-        val props = ArrayList<AtticProp>()
-        var spawnX = 0
-        var spawnZ = 0
-        var spawnBeta = 0
-        var typeZv = 2
-        var playerFound = false
-        for (i in 0 until total) {
-            val p = 2 + i * OBJECT_SIZE
-            fun w(k: Int) = objects.s16(p + k * 2)
-            if (w(14) != 0 || w(15) != ROOM || w(1) < 0) continue // stage 0, room 0, has a body
-            val bodyNo = w(1)
-            if (bodyNo == PLAYER_BODY) {
-                spawnX = w(8)
-                spawnZ = w(10)
-                spawnBeta = w(12)
-                typeZv = w(3)
-                playerFound = true
-                continue
-            }
-            // creatures that appear later by script are parked outside the room (below the floor / beyond the walls)
-            if (w(8) < minX || w(8) > maxX || w(10) < minZ || w(10) > maxZ || w(9) > 500) continue
-            val data = bodies.get(bodyNo + 1) ?: continue
-            val body = OriginalBody.parse(data)
-            val mesh = body.toMesh(palette)
-            props.add(AtticProp(i, bodyNo, mesh.first, mesh.second, w(8), w(9), w(10), w(11), w(12), w(13), body.lines(palette), body.spheres(palette)))
+        // ---- the game logic: objects, scripts, variables, bodies, animations, sounds, texts
+        fun zones(v: IntArray) = List(v.size / AtticData.HARDCOL_STRIDE) { i ->
+            val o = i * AtticData.HARDCOL_STRIDE
+            Zone(v[o], v[o + 1], v[o + 2], v[o + 3], v[o + 4], v[o + 5], v[o + 6], v[o + 7])
         }
-        if (!playerFound) throw OriginalFilesException("$OBJECT_FILE: Spielfigur (Körper $PLAYER_BODY) nicht in Raum 0 gefunden")
-
-        val playerBody = OriginalBody.parse(bodies.get(PLAYER_BODY + 1) ?: throw OriginalFilesException("$BODY_FILE: Körper $PLAYER_BODY fehlt"))
-        val animRaw = Pak(files.read(ANIM_FILE)!!).get(WALK_ANIM + 1) ?: throw OriginalFilesException("$ANIM_FILE: Animation $WALK_ANIM fehlt")
-        val frames = animRaw.u16(0)
-        val groups = animRaw.u16(2)
-        if (animRaw.size != 4 + frames * (8 + groups * 8)) throw OriginalFilesException("$ANIM_FILE: Animation $WALK_ANIM hat ein unerwartetes Format")
-        val walk = IntArray(frames * (4 + groups * 4))
-        var q = 4
-        var o = 0
-        for (f in 0 until frames) {
-            walk[o++] = animRaw.u16(q)
-            walk[o++] = animRaw.s16(q + 2)
-            walk[o++] = animRaw.s16(q + 4)
-            walk[o++] = animRaw.s16(q + 6)
-            q += 8
-            for (g in 0 until groups) {
-                for (k in 0 until 4) walk[o++] = animRaw.s16(q + k * 2)
-                q += 8
-            }
-        }
-        val animPak = Pak(files.read(ANIM_FILE)!!)
-        val moveAnims = MOVE_ANIMS.associateWith { n -> AnimData.parse(animPak.get(n + 1) ?: throw OriginalFilesException("$ANIM_FILE: Animation $n fehlt")) }
-        val samplePak = Pak(files.read(SAMPLE_FILE)!!)
-        val samples = ROOM_SAMPLES.associateWith { n -> VocSample.parse(samplePak.get(n + 1) ?: throw OriginalFilesException("$SAMPLE_FILE: Klang $n fehlt")) ?: throw OriginalFilesException("$SAMPLE_FILE: Klang $n ist kein VOC") }
-        val rig = playerBody.animatedParts()
-        val tris = playerBody.toMesh(palette).second
-        val player = AtticPlayer(
-            rig.vertices, rig.groups, rig.groupOrder, tris, walk, groups, spawnX, spawnZ,
-            maxOf(-playerBody.zv[0], playerBody.zv[1]), -playerBody.zv[2],
-            playerBody.lines(palette), playerBody.spheres(palette),
-            spawnBeta, typeZv, playerBody.zv, moveAnims,
+        val varBytes = files.read(VARS_FILE)!!
+        val vars = ShortArray(varBytes.size / 2) { varBytes.s16(it * 2).toShort() }
+        val musicPak = Pak(files.read(MusicOriginalReader.FILE)!!)
+        val game = GameData(
+            files.read(OBJECT_FILE)!!, Pak(files.read(LIFE_FILE)!!), vars, Pak(files.read(BODY_FILE)!!), Pak(files.read(ANIM_FILE)!!),
+            Pak(files.read(SAMPLE_FILE)!!), palette, zones(hardcols), zones(room.zones),
+            GameTexts.parse(Pak(files.read(TEXT_FILE)!!).get(1) ?: throw OriginalFilesException("$TEXT_FILE: Texte fehlen")),
         )
-        val music = Pak(files.read(MusicOriginalReader.FILE)!!).get(ATTIC_MUSIC + 1) ?: throw OriginalFilesException("${MusicOriginalReader.FILE}: Musik $ATTIC_MUSIC fehlt")
-        return AtticOriginal(cameras, hardcols, masks, props, player, photos, room.zones, samples, music)
+        val music = musicPak.get(ATTIC_MUSIC + 1) ?: throw OriginalFilesException("${MusicOriginalReader.FILE}: Musik $ATTIC_MUSIC fehlt")
+        return AtticOriginal(cameras, hardcols, masks, photos, room.zones, music, game) { n -> musicPak.get(n + 1) }
     }
 
     private fun readPalette(d: ByteArray): IntArray {

@@ -123,15 +123,15 @@ fun animatedVertices(
     // any group beyond what this animation covers (matches the original: extra body groups are
     // simply left untouched by a shorter animation).
     //
-    // Group-index mapping is offset by one: body group 0 is the root (the actor's own heading, applied elsewhere), so
-    // the animation's group slot i drives body group i+1 and its last slot goes unused.
+    // The animation's group slot i drives body group i (as the original's SetAnimObjet does). Slot 0 is ignored: the original replaces the root group's
+    // state with the object's own angles, which are applied outside of this pose.
     val stateType = IntArray(groupCount)
     val deltaX = FloatArray(groupCount)
     val deltaY = FloatArray(groupCount)
     val deltaZ = FloatArray(groupCount)
     for (gi in 0 until groupCount) {
-        val animGi = gi - 1
-        if (animGi in 0 until (animNumGroups - 1)) {
+        val animGi = gi
+        if (animGi in 1 until animNumGroups) {
             val a = prevFrame[animGi]; val b = nextFrame[animGi]
             stateType[gi] = b.type
             if (b.type == 0) {

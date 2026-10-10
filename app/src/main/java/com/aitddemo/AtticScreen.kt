@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -27,34 +28,85 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import com.aitddemo.game.AtticGame
+import com.aitddemo.game.GameObject
+import com.aitddemo.game.GameUi
 import com.aitddemo.game.Joy
-import com.aitddemo.game.PlayerController
-import com.aitddemo.game.Zone
 import kotlin.math.PI
-import kotlin.math.atan2
 import kotlin.math.cos
-import kotlin.math.floor
 import kotlin.math.hypot
 import kotlin.math.sin
 
-// Attic room (stage 0, room 0): the camera photo, furniture and player are read from the user's original files at
-// runtime. Fixed camera views with live zone-based camera switching (AtticCameraLogic.kt), 3D actors rendered over
-// the photo through the camera matrix with background masks (AtticSceneRenderer).
+// Attic room (stage 0, room 0): the camera photo, the objects and the player are read from the user's original files at
+// runtime. The life scripts of the original run on the objects (AtticGame); the objects are drawn through the camera matrix
+// over the photo with background masks (AtticSceneRenderer). Fixed camera views switch live by the room's zones (AtticCameraLogic.kt).
 
-/** A furniture piece read from the original files, placed in the world (object rotation as in the original, then translation). */
-private fun AtticProp.toActor(): AtticActor {
-    val rot = initRot(alpha, beta, gamma)
-    val n = vertices.size / 3
-    val w = FloatArray(n * 3)
-    var minX = Float.MAX_VALUE; var maxX = -Float.MAX_VALUE; var minZ = Float.MAX_VALUE; var maxZ = -Float.MAX_VALUE
-    for (i in 0 until n) {
-        val (rx, ry, rz) = rotatePoint(vertices[i * 3], vertices[i * 3 + 1], vertices[i * 3 + 2], rot)
-        w[i * 3] = rx + x; w[i * 3 + 1] = ry + y; w[i * 3 + 2] = rz + z
-        minX = minOf(minX, w[i * 3]); maxX = maxOf(maxX, w[i * 3]); minZ = minOf(minZ, w[i * 3 + 2]); maxZ = maxOf(maxZ, w[i * 3 + 2])
+/** The screen's side of [GameUi]: messages, sounds, music. */
+private class AtticUi(private val world: AtticOriginal, private val sounds: IntroSounds) : GameUi {
+    /** Up to five messages, the first slot at the bottom (as in the original); a message that is shown again starts over. */
+    val messages = arrayOfNulls<MessageSlot>(5)
+    var gameOverShown by mutableStateOf(false)
+    private var music = AtticOriginalReader.ATTIC_MUSIC
+
+    override fun message(text: String) {
+        val now = System.nanoTime()
+        val same = messages.indexOfFirst { it?.text == text }
+        val slot = if (same >= 0) same else messages.indexOfFirst { it == null }
+        if (slot >= 0) messages[slot] = MessageSlot(text, now)
     }
-    return AtticActor(w, triangles, x.toFloat(), y.toFloat(), z.toFloat(), (minX / 10).toInt(), (maxX / 10).toInt(), (minZ / 10).toInt(), (maxZ / 10).toInt(), lines, spheres)
+
+    /** Forgets the messages whose time is over. */
+    fun expire(now: Long) {
+        for (i in messages.indices) if (messages[i]?.let { now - it.startNanos > MESSAGE_NANOS } == true) messages[i] = null
+    }
+
+    override fun playSample(number: Int) = sounds.play(number)
+
+    override fun music(number: Int, loop: Boolean) {
+        if (number == music) return
+        val data = world.musicTrack(number) ?: return
+        music = number
+        GameMusic.setLooping(loop, number, data)
+        GameMusic.start(number, data)
+    }
+
+    override fun gameOver() {
+        gameOverShown = true
+    }
+
+    private companion object {
+        const val MESSAGE_NANOS = 2_800_000_000L
+    }
+}
+
+/** An object of the game as something to draw: its posed vertices turned by the object's angles and moved to its place. */
+private fun GameObject.toActor(minX: Int, maxX: Int, minZ: Int, maxZ: Int): AtticActor? {
+    val act = actor ?: return null
+    val local = posedVertices() ?: return null
+    val asset = asset ?: return null
+    if (!w.active || w.body < 0) return null
+    val x = act.renderX
+    val y = act.renderY
+    val z = act.renderZ
+    // creatures that appear later by script are parked outside the room (below the floor, beyond the walls)
+    if (x < minX || x > maxX || z < minZ || z > maxZ || y > 500) return null
+    val rot = initRot(w.alpha, act.beta and 0x3FF, w.gamma)
+    val n = local.size / 3
+    val out = FloatArray(n * 3)
+    var lowX = Float.MAX_VALUE; var highX = -Float.MAX_VALUE; var lowZ = Float.MAX_VALUE; var highZ = -Float.MAX_VALUE
+    for (i in 0 until n) {
+        val (rx, ry, rz) = rotatePoint(local[i * 3], local[i * 3 + 1], local[i * 3 + 2], rot)
+        out[i * 3] = rx + x; out[i * 3 + 1] = ry + y; out[i * 3 + 2] = rz + z
+        lowX = minOf(lowX, out[i * 3]); highX = maxOf(highX, out[i * 3]); lowZ = minOf(lowZ, out[i * 3 + 2]); highZ = maxOf(highZ, out[i * 3 + 2])
+    }
+    val zv = act.zv
+    // figures (articulated bodies) use their body box for the background masks, furniture the box of its vertices
+    return if (asset.parts != null) {
+        AtticActor(out, asset.triangles, x.toFloat(), y.toFloat(), z.toFloat(), zv[0] / 10, zv[1] / 10, zv[4] / 10, zv[5] / 10, asset.lines, asset.spheres)
+    } else {
+        AtticActor(out, asset.triangles, x.toFloat(), y.toFloat(), z.toFloat(), (lowX / 10).toInt(), (highX / 10).toInt(), (lowZ / 10).toInt(), (highZ / 10).toInt(), asset.lines, asset.spheres)
+    }
 }
 
 /** Entry point: reads the room from the original game files, shows an error message when that is not possible. */
@@ -74,31 +126,33 @@ fun AtticScreen(onExit: () -> Unit, controlMode: ControlMode = ControlMode.STEER
 @Composable
 private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: ControlMode, developerMode: Boolean) {
     BackHandler { onExit() }
-    remember(world) { AtticData.install(world) } // collision boxes and masks of this room
+    remember(world) { AtticData.install(world) } // masks of this room
     val cameras = world.cameras
     // the attic plays the first track of LISTMUS.PAK in a loop (the intro music stops); leaving the attic stops it
-    androidx.compose.runtime.DisposableEffect(world) {
+    DisposableEffect(world) {
         GameMusic.setLooping(true, AtticOriginalReader.ATTIC_MUSIC, world.music) // the attic loops its music
         GameMusic.start(AtticOriginalReader.ATTIC_MUSIC, world.music) // stops the intro music and plays the first track of LISTMUS.PAK
         onDispose { GameMusic.stop() }
     }
 
-    // The player is the original body 12 (Carnby) driven by the original actor logic (animations from LISTANIM.PAK, collision with the room's boxes).
-    val player = world.player
-    val sounds = remember(world) { IntroSounds(world.samples) }
-    androidx.compose.runtime.DisposableEffect(sounds) { onDispose { sounds.release() } }
-    val startNanos = remember { System.nanoTime() }
-    val controller = remember(world) {
-        fun zones(a: IntArray) = List(a.size / AtticData.HARDCOL_STRIDE) { i ->
-            val o = i * AtticData.HARDCOL_STRIDE
-            Zone(a[o], a[o + 1], a[o + 2], a[o + 3], a[o + 4], a[o + 5], a[o + 6], a[o + 7])
-        }
-        PlayerController(player, zones(world.hardcols), zones(world.zones), 0) { sounds.play(it) }
+    val sounds = remember(world) { IntroSounds { world.game.sample(it) } }
+    DisposableEffect(sounds) { onDispose { sounds.release() } }
+    val ui = remember(world) { AtticUi(world, sounds) }
+    val game = remember(world) { AtticGame(world.game, ui) }
+    val bounds = remember(world) {
+        val h = world.game.hardcols
+        intArrayOf(h.minOf { it.x1 }, h.maxOf { it.x2 }, h.minOf { it.z1 }, h.maxOf { it.z2 })
     }
-    var playerX by remember { mutableFloatStateOf(player.spawnX.toFloat()) }
-    var playerZ by remember { mutableFloatStateOf(player.spawnZ.toFloat()) }
+    val startNanos = remember { System.nanoTime() }
     var frameTick by remember { mutableIntStateOf(0) }
     var cameraIndex by remember { mutableIntStateOf(ATTIC_INITIAL_CAMERA_INDEX) }
+    var playerX by remember { mutableFloatStateOf(0f) }
+    var playerZ by remember { mutableFloatStateOf(0f) }
+
+    // the found window and the inventory stop the game
+    var foundItem by remember { mutableIntStateOf(-1) }
+    var inventoryOpen by remember { mutableStateOf(false) }
+    var actionHeld by remember { mutableStateOf(false) }
 
     // Floating joystick state: drag vector in stick-radius units, (-1..1) on each axis.
     var stickX by remember { mutableFloatStateOf(0f) }
@@ -111,9 +165,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     var dpadDown by remember { mutableStateOf(false) }
     var dpadLeft by remember { mutableStateOf(false) }
     var dpadRight by remember { mutableStateOf(false) }
-    val dpadTurnRateRadPerMs = 0.0028f
 
-    val furniture = remember(world) { world.props.map { it.toActor() } }
     val renderer = remember { AtticSceneRenderer() }
     val backgrounds = remember(world) {
         // photo of each camera, scaled once to the renderer's resolution (nearest neighbour keeps the pixel look)
@@ -128,65 +180,68 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     var showBackground by remember { mutableStateOf(true) }
 
     // Stick mode: the stick gives the screen direction to walk in; the body turns towards it with the engine tank keys.
-    val steerTurnRateRadPerMs = 0.005f
     val stickDeadzone = 0.15f
 
     // The stick direction is rotated by the active camera's own yaw, so "up" always means away from the camera.
     val angleUnitToRad = 2f * PI.toFloat() / 1024f
 
-    LaunchedEffect(controller) {
+    LaunchedEffect(game) {
+        var gameClock = 0
+        var lastTimer = 0
         while (true) {
             val nanos = withFrameNanos { it }
             val timer = ((nanos - startNanos) / 16_666_667L).toInt() // engine ticks, 60 per second
-            var joy = 0
-            var run = false
-            when (controlMode) {
-                ControlMode.STEERING -> if (hypot(stickX, stickY) > stickDeadzone) {
-                    // stick up = away from the camera, right = screen right, in the active camera's own ground directions
-                    val camBeta = cameras[cameraIndex].angleBeta * angleUnitToRad
-                    val fwd = -stickY
-                    val dirX = sin(camBeta) * fwd + cos(camBeta) * stickX
-                    val dirZ = cos(camBeta) * fwd - sin(camBeta) * stickX
-                    // turn the body towards that direction with the engine's tank keys: turn left/right while it is off, walk when it faces it
-                    val target = IntroTimeline.headingOf(dirX, dirZ)
-                    var diff = (target - (controller.actor.beta and 0x3FF)) % 1024f
-                    if (diff > 512f) diff -= 1024f
-                    if (diff < -512f) diff += 1024f
-                    if (diff > 40f) joy = joy or Joy.LEFT
-                    if (diff < -40f) joy = joy or Joy.RIGHT
-                    if (kotlin.math.abs(diff) < 300f) joy = joy or Joy.FORWARD
-                    run = hypot(stickX, stickY) > 0.92f
+            val paused = foundItem >= 0 || inventoryOpen || ui.gameOverShown
+            if (!paused) gameClock += (timer - lastTimer).coerceAtLeast(0)
+            lastTimer = timer
+            ui.expire(System.nanoTime())
+            if (!paused) {
+                val player = game.player?.actor
+                var joy = 0
+                var run = false
+                when (controlMode) {
+                    ControlMode.STEERING -> if (player != null && hypot(stickX, stickY) > stickDeadzone) {
+                        // stick up = away from the camera, right = screen right, in the active camera's own ground directions
+                        val camBeta = cameras[cameraIndex].angleBeta * angleUnitToRad
+                        val fwd = -stickY
+                        val dirX = sin(camBeta) * fwd + cos(camBeta) * stickX
+                        val dirZ = cos(camBeta) * fwd - sin(camBeta) * stickX
+                        // turn the body towards that direction with the engine's tank keys: turn left/right while it is off, walk when it faces it
+                        val target = IntroTimeline.headingOf(dirX, dirZ)
+                        var diff = (target - (player.beta and 0x3FF)) % 1024f
+                        if (diff > 512f) diff -= 1024f
+                        if (diff < -512f) diff += 1024f
+                        if (diff > 40f) joy = joy or Joy.LEFT
+                        if (diff < -40f) joy = joy or Joy.RIGHT
+                        if (kotlin.math.abs(diff) < 300f) joy = joy or Joy.FORWARD
+                        run = hypot(stickX, stickY) > 0.92f
+                    }
+                    ControlMode.DPAD -> {
+                        if (dpadUp) joy = joy or Joy.FORWARD
+                        if (dpadDown) joy = joy or Joy.BACKWARD
+                        if (dpadLeft) joy = joy or Joy.LEFT
+                        if (dpadRight) joy = joy or Joy.RIGHT
+                    }
                 }
-                ControlMode.DPAD -> {
-                    if (dpadUp) joy = joy or Joy.FORWARD
-                    if (dpadDown) joy = joy or Joy.BACKWARD
-                    if (dpadLeft) joy = joy or Joy.LEFT
-                    if (dpadRight) joy = joy or Joy.RIGHT
+                game.tick(gameClock, joy, actionHeld, run)
+                if (game.pendingFound >= 0) foundItem = game.pendingFound
+                game.player?.actor?.let {
+                    playerX = it.renderX.toFloat()
+                    playerZ = it.renderZ.toFloat()
                 }
+                // the room's camera follows the player by the engine's zone rule (checkIfCameraChangeIsRequired)
+                cameraIndex = resolveAtticCamera(playerX, playerZ, cameraIndex, cameras)
             }
-            controller.update(joy, timer, run)
-            playerX = controller.actor.renderX.toFloat()
-            playerZ = controller.actor.renderZ.toFloat()
-            // the room's camera follows the player by the engine's zone rule (checkIfCameraChangeIsRequired)
-            cameraIndex = resolveAtticCamera(playerX, playerZ, cameraIndex, cameras)
             frameTick++
         }
     }
 
     val camera = cameras[cameraIndex]
-    val playerActor = run {
-        frameTick // the pose changes every frame
-        val zv = controller.actor.zv
-        AtticActor(
-            controller.worldVertices(), player.triangles,
-            controller.actor.renderX.toFloat(), 0f, controller.actor.renderZ.toFloat(),
-            zv[0] / 10, zv[1] / 10, zv[4] / 10, zv[5] / 10,
-            player.lines, player.spheres,
-        )
-    }
-    // one frame of the room: photo, furniture and player through the camera matrix, masks over them (AtticSceneRenderer)
+    // one frame of the room: photo, objects and player through the camera matrix, masks over them (AtticSceneRenderer)
     val roomImage = run {
-        renderer.render(camera, if (showBackground) backgrounds[cameraIndex] else blackBackground, furniture + playerActor)
+        frameTick // the poses change every frame
+        val actors = game.objects.mapNotNull { it.toActor(bounds[0], bounds[1], bounds[2], bounds[3]) }
+        renderer.render(camera, if (showBackground) backgrounds[cameraIndex] else blackBackground, actors)
         renderer.bitmap.asImageBitmap()
     }
 
@@ -262,10 +317,29 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
             )
         }
 
+        // the action key of the original (Enter): held while the finger is down; what it does is chosen in the inventory
+        HoldButton(
+            label = "Action",
+            modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = if (controlMode == ControlMode.DPAD) 24.dp else 40.dp, end = if (controlMode == ControlMode.DPAD) 200.dp else 24.dp),
+            onHeld = { actionHeld = it },
+        )
+
         BackButton(onClick = onExit)
 
-        // Same visual style as BackButton (semi-transparent box, original bitmap font), opposite
-        // corner (top-right) so it doesn't compete with Back/the joystick for space.
+        if (game.allowInventory && game.inventory.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(start = 120.dp, bottom = 12.dp)
+                    .background(Color.Black.copy(alpha = 0.5f))
+                    .clickable { inventoryOpen = true }
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                BitmapText(text = "Inventory", scale = 2f, color = Color(0xFFF2E4B8))
+            }
+        }
+
+        // Same visual style as BackButton, opposite corner (top-right).
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
@@ -275,6 +349,27 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
                 .padding(horizontal = 10.dp, vertical = 6.dp)
         ) {
             BitmapText(text = if (showBackground) "Hintergrund: an" else "Hintergrund: aus", scale = 1.6f, color = Color(0xFFF2E4B8))
+        }
+
+        frameTick // the messages fade every frame
+        if (ui.messages.any { it != null }) MessageLines(ui.messages, System.nanoTime(), world.game.palette)
+
+        if (foundItem >= 0) {
+            FoundWindow(game, foundItem) { take ->
+                game.resolveFound(take)
+                foundItem = -1
+            }
+        }
+        if (inventoryOpen) {
+            InventoryOverlay(game, onClose = { inventoryOpen = false }) { item, action ->
+                inventoryOpen = false
+                game.useItem(item, action)
+            }
+        }
+        if (ui.gameOverShown) {
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.7f)).clickable { onExit() }, contentAlignment = Alignment.Center) {
+                BitmapText(text = "Game Over", scale = 4f, color = Color(0xFFF2E4B8))
+            }
         }
     }
 }

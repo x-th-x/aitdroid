@@ -81,6 +81,7 @@ interface LifeHost {
     fun continueTrack(obj: Int) {}
     fun setBeta(obj: Int, beta: Int, speed: Int) {}
     fun setAlpha(obj: Int, alpha: Int, speed: Int) {}
+    fun testCol(obj: Int, on: Boolean) {}
     fun moved(obj: Int) {} // STAGE, ANGLE, PUT: position, room or angles of an object were set
     fun zv(obj: Int, op: String, values: IntArray) {} // DEF_ZV, DEF_ABS_ZV, DO_REAL_ZV, DO_MAX_ZV, DO_CARRE_ZV, DO_NORMAL_ZV, DO_ROT_ZV
 
@@ -336,7 +337,7 @@ class LifeVm(
                         t.body = eval()
                         if (t.active) host.body(target)
                     }
-                    "TYPE" -> t.flags = (t.flags and 0xFF.inv()) or (s16() and 0xFF)
+                    "TYPE" -> t.flags = (t.flags and 1) or s16()
                     "ANIM_ONCE" -> {
                         val a = s16()
                         val info = s16()
@@ -386,7 +387,7 @@ class LifeVm(
                         trace?.invoke("script $scriptNo (obj $owner): obj $target STAGE ${t.stage}/${t.room} at ${t.x},${t.y},${t.z}")
                         host.moved(target)
                     }
-                    "TEST_COL" -> t.flags = if (s16() != 0) t.flags or 0x20 else t.flags and 0x20.inv()
+                    "TEST_COL" -> host.testCol(target, s16() != 0)
                     "LIFE" -> {
                         t.life = s16()
                         trace?.invoke("script $scriptNo (obj $owner): obj $target -> life ${t.life}")

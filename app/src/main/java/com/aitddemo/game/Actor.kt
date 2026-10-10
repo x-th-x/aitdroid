@@ -101,9 +101,37 @@ class Actor(
     var collidedWith = -1
         private set
 
-    /** Animation starten wie ANIM_ONCE (type 0), ANIM_REPEAT (1) oder ANIM_ALL_ONCE (2) im Skript; [info] = Folgeanimation. */
+    /** Alle Hüllquader (Indizes in [colliders]), die der Schritt im letzten [update] berührte (CheckObjectCol im Original). */
+    val collidedAll = ArrayList<Int>()
+
+    private var stopPending = false
+
+    /** flagEndAnim des Originals: die letzte Animation ist zu Ende gelaufen (bleibt gesetzt, bis eine neue beginnt). */
+    var flagEndAnim = false
+        private set
+
+    /** Wand-Kollision (Zone Typ 9: deren Parameter, Typ 3: 255) der letzten Bewegung, -1 = keine (HARD_COL im Original). */
+    var hardCol = -1
+
+    /** Stoßen an Wände und Zonen aktiv (TEST_COL des Skripts, dynFlags & 1). */
+    var wallCollision = true
+
+    /** Läuft eine Animation (AF_ANIMATED)? Ohne Animation bleibt der Körper in der Haltung des Körpers stehen. */
+    val animated: Boolean get() = animData != null
+
+    /** Animation starten wie ANIM_ONCE (type 0), ANIM_REPEAT (1) oder ANIM_ALL_ONCE (2) im Skript; [info] = Folgeanimation; -1 beendet die Animation. */
     fun playAnim(num: Int, type: Int, info: Int) {
-        if (num < 0) return
+        if (num < 0) {
+            if (anim != -1 || animData != null) {
+                anim = -1
+                animData = null
+                newAnim = -1
+                newAnimType = 0
+                newAnimInfo = -1
+                flagEndAnim = true
+            }
+            return
+        }
         initAnim(num, type, info)
     }
 
@@ -152,7 +180,23 @@ class Actor(
     }
 
     /** Weitere feste Hüllquader (x1, x2, y1, y2, z1, z2) im Raum, z. B. andere Objekte: sie blockieren die Figur wie Hindernisse. */
-    var extraColliders: List<IntArray> = emptyList()
+    var colliders: List<Collider> = emptyList()
+
+    /** Ein Hindernis-Quader (x1, x2, y1, y2, z1, z2); [movable] = er lässt sich schieben (AF_MOVABLE). */
+    class Collider(val zv: IntArray, val movable: Boolean)
+
+    /** Schiebt Objekt [index] von [colliders] um (dx, dz); true, wenn es sich bewegt hat (der Aufrufer prüft Wände und andere Objekte). */
+    var pushObject: ((Int, Int, Int) -> Boolean)? = null
+
+    /** Wird von außen um (dx, dz) verschoben (geschoben von einer Figur). */
+    fun pushBy(dx: Int, dz: Int) {
+        worldX += dx
+        worldZ += dz
+        zv[0] += dx; zv[1] += dx; zv[4] += dz; zv[5] += dz
+    }
+
+    private fun hits(l: IntArray, x1: Int, x2: Int, y1: Int, y2: Int, z1: Int, z2: Int) =
+        x1 < l[1] && l[0] < x2 && y1 < l[3] && l[2] < y2 && z1 < l[5] && l[4] < z2
 
     /** Bodenmaterial aus der Szenenzone Typ 8 (steuert später die Schrittgeräusche), -1 = keins. */
     var hardMat = -1
@@ -230,9 +274,9 @@ class Actor(
         zv[5] = box[5] + startZ
         // erste Animation setzen (SetAnimObjet: Keyframe 0 gilt sofort)
         anim = startAnim
-        animData = loadAnim(startAnim)
+        animData = if (startAnim >= 0) loadAnim(startAnim) else null
         frame = 0
-        applyKeyframe(animData!!.frames[0])
+        animData?.let { applyKeyframe(it.frames[0]) }
         previous = copyOf(state)
         keyStart = startTimer
         animType = startAnimType
@@ -520,16 +564,15 @@ class Actor(
     }
 
     private fun initAnim(num: Int, type: Int, info: Int) {
+        stopPending = false
         if (num == anim) {
             animType = type
             animInfo = info
             return
         }
-        if (animType and 2 != 0) { // nicht unterbrechbar
-            if (newAnimType and 2 != 0) return
-            animInfo = num
-            return
-        }
+        // AITD1: eine nicht unterbrechbare Animation (ANIM_ALL_ONCE) lässt jede neue Anforderung verfallen
+        if (animType and 2 != 0) return
+        if (newAnimType and 2 != 0) return
         newAnim = num
         newAnimType = type
         newAnimInfo = info
@@ -542,9 +585,14 @@ class Actor(
         endFrameTick = false
         endAnimTick = false
         collidedWith = -1
+        collidedAll.clear()
         if (turning) {
             beta = updateRotation(timer)
             if (rotSteps == 0) turning = false
+        }
+        if (newAnim == -1 && stopPending) { // the animation ended with nothing to follow (animInfo -1): it stops now, one tick after its last keyframe
+            stopPending = false
+            playAnim(-1, 0, -1)
         }
         if (newAnim != -1) {
             if (newAnimType and 4 == 0) {
@@ -571,6 +619,7 @@ class Actor(
             newAnimType = 0
             newAnimInfo = -1
             frame = 0
+            flagEndAnim = false
         }
         val data = animData ?: return
         val oldStepX = stepX
@@ -590,11 +639,30 @@ class Actor(
             local[1] += sx
             local[4] += sz
             local[5] += sz
-            val obstacles = if (extraColliders.isEmpty()) hardcols else hardcols + extraColliders.map { Zone(it[0], it[1], it[2], it[3], it[4], it[5], 0, 99) }
-            for ((hi, h) in obstacles.withIndex()) {
-                if (!(h.x1 < local[1] && local[0] < h.x2 && h.y1 < local[3] && local[2] < h.y2 && h.z1 < local[5] && local[4] < h.z2)) continue
-                if (hi >= hardcols.size && collidedWith < 0) collidedWith = hi - hardcols.size
+            // walls of the room (AsmCheckListCol + GereCollision)
+            if (wallCollision) for (h in hardcols) {
+                if (!hits(local, h.x1, h.x2, h.y1, h.y2, h.z1, h.z2)) continue
+                if (h.type == 9) hardCol = h.parameter
+                if (h.type == 3) hardCol = 255
                 val r = collide(zv, local, h, sx, sz)
+                animNegX += r[0] - sx
+                animNegZ += r[1] - sz
+                local[0] += r[0] - sx
+                local[1] += r[0] - sx
+                local[4] += r[1] - sz
+                local[5] += r[1] - sz
+                sx = r[0]
+                sz = r[1]
+            }
+            // other objects (CheckObjectCol): a movable one is pushed along when it can move, anything else stops him (only when his collisions are on)
+            for ((i, c) in colliders.withIndex()) {
+                val b = c.zv
+                if (!hits(local, b[0], b[1], b[2], b[3], b[4], b[5])) continue
+                if (collidedWith < 0) collidedWith = i
+                if (i !in collidedAll) collidedAll.add(i)
+                if (c.movable && (sx != 0 || sz != 0) && pushObject?.invoke(i, sx, sz) == true) continue
+                if (!c.movable && !wallCollision) continue
+                val r = collide(zv, local, Zone(b[0], b[1], b[2], b[3], b[4], b[5], 0, 99), sx, sz)
                 animNegX += r[0] - sx
                 animNegZ += r[1] - sz
                 local[0] += r[0] - sx
@@ -619,10 +687,11 @@ class Actor(
             eventFrame = if (frame >= data.numFrames) 0 else frame
             if (frame >= data.numFrames) {
                 endAnimTick = true
+                flagEndAnim = true
                 frame = 0
                 if (animType and 1 == 0 && newAnim == -1) {
                     animType = animType and 2.inv()
-                    initAnim(animInfo, 1, -1)
+                    if (animInfo == -1) stopPending = true else initAnim(animInfo, 1, -1)
                 }
             }
             worldX += stepX

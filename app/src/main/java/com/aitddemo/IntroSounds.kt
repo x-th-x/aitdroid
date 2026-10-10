@@ -6,12 +6,14 @@ import android.media.AudioTrack
 import com.aitddemo.original.VocSample
 
 /** Plays the sound samples read from LISTSAMP.PAK (8 bit unsigned mono). Several samples can sound at once; finished ones are released. */
-class IntroSounds(private val samples: Map<Int, VocSample>) {
+class IntroSounds(private val lookup: (Int) -> VocSample?) {
+    constructor(samples: Map<Int, VocSample>) : this({ n -> samples[n] })
+
     private val active = ArrayList<AudioTrack>()
 
     @Synchronized
     fun play(number: Int) {
-        val s = samples[number] ?: return
+        val s = lookup(number) ?: return
         try {
             while (active.size >= MAX_ACTIVE) active.removeAt(0).release()
             val track = AudioTrack.Builder()

@@ -88,7 +88,7 @@ private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: 
         mutableStateOf(if (devControlMode == "dpad") ControlMode.DPAD else ControlMode.STEERING)
     }
 
-    // Developer Mode: off by default. Needed to start the (work-in-progress) intro/attic flow from the character screen.
+    // Developer Mode: off by default. Shows the world position and camera in the attic.
     var developerMode by remember { mutableStateOf(devAutoAttic) }
 
     fun advance() {
@@ -139,10 +139,9 @@ private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: 
             )
             Screen.SELECT -> SelectScreen(
                 onBack = { screen = Screen.MENU },
-                // Carnby leads into the intro/attic flow, but only while Developer Mode is on (that gameplay is still
-                // work in progress); otherwise a placeholder message is shown.
+                // Carnby starts the intro and the attic; Emily's game is not available yet.
                 onAttemptStart = { name ->
-                    if (name == "Edward Carnby" && developerMode) {
+                    if (name == "Edward Carnby") {
                         screen = Screen.INTRO
                     } else {
                         Toast.makeText(context, "Would start as $name (demo only)", Toast.LENGTH_SHORT).show()
