@@ -51,13 +51,15 @@ class MainActivity : ComponentActivity() {
         val devAutoIntro = intent?.getBooleanExtra("devAutoIntro", false) ?: false
         val devAutoMusic = intent?.getBooleanExtra("devAutoMusic", false) ?: false
         val devControlMode = intent?.getStringExtra("devControlMode")
-        setContent { StartGate(devAutoAttic, devAutoIntro, devAutoMusic, devControlMode) }
+        // `--es devItems 12,15` puts those world objects into the inventory when the attic starts (for testing)
+        val devItems = intent?.getStringExtra("devItems")?.split(",")?.mapNotNull { it.trim().toIntOrNull() } ?: emptyList()
+        setContent { StartGate(devAutoAttic, devAutoIntro, devAutoMusic, devControlMode, devItems) }
     }
 }
 
 /** The start sequence, the menus and the font need files from the original game: read them first, show the error screen when they are missing. */
 @Composable
-private fun StartGate(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: Boolean, devControlMode: String?) {
+private fun StartGate(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: Boolean, devControlMode: String?, devItems: List<Int>) {
     val context = LocalContext.current
     val loader = rememberOriginalFiles(missing = { StartOriginalReader.missingFiles(it) }, cacheKey = "start") { files: GameFiles -> StartOriginalReader.read(files) }
     when (val s = loader.state) {
@@ -65,13 +67,13 @@ private fun StartGate(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic
         is OriginalState.Failed -> OriginalFilesErrorScreen(s.message, loader.chooseFolder, onExit = { (context as? Activity)?.finish() })
         is OriginalState.Ready -> {
             if (StartAssets.original !== s.data) StartAssets.install(s.data)
-            if (StartAssets.original != null) DemoApp(devAutoAttic, devAutoIntro, devAutoMusic, devControlMode)
+            if (StartAssets.original != null) DemoApp(devAutoAttic, devAutoIntro, devAutoMusic, devControlMode, devItems)
         }
     }
 }
 
 @Composable
-private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: Boolean, devControlMode: String?) {
+private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: Boolean, devControlMode: String?, devItems: List<Int>) {
     var screen by remember {
         mutableStateOf(
             when {
@@ -151,7 +153,7 @@ private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: 
             Screen.INTRO -> IntroScreen(onFinished = { screen = Screen.ATTIC })
             Screen.MODELS -> ModelsScreen(onExit = { screen = Screen.MENU })
             Screen.MUSIC -> MusicViewerScreen(onExit = { screen = Screen.MENU })
-            Screen.ATTIC -> AtticScreen(onExit = { screen = Screen.MENU }, controlMode = controlMode, developerMode = developerMode)
+            Screen.ATTIC -> AtticScreen(onExit = { screen = Screen.MENU }, controlMode = controlMode, developerMode = developerMode, devItems = devItems)
             Screen.OPTIONS -> OptionsScreen(
                 controlMode = controlMode,
                 onControlModeChange = { controlMode = it },

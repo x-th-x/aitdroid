@@ -65,6 +65,8 @@ class GameData(
     val hardcols: List<Zone>,
     val zones: List<Zone>,
     val texts: GameTexts,
+    private val textPak: Pak,
+    private val resourcePak: Pak,
 ) {
     private val bodies = HashMap<Int, BodyAsset?>()
     private val anims = HashMap<Int, AnimData?>()
@@ -95,6 +97,16 @@ class GameData(
         } catch (_: Exception) {
             null
         }
+    }
+
+    /** The text of a book, letter or notebook: entry [index] + 2 of ENGLISH.PAK (the original's `readBook(index + 1)`). */
+    fun bookText(index: Int): ByteArray? = textPak.get(index + 2)
+
+    /** The page picture of a reader (type 0 letter, 1 book, 2 notebook): ITD_RESS.PAK entries 7 to 9, 320 x 200 in the game's colours (ARGB). */
+    fun bookPicture(type: Int): IntArray? {
+        val d = resourcePak.get(7 + type) ?: return null
+        if (d.size < 64000) return null
+        return IntArray(64000) { palette[d[it].toInt() and 0xFF] }
     }
 
     /** Sound sample [n] (entry n + 1 of LISTSAMP.PAK) or null. */

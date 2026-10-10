@@ -183,7 +183,7 @@ class Actor(
     var colliders: List<Collider> = emptyList()
 
     /** Ein Hindernis-Quader (x1, x2, y1, y2, z1, z2); [movable] = er lässt sich schieben (AF_MOVABLE). */
-    class Collider(val zv: IntArray, val movable: Boolean)
+    class Collider(val zv: IntArray, val movable: Boolean, val solid: Boolean = true)
 
     /** Schiebt Objekt [index] von [colliders] um (dx, dz); true, wenn es sich bewegt hat (der Aufrufer prüft Wände und andere Objekte). */
     var pushObject: ((Int, Int, Int) -> Boolean)? = null
@@ -660,6 +660,7 @@ class Actor(
                 if (!hits(local, b[0], b[1], b[2], b[3], b[4], b[5])) continue
                 if (collidedWith < 0) collidedWith = i
                 if (i !in collidedAll) collidedAll.add(i)
+                if (!c.solid) continue // touched only (items lying on the floor)
                 if (c.movable && (sx != 0 || sz != 0) && pushObject?.invoke(i, sx, sz) == true) continue
                 if (!c.movable && !wallCollision) continue
                 val r = collide(zv, local, Zone(b[0], b[1], b[2], b[3], b[4], b[5], 0, 99), sx, sz)

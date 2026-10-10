@@ -47,6 +47,7 @@ private class AtticUi(private val world: AtticOriginal, private val sounds: Intr
     /** Up to five messages, the first slot at the bottom (as in the original); a message that is shown again starts over. */
     val messages = arrayOfNulls<MessageSlot>(5)
     var gameOverShown by mutableStateOf(false)
+    var exitShown by mutableStateOf(false)
     private var music = AtticOriginalReader.ATTIC_MUSIC
 
     override fun message(text: String) {
@@ -73,6 +74,10 @@ private class AtticUi(private val world: AtticOriginal, private val sounds: Intr
 
     override fun gameOver() {
         gameOverShown = true
+    }
+
+    override fun leftRoom(stage: Int, room: Int) {
+        exitShown = true
     }
 
     private companion object {
@@ -111,10 +116,10 @@ private fun GameObject.toActor(minX: Int, maxX: Int, minZ: Int, maxZ: Int): Atti
 
 /** Entry point: reads the room from the original game files, shows an error message when that is not possible. */
 @Composable
-fun AtticScreen(onExit: () -> Unit, controlMode: ControlMode = ControlMode.STEERING, developerMode: Boolean = false) {
+fun AtticScreen(onExit: () -> Unit, controlMode: ControlMode = ControlMode.STEERING, developerMode: Boolean = false, devItems: List<Int> = emptyList()) {
     val loader = rememberOriginalFiles(AtticOriginalReader::missingFiles, cacheKey = "attic") { files -> AtticOriginalReader.read(files) }
     when (val state = loader.state) {
-        is OriginalState.Ready -> AtticRoom(state.data, onExit, controlMode, developerMode)
+        is OriginalState.Ready -> AtticRoom(state.data, onExit, controlMode, developerMode, devItems)
         is OriginalState.Failed -> OriginalFilesErrorScreen(state.message, onChooseFolder = loader.chooseFolder, onExit = onExit)
         OriginalState.Loading -> Box(Modifier.fillMaxSize().background(Color.Black)) {
             BitmapText(text = "Lade Originaldateien...", scale = 2f, color = Color(0xFFF2E4B8), modifier = Modifier.align(Alignment.Center))
@@ -124,7 +129,7 @@ fun AtticScreen(onExit: () -> Unit, controlMode: ControlMode = ControlMode.STEER
 }
 
 @Composable
-private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: ControlMode, developerMode: Boolean) {
+private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: ControlMode, developerMode: Boolean, devItems: List<Int>) {
     BackHandler { onExit() }
     remember(world) { AtticData.install(world) } // masks of this room
     val cameras = world.cameras
@@ -138,7 +143,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     val sounds = remember(world) { IntroSounds { world.game.sample(it) } }
     DisposableEffect(sounds) { onDispose { sounds.release() } }
     val ui = remember(world) { AtticUi(world, sounds) }
-    val game = remember(world) { AtticGame(world.game, ui) }
+    val game = remember(world) { AtticGame(world.game, ui).also { g -> devItems.forEach { g.take(it) } } }
     val bounds = remember(world) {
         val h = world.game.hardcols
         intArrayOf(h.minOf { it.x1 }, h.maxOf { it.x2 }, h.minOf { it.z1 }, h.maxOf { it.z2 })
@@ -191,7 +196,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
         while (true) {
             val nanos = withFrameNanos { it }
             val timer = ((nanos - startNanos) / 16_666_667L).toInt() // engine ticks, 60 per second
-            val paused = foundItem >= 0 || inventoryOpen || ui.gameOverShown
+            val paused = foundItem >= 0 || inventoryOpen || ui.gameOverShown || ui.exitShown || game.pendingRead != null
             if (!paused) gameClock += (timer - lastTimer).coerceAtLeast(0)
             lastTimer = timer
             ui.expire(System.nanoTime())
@@ -364,6 +369,14 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
             InventoryOverlay(game, onClose = { inventoryOpen = false }) { item, action ->
                 inventoryOpen = false
                 game.useItem(item, action)
+            }
+        }
+        game.pendingRead?.let { read ->
+            BookReader(game, read[0], read[1]) { game.finishRead() }
+        }
+        if (ui.exitShown) {
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.8f)).clickable { onExit() }, contentAlignment = Alignment.Center) {
+                BitmapText(text = "To be continued...", scale = 3f, color = Color(0xFFF2E4B8))
             }
         }
         if (ui.gameOverShown) {

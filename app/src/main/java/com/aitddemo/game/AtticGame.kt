@@ -10,10 +10,15 @@ interface GameUi {
     fun playSample(number: Int)
     fun music(number: Int, loop: Boolean)
     fun gameOver()
+
+    /** The player was sent to another room or floor by a script; that part of the game is not available yet. */
+    fun leftRoom(stage: Int, room: Int)
 }
 
 /** An object of the world with its actor (animation, position, collision box) while it is part of the scene. */
 class GameObject(val w: WorldObject) {
+    /** Box of an object whose box is a collider of the room (OBJETS type 4, "hard ZV"); such objects are invisible helpers of the furniture scripts. */
+    var fixedZv: IntArray? = null
     var actor: Actor? = null
     var asset: BodyAsset? = null
 
@@ -54,6 +59,14 @@ class AtticGame(val data: GameData, private val ui: GameUi, private val stage: I
     var pendingFound = -1
         private set
 
+    /** A book, letter or notebook the scripts want shown: (text entry, type), or null. The screen shows the reader and calls [finishRead]. */
+    var pendingRead: IntArray? = null
+        private set
+
+    /** Set when the player was sent out of this room (to another floor); the screen shows the end of what is available. */
+    var exited = false
+        private set
+
     /** Keys of this tick (bits of [Joy]) and whether the action key was pressed. */
     private var joy = 0
     private var run = false
@@ -81,6 +94,13 @@ class AtticGame(val data: GameData, private val ui: GameUi, private val stage: I
         w.roomChronoStart = time
         w.col = -1; w.colBy = -1; w.hit = -1; w.hitBy = -1; w.hardCol = -1; w.hardDec = -1
         createActor(g, w.anim, w.animType, w.animInfo)
+        if (w.typeZv == 4) { // the box of the room's collider with this object's parameter (foundName), and the place at its centre
+            val h = data.hardcols.firstOrNull { it.type == 9 && it.parameter == w.foundName }
+            g.fixedZv = h?.let { intArrayOf(it.x1, it.x2, it.y1, it.y2, it.z1, it.z2) }
+            if (h != null) {
+                w.x = (h.x1 + h.x2) / 2; w.y = (h.y1 + h.y2) / 2; w.z = (h.z1 + h.z2) / 2
+            }
+        }
     }
 
     private fun deactivate(g: GameObject) {
@@ -123,7 +143,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private val stage: I
 
     /** One tick (60 per second) of the game; [keys] = [Joy] bits, [action] = the action key was pressed, [runHint] = he should run when going forward. */
     fun tick(timer: Int, keys: Int, action: Boolean, runHint: Boolean) {
-        if (pendingFound >= 0 || gameOver) return
+        if (pendingFound >= 0 || pendingRead != null || exited || gameOver) return
         time = timer
         joy = keys
         run = runHint
@@ -170,6 +190,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private val stage: I
                     if (other >= 0) {
                         objects[other].w.colBy = g.w.index
                         if (w.col == -1) w.col = other
+                        // an item lying on the floor: walking into it offers it (FoundObjet with param 0)
+                        if (objects[other].w.flags and AF_FOUNDABLE != 0 && a.trackMode == 1) offerItem(other)
                     }
                 }
             }
@@ -181,7 +203,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private val stage: I
             val w = g.w
             if (!w.active) continue
             if (w.life != -1 && w.lifeMode != -1) vm.runObject(w.index)
-            if (pendingFound >= 0 || gameOver) break
+            if (pendingFound >= 0 || pendingRead != null || exited || gameOver) break
         }
     }
 
@@ -194,8 +216,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private val stage: I
         for (g in objects) {
             if (g === self || !g.w.active) continue
             val a = g.actor ?: continue
-            if (g.w.flags and AF_FOUNDABLE != 0) continue
-            boxes.add(Actor.Collider(a.zv, g.w.flags and AF_MOVABLE != 0))
+            val foundable = g.w.flags and AF_FOUNDABLE != 0
+            boxes.add(Actor.Collider(a.zv, !foundable && g.w.flags and AF_MOVABLE != 0, !foundable))
             owners.add(g.w.index)
         }
         colliderIndexes = owners.toIntArray()
@@ -231,7 +253,12 @@ class AtticGame(val data: GameData, private val ui: GameUi, private val stage: I
             if (!zone.contains(x, y, z)) continue
             when (zone.type) {
                 9 -> g.w.hardDec = zone.parameter
-                10 -> g.w.hardDec = zone.parameter
+                10 -> { // stage zone: the object's own floor script takes over
+                    val life = g.w.floorLife
+                    if (life == -1) return
+                    g.w.life = life
+                    g.w.hardDec = zone.parameter
+                }
             }
             return // the first zone only
         }
@@ -280,17 +307,27 @@ class AtticGame(val data: GameData, private val ui: GameUi, private val stage: I
 
     // ------------------------------------------------------------------------------------------------------------------ LifeHost: expressions
 
+    /** Box of an object: its actor's, or a point at its place for the invisible helper objects (body -1), as the original gives them a zero-size box. */
+    private fun boxOf(i: Int): IntArray? {
+        val g = objects.getOrNull(i) ?: return null
+        if (!g.w.active) return null
+        g.fixedZv?.let { return it }
+        g.actor?.let { return it.zv }
+        val w = g.w
+        return intArrayOf(w.x, w.x, w.y, w.y, w.z, w.z)
+    }
+
     override fun posRel(actor: Int, other: Int): Int {
-        val a = objects.getOrNull(actor)?.actor ?: return 0
-        val b = objects.getOrNull(other)?.actor ?: return 0
-        val beta = a.beta and 0x3FF
+        val az = boxOf(actor) ?: return 0
+        val bz = boxOf(other) ?: return 0
+        val beta = (objects[actor].actor?.beta ?: objects[actor].w.beta) and 0x3FF
         var counter = 3
         if (beta in 0x80 until 0x180) counter = 2
         if (beta in 0x180 until 0x280) counter = 1
         if (beta in 0x280 until 0x380) counter = 0
-        val cx = (b.zv[0] + b.zv[1]) / 2
-        val cz = (b.zv[4] + b.zv[5]) / 2
-        val z = a.zv
+        val cx = (bz[0] + bz[1]) / 2
+        val cz = (bz[4] + bz[5]) / 2
+        val z = az
         if (z[5] >= cz && z[4] <= cz) {
             if (z[1] < cx) {
                 counter++
@@ -312,9 +349,9 @@ class AtticGame(val data: GameData, private val ui: GameUi, private val stage: I
     }
 
     override fun dist(actor: Int, other: Int): Int {
-        val a = objects.getOrNull(actor)?.actor ?: return 32000
-        val b = objects.getOrNull(other)?.actor ?: return 32000
-        return Math.abs(a.worldX - b.worldX) + Math.abs(a.worldY - b.worldY) + Math.abs(a.worldZ - b.worldZ)
+        val a = objects.getOrNull(actor)?.takeIf { it.w.active }?.w ?: return 32000
+        val b = objects.getOrNull(other)?.takeIf { it.w.active }?.w ?: return 32000
+        return Math.abs(a.x - b.x) + Math.abs(a.y - b.y) + Math.abs(a.z - b.z)
     }
 
     override fun testZvEndAnim(actor: Int, anim: Int, param: Int): Int {
@@ -400,6 +437,11 @@ class AtticGame(val data: GameData, private val ui: GameUi, private val stage: I
         val g = objects[obj]
         val w = g.w
         val inScene = w.stage == stage && w.room == room
+        if (obj == playerIndex && !inScene && w.stage >= 0) {
+            exited = true
+            ui.leftRoom(w.stage, w.room)
+            return
+        }
         if (inScene && !w.active) {
             activate(g)
         } else if (!inScene && w.active) {
@@ -418,9 +460,53 @@ class AtticGame(val data: GameData, private val ui: GameUi, private val stage: I
     override fun found(item: Int) {
         val w = vm.objects.getOrNull(item) ?: return
         if (w.foundFlag and 0xC000 != 0) return
+        offerItem(item)
+    }
+
+    /** Opens the "found" window for an item unless it was just left behind (the original waits 300 ticks before it asks again). */
+    private fun offerItem(item: Int) {
+        val w = vm.objects.getOrNull(item) ?: return
         if (w.trackNumber > 0 && time - w.trackNumber < REOPEN_TICKS) return
         w.trackNumber = 0
-        pendingFound = item
+        if (pendingFound < 0) pendingFound = item
+    }
+
+    /** PUT: an item is placed in the world at a position (it leaves the inventory). */
+    override fun put(item: Int, x: Int, y: Int, z: Int, stage: Int, room: Int, alpha: Int, beta: Int, gamma: Int) {
+        val w = vm.objects.getOrNull(item) ?: return
+        w.x = x; w.y = y; w.z = z; w.stage = stage; w.room = room; w.alpha = alpha; w.beta = beta; w.gamma = gamma
+        removeFromInventory(item)
+        w.foundFlag = w.foundFlag or 0x4000
+        moved(item)
+    }
+
+    /** PUT_AT / DROP: an item is placed where another object is (it leaves the inventory and can be picked up again). */
+    override fun putAt(item: Int, target: Int) {
+        val w = vm.objects.getOrNull(item) ?: return
+        val t = vm.objects.getOrNull(target) ?: return
+        removeFromInventory(item)
+        w.x = t.x; w.y = t.y; w.z = t.z; w.stage = t.stage; w.room = t.room; w.alpha = t.alpha; w.beta = t.beta; w.gamma = t.gamma
+        w.foundFlag = w.foundFlag or 0x4000
+        w.flags = w.flags or AF_FOUNDABLE
+        w.trackNumber = time.coerceAtLeast(1) // do not offer it again at once
+        moved(item)
+    }
+
+    override fun drop(item: Int, from: Int) = putAt(item, from)
+
+    private fun removeFromInventory(item: Int) {
+        inventory.remove(item)
+        vm.objects[item].foundFlag = vm.objects[item].foundFlag and 0x7FFF
+        if (vm.inHand == item) vm.inHand = -1
+    }
+
+    override fun read(index: Int, type: Int) {
+        pendingRead = intArrayOf(index, type)
+    }
+
+    /** The player closed the reader. */
+    fun finishRead() {
+        pendingRead = null
     }
 
     override fun take(item: Int) {

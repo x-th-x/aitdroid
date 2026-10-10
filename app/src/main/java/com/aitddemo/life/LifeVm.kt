@@ -99,7 +99,7 @@ interface LifeHost {
     fun putAt(item: Int, target: Int) {}
     fun put(item: Int, x: Int, y: Int, z: Int, stage: Int, room: Int, alpha: Int, beta: Int, gamma: Int) {}
     fun delete(obj: Int) {}
-    fun read(book: Int, page: Int) {}
+    fun read(index: Int, type: Int) {} // type 0 = letter, 1 = book, 2 = notebook; index = text entry of ENGLISH.PAK
     fun special(obj: Int, kind: Int) {}
     fun lifeChanged(obj: Int, life: Int) {}
 
@@ -421,7 +421,7 @@ class LifeVm(
                     "DROP" -> { val item = eval(); val from = s16(); host.drop(item, from) }
                     "PUT_AT" -> { val a = s16(); val b = s16(); host.putAt(a, b) }
                     "PUT" -> {
-                        val item = s16(); val x = s16(); val y = s16(); val z = s16(); val stage = s16(); val room = s16()
+                        val item = s16(); val x = s16(); val y = s16(); val z = s16(); val room = s16(); val stage = s16()
                         val alpha = s16(); val beta = s16(); val gamma = s16()
                         host.put(item, x, y, z, stage, room, alpha, beta, gamma)
                     }
@@ -438,7 +438,7 @@ class LifeVm(
                             host.delete(i)
                         }
                     }
-                    "READ" -> { val page = s16(); val book = s16(); s16(); host.read(book, page) }
+                    "READ" -> { val type = s16(); val index = s16(); s16(); host.read(index, type) }
                     "FOUND_NAME" -> t.foundName = s16()
                     "FOUND_BODY" -> t.foundBody = s16()
                     "FOUND_FLAG" -> t.foundFlag = (t.foundFlag and 0xE000) or (s16() and 0x1FFF)

@@ -192,3 +192,37 @@ private fun ZoomedItem(name: String, vertices: FloatArray, triangles: IntArray, 
         ) { BitmapText(text = "< Back", scale = 2f, color = TEXT) }
     }
 }
+
+/** The reader of the original for letters (type 0), books (1) and notebooks (2): the page picture with the text laid out in pages; "<" ">" turn the pages. */
+@Composable
+fun BookReader(game: AtticGame, index: Int, type: Int, onClose: () -> Unit) {
+    BackHandler { onClose() }
+    val rect = when (type) {
+        0 -> intArrayOf(60, 10, 245, 190)
+        1 -> intArrayOf(48, 2, 260, 197)
+        else -> intArrayOf(50, 20, 250, 199)
+    }
+    val pages = remember(index, type, StartAssets.original) {
+        game.data.bookText(index)?.let { layoutBook(it, rect[0], rect[1], rect[2], rect[3]) { w -> bitmapTextWidth(w) } } ?: emptyList()
+    }
+    val picture = remember(type) { game.data.bookPicture(type)?.let { StartAssets.picture(it) } }
+    var page by remember(index, type) { mutableIntStateOf(0) }
+    val color = Color(game.data.palette.getOrElse(26) { 0xFF000000.toInt() })
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        GameCanvas(Modifier.fillMaxSize()) {
+            if (picture != null) {
+                androidx.compose.foundation.Image(bitmap = picture, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.FillBounds, modifier = Modifier.fillMaxSize())
+            }
+            pages.getOrNull(page)?.forEach { line ->
+                line.words.forEach { w ->
+                    Box(Modifier.offset(x = gx(w.x), y = gy(line.y))) { BitmapText(text = w.text, scale = unit.value, color = color) }
+                }
+            }
+            if (page > 0) Choice("<", 22, 182, false) { page-- }
+            if (page < pages.size - 1) Choice(">", 298, 182, false) { page++ }
+        }
+        Box(
+            Modifier.align(Alignment.BottomStart).padding(12.dp).background(Color.Black.copy(alpha = 0.5f)).clickable(onClick = onClose).padding(horizontal = 10.dp, vertical = 6.dp),
+        ) { BitmapText(text = "< Back", scale = 2f, color = TEXT) }
+    }
+}

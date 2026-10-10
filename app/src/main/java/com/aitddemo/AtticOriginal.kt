@@ -86,13 +86,16 @@ object AtticOriginalReader {
             val o = i * AtticData.HARDCOL_STRIDE
             Zone(v[o], v[o + 1], v[o + 2], v[o + 3], v[o + 4], v[o + 5], v[o + 6], v[o + 7])
         }
+        val textPak = Pak(files.read(TEXT_FILE)!!)
+        val resourcePak = Pak(files.read(RESOURCE_FILE)!!)
         val varBytes = files.read(VARS_FILE)!!
         val vars = ShortArray(varBytes.size / 2) { varBytes.s16(it * 2).toShort() }
         val musicPak = Pak(files.read(MusicOriginalReader.FILE)!!)
         val game = GameData(
             files.read(OBJECT_FILE)!!, Pak(files.read(LIFE_FILE)!!), vars, Pak(files.read(BODY_FILE)!!), Pak(files.read(ANIM_FILE)!!),
             Pak(files.read(SAMPLE_FILE)!!), palette, zones(hardcols), zones(room.zones),
-            GameTexts.parse(Pak(files.read(TEXT_FILE)!!).get(1) ?: throw OriginalFilesException("$TEXT_FILE: Texte fehlen")),
+            GameTexts.parse(textPak.get(1) ?: throw OriginalFilesException("$TEXT_FILE: Texte fehlen")),
+            textPak, resourcePak,
         )
         val music = musicPak.get(ATTIC_MUSIC + 1) ?: throw OriginalFilesException("${MusicOriginalReader.FILE}: Musik $ATTIC_MUSIC fehlt")
         return AtticOriginal(cameras, hardcols, masks, photos, room.zones, music, game) { n -> musicPak.get(n + 1) }
