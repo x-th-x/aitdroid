@@ -1,0 +1,301 @@
+package com.aitddemo
+
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
+import kotlin.math.cos
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.sqrt
+
+/**
+ * One thing drawn into the room: a body whose vertices are already in WORLD coordinates (engine units, y down),
+ * its triangles (a, b, c, ARGB colour per triangle), the origin used for draw order
+ * and its ZV in tenths ([zvX1], [zvX2], [zvZ1], [zvZ2]) which decides which background masks cover it.
+ */
+class AtticActor(
+    val worldVertices: FloatArray,
+    val triangles: IntArray,
+    val originX: Float,
+    val originY: Float,
+    val originZ: Float,
+    val zvX1: Int,
+    val zvX2: Int,
+    val zvZ1: Int,
+    val zvZ2: Int,
+    /** Line primitives (vertex a, vertex b, ARGB per line) and spheres (centre vertex, radius, ARGB per sphere) of the body. */
+    val lines: IntArray = IntArray(0),
+    val spheres: IntArray = IntArray(0),
+) {
+    /** Flat things lying on the floor (rug, trap door lid) are drawn before everything that stands on them. */
+    val isFlat: Boolean = run {
+        var lo = Float.MAX_VALUE
+        var hi = -Float.MAX_VALUE
+        for (i in 0 until worldVertices.size / 3) {
+            lo = min(lo, worldVertices[i * 3 + 1]); hi = max(hi, worldVertices[i * 3 + 1])
+        }
+        hi - lo < 100f
+    }
+}
+
+/** World -> screen projection of the original engine for one camera (same maths as in the Time Gate port, which was verified against the photos). */
+class AtticProjector(private val cam: AtticCameraDef) {
+    private val tx = (cam.posX - cam.roomX) * 10f
+    private val ty = (cam.roomY - cam.posY) * 10f
+    private val tz = (cam.roomZ - cam.posZ) * 10f
+    private val bc = rc(cam.angleBeta); private val bs = rs(cam.angleBeta)
+    private val ac = rc(cam.angleAlpha); private val asn = rs(cam.angleAlpha)
+    private val gc = rc(cam.angleGamma); private val gs = rs(cam.angleGamma)
+    private val hasB = cam.angleBeta and 0x3FF != 0
+    private val hasA = cam.angleAlpha and 0x3FF != 0
+    private val hasG = cam.angleGamma and 0x3FF != 0
+
+    private fun rc(a: Int) = cos((a and 0x3FF) * 2.0 * Math.PI / 1024.0).toFloat()
+    private fun rs(a: Int) = kotlin.math.sin((a and 0x3FF) * 2.0 * Math.PI / 1024.0).toFloat()
+
+    /** Writes the camera-space position (x, y, depth z including the projection distance) of a world point into [out]. */
+    fun camera(wx: Float, wy: Float, wz: Float, out: FloatArray) {
+        var x = wx - tx
+        var y = wy - ty
+        var z = wz - tz
+        if (hasB) { val nx = x * bc - z * bs; z = x * bs + z * bc; x = nx }
+        if (hasA) { val ny = y * ac - z * asn; z = y * asn + z * ac; y = ny }
+        if (hasG) { val nx = x * gc - y * gs; y = x * gs + y * gc; x = nx }
+        out[0] = x
+        out[1] = y
+        out[2] = z + cam.focal1
+    }
+
+    /** Horizontal focal length (pixels per unit at depth 1) for sizing round parts. */
+    val focalX: Float get() = cam.focal2
+
+    /** Screen position (320x200 plate units) of a camera-space point with depth z > 0. */
+    fun screen(x: Float, y: Float, z: Float, out: FloatArray) {
+        out[0] = x * cam.focal2 / z + 160f
+        out[1] = y * cam.focal3 / z + 100f
+    }
+
+    /** Writes (screenX, screenY, depth) in 320x200 plate units into [out]; false when the point is too close to / behind the camera. */
+    fun project(wx: Float, wy: Float, wz: Float, out: FloatArray): Boolean {
+        camera(wx, wy, wz, out)
+        if (out[2] <= NEAR) return false
+        screen(out[0], out[1], out[2], out)
+        return true
+    }
+
+    companion object {
+        const val NEAR = 200f
+    }
+}
+
+/**
+ * Draws the room like the original: the camera photo, then every actor (far to near) through the camera matrix, then
+ * the background masks that cover the actor (polygons cut out of the photo, shown again over the actor).
+ * Renders at 2x the 320x200 plate.
+ */
+class AtticSceneRenderer {
+    val bitmap: Bitmap = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
+    private val canvas = Canvas(bitmap)
+    private val paint = Paint().apply { isAntiAlias = false; style = Paint.Style.FILL }
+    private val path = Path()
+    private val maskPaths = HashMap<AtticData.Mask, Path>()
+    private val p0 = FloatArray(3)
+
+    /** One thing to draw: a triangle (kind 0), a line (kind 1, from a to b) or a filled circle (kind 2, centre a, radius in [bx]); sorted by depth with the others. */
+    private class Tri(val depth: Float, val ax: Float, val ay: Float, val bx: Float, val by: Float, val cx: Float, val cy: Float, val color: Int, val kind: Int = 0)
+
+    /** A plain picture without actors (for example a full-screen picture of the game). */
+    fun renderPicture(picture: Bitmap) {
+        canvas.drawBitmap(picture, 0f, 0f, null)
+    }
+
+    /** [background] must be the camera photo scaled to [W] x [H]. */
+    fun render(
+        camera: AtticCameraDef,
+        background: Bitmap,
+        actors: List<AtticActor>,
+        masks: List<AtticData.Mask> = AtticData.MASKS.getOrNull(camera.index) ?: emptyList(),
+    ) {
+        canvas.drawBitmap(background, 0f, 0f, null)
+        val proj = AtticProjector(camera)
+        val order = actors.map { a ->
+            proj.camera(a.originX, a.originY, a.originZ, p0)
+            a to (if (a.isFlat) Float.MAX_VALUE else p0[2])
+        }.sortedByDescending { it.second }
+        for ((a, _) in order) {
+            val box = drawActor(proj, a) ?: continue
+            for (m in masks) {
+                if (!covers(m, a)) continue
+                canvas.save()
+                canvas.clipRect(box[0], box[1], box[2], box[3])
+                canvas.clipPath(maskPath(m))
+                canvas.drawBitmap(background, 0f, 0f, null)
+                canvas.restore()
+            }
+        }
+    }
+
+    /** isBgOverlayRequired of the original: the actor's ZV (tenths) must lie completely inside one of the mask's zones. */
+    private fun covers(m: AtticData.Mask, a: AtticActor): Boolean {
+        var i = 0
+        while (i + 3 < m.rects.size) {
+            if (a.zvX1 >= m.rects[i] && a.zvZ1 >= m.rects[i + 1] && a.zvX2 <= m.rects[i + 2] && a.zvZ2 <= m.rects[i + 3]) return true
+            i += 4
+        }
+        return false
+    }
+
+    private fun maskPath(m: AtticData.Mask): Path = maskPaths.getOrPut(m) {
+        Path().also { p ->
+            for (poly in m.polys) {
+                if (poly.size < 6) continue
+                p.moveTo((poly[0] * S).toFloat(), (poly[1] * S).toFloat())
+                var i = 2
+                while (i + 1 < poly.size) { p.lineTo((poly[i] * S).toFloat(), (poly[i + 1] * S).toFloat()); i += 2 }
+                p.close()
+            }
+        }
+    }
+
+    /** Draws one actor; returns its screen box (left, top, right, bottom) in pixels, or null if nothing was visible. */
+    private fun drawActor(proj: AtticProjector, a: AtticActor): FloatArray? {
+        val n = a.worldVertices.size / 3
+        // camera space position of every vertex
+        val cx = FloatArray(n)
+        val cy = FloatArray(n)
+        val cz = FloatArray(n)
+        for (i in 0 until n) {
+            proj.camera(a.worldVertices[i * 3], a.worldVertices[i * 3 + 1], a.worldVertices[i * 3 + 2], p0)
+            cx[i] = p0[0]; cy[i] = p0[1]; cz[i] = p0[2]
+        }
+        var l = Float.MAX_VALUE; var t = Float.MAX_VALUE; var r = -Float.MAX_VALUE; var b = -Float.MAX_VALUE
+        val tris = ArrayList<Tri>(a.triangles.size / 4)
+        val v = a.worldVertices
+        val poly = FloatArray(4 * 3)
+        for (k in 0 until a.triangles.size / 4) {
+            val ia = a.triangles[k * 4]; val ib = a.triangles[k * 4 + 1]; val ic = a.triangles[k * 4 + 2]
+            if (cz[ia] < CLIP && cz[ib] < CLIP && cz[ic] < CLIP) continue
+            // the original draws the polygons of a body in their palette colour, the shading is part of the model's colours
+            val col = a.triangles[k * 4 + 3]
+            // clip the triangle against the near plane (z >= CLIP); at most one corner is cut off into two, giving up to four points
+            val count = clipNear(cx, cy, cz, ia, ib, ic, poly)
+            if (count < 3) continue
+            val sx = FloatArray(count)
+            val sy = FloatArray(count)
+            var depth = 0f
+            for (q in 0 until count) {
+                proj.screen(poly[q * 3], poly[q * 3 + 1], poly[q * 3 + 2], p0)
+                sx[q] = p0[0] * S; sy[q] = p0[1] * S
+                depth += poly[q * 3 + 2]
+                l = min(l, sx[q]); r = max(r, sx[q]); t = min(t, sy[q]); b = max(b, sy[q])
+            }
+            depth /= count
+            for (q in 1 until count - 1) tris.add(Tri(depth, sx[0], sy[0], sx[q], sy[q], sx[q + 1], sy[q + 1], col))
+        }
+        // lines: cut at the near plane, drawn two pixels wide (one plate pixel)
+        var li = 0
+        while (li + 2 < a.lines.size) {
+            val ia = a.lines[li]; val ib = a.lines[li + 1]; val col = a.lines[li + 2]
+            li += 3
+            if (cz[ia] < CLIP && cz[ib] < CLIP) continue
+            var ax = cx[ia]; var ay = cy[ia]; var az = cz[ia]
+            var bx = cx[ib]; var by = cy[ib]; var bz = cz[ib]
+            if (az < CLIP) { val f = (CLIP - az) / (bz - az); ax += (bx - ax) * f; ay += (by - ay) * f; az = CLIP }
+            if (bz < CLIP) { val f = (CLIP - bz) / (az - bz); bx += (ax - bx) * f; by += (ay - by) * f; bz = CLIP }
+            proj.screen(ax, ay, az, p0); val sax = p0[0] * S; val say = p0[1] * S
+            proj.screen(bx, by, bz, p0); val sbx = p0[0] * S; val sby = p0[1] * S
+            tris.add(Tri((az + bz) / 2f - 0.5f, sax, say, sbx, sby, 0f, 0f, col, 1))
+            l = min(l, min(sax, sbx)); r = max(r, max(sax, sbx)); t = min(t, min(say, sby)); b = max(b, max(say, sby))
+        }
+        // spheres: a filled circle whose radius follows the perspective
+        var si = 0
+        while (si + 2 < a.spheres.size) {
+            val ic = a.spheres[si]; val radius = a.spheres[si + 1]; val col = a.spheres[si + 2]
+            si += 3
+            if (cz[ic] < CLIP) continue
+            proj.screen(cx[ic], cy[ic], cz[ic], p0)
+            val sx = p0[0] * S; val sy = p0[1] * S
+            // radius > 0: sphere (units, scaled by perspective); -2 point (a dot of one plate pixel), -6 big point, -7 zixel (20 units)
+            val pr = when {
+                radius > 0 -> max(1f, radius * proj.focalX / cz[ic] * S)
+                radius == -7 -> max(1f, 20f * proj.focalX / cz[ic] * S)
+                radius == -6 -> S.toFloat()
+                else -> S * 0.75f
+            }
+            tris.add(Tri(cz[ic] - 0.5f, sx, sy, pr, 0f, 0f, 0f, col, 2))
+            l = min(l, sx - pr); r = max(r, sx + pr); t = min(t, sy - pr); b = max(b, sy + pr)
+        }
+        if (tris.isEmpty()) return null
+        tris.sortByDescending { it.depth }
+        for (tri in tris) {
+            paint.color = tri.color
+            when (tri.kind) {
+                0 -> {
+                    paint.shader = if (tri.color ushr 24 == 0xFE) ditherShader(tri.color or (0xFF shl 24)) else null
+                    path.reset()
+                    path.moveTo(tri.ax, tri.ay); path.lineTo(tri.bx, tri.by); path.lineTo(tri.cx, tri.cy); path.close()
+                    canvas.drawPath(path, paint)
+                    paint.shader = null
+                }
+                1 -> {
+                    paint.style = Paint.Style.STROKE
+                    paint.strokeWidth = S.toFloat()
+                    canvas.drawLine(tri.ax, tri.ay, tri.bx, tri.by, paint)
+                    paint.style = Paint.Style.FILL
+                }
+                else -> canvas.drawCircle(tri.ax, tri.ay, tri.bx, paint)
+            }
+        }
+        return floatArrayOf(max(0f, l - 2f), max(0f, t - 2f), min(W.toFloat(), r + 2f), min(H.toFloat(), b + 2f))
+    }
+
+    /** Clips the triangle (ia, ib, ic) in camera space against the near plane; writes up to four (x, y, z) points to [out], returns their count. */
+    /** Noise fill of the original's dither material: a small tile of the colour with random brightness per pixel (fixed seed, so it does not flicker). */
+    private val dither = HashMap<Int, android.graphics.BitmapShader>()
+
+    private fun ditherShader(base: Int): android.graphics.BitmapShader = dither.getOrPut(base) {
+        val rnd = java.util.Random(base.toLong())
+        val tile = Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888)
+        for (y in 0 until 8) for (x in 0 until 8) {
+            val f = 0.8f + rnd.nextFloat() * 0.4f
+            val r = ((base shr 16 and 0xFF) * f).toInt().coerceIn(0, 255)
+            val g = ((base shr 8 and 0xFF) * f).toInt().coerceIn(0, 255)
+            val b = ((base and 0xFF) * f).toInt().coerceIn(0, 255)
+            tile.setPixel(x, y, (0xFF shl 24) or (r shl 16) or (g shl 8) or b)
+        }
+        android.graphics.BitmapShader(tile, android.graphics.Shader.TileMode.REPEAT, android.graphics.Shader.TileMode.REPEAT)
+    }
+
+    private fun clipNear(cx: FloatArray, cy: FloatArray, cz: FloatArray, ia: Int, ib: Int, ic: Int, out: FloatArray): Int {
+        val idx = intArrayOf(ia, ib, ic)
+        var count = 0
+        for (i in 0 until 3) {
+            val p = idx[i]
+            val q = idx[(i + 1) % 3]
+            val pIn = cz[p] >= CLIP
+            val qIn = cz[q] >= CLIP
+            if (pIn) {
+                out[count * 3] = cx[p]; out[count * 3 + 1] = cy[p]; out[count * 3 + 2] = cz[p]
+                count++
+            }
+            if (pIn != qIn) {
+                val f = (CLIP - cz[p]) / (cz[q] - cz[p])
+                out[count * 3] = cx[p] + (cx[q] - cx[p]) * f
+                out[count * 3 + 1] = cy[p] + (cy[q] - cy[p]) * f
+                out[count * 3 + 2] = CLIP
+                count++
+            }
+        }
+        return count
+    }
+
+    companion object {
+        const val S = 2
+
+        /** Triangles are cut at this camera depth (units); everything nearer is not drawn. */
+        const val CLIP = 30f
+        const val W = 320 * S
+        const val H = 200 * S
+    }
+}
