@@ -169,10 +169,10 @@ private fun effectActor(e: Effect, now: Int): AtticActor {
 
 /** Entry point: reads the room from the original game files, shows an error message when that is not possible. */
 @Composable
-fun AtticScreen(onExit: () -> Unit, controlMode: ControlMode = ControlMode.STEERING, developerMode: Boolean = false, devItems: List<Int> = emptyList(), devPos: List<Int>? = null) {
+fun AtticScreen(onExit: () -> Unit, controlMode: ControlMode = ControlMode.STEERING, developerMode: Boolean = false, devItems: List<Int> = emptyList(), devPos: List<Int>? = null, loadSlot: Int? = null) {
     val loader = rememberOriginalFiles(AtticOriginalReader::missingFiles, cacheKey = "attic") { files -> AtticOriginalReader.read(files) }
     when (val state = loader.state) {
-        is OriginalState.Ready -> AtticRoom(state.data, onExit, controlMode, developerMode, devItems, devPos)
+        is OriginalState.Ready -> AtticRoom(state.data, onExit, controlMode, developerMode, devItems, devPos, loadSlot)
         is OriginalState.Failed -> OriginalFilesErrorScreen(state.message, onChooseFolder = loader.chooseFolder, onExit = onExit)
         OriginalState.Loading -> Box(Modifier.fillMaxSize().background(Color.Black)) {
             BitmapText(text = "Lade Originaldateien...", scale = 2f, color = Color(0xFFF2E4B8), modifier = Modifier.align(Alignment.Center))
@@ -182,7 +182,7 @@ fun AtticScreen(onExit: () -> Unit, controlMode: ControlMode = ControlMode.STEER
 }
 
 @Composable
-private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: ControlMode, developerMode: Boolean, devItems: List<Int>, devPos: List<Int>?) {
+private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: ControlMode, developerMode: Boolean, devItems: List<Int>, devPos: List<Int>?, loadSlot: Int?) {
     BackHandler { onExit() }
     // the attic plays the first track of LISTMUS.PAK in a loop (the intro music stops); leaving the attic stops it
     DisposableEffect(world) {
@@ -194,9 +194,11 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     val sounds = remember(world) { IntroSounds { world.game.sample(it) } }
     DisposableEffect(sounds) { onDispose { sounds.release() } }
     val ui = remember(world) { AtticUi(world, sounds) }
+    val context = androidx.compose.ui.platform.LocalContext.current
     val game = remember(world) { AtticGame(world.game, ui).also { g ->
         devItems.forEach { g.take(it) }
         devPos?.let { p -> g.player?.actor?.teleport(p[0], 0, p[1], p[2]) }
+        if (loadSlot != null) SaveStore.load(context, loadSlot, g)
     } }
     // the room behind the attic stairs is read in the background, so the change of floor does not stop the game
     LaunchedEffect(world) {
@@ -217,6 +219,8 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     var foundItem by remember { mutableIntStateOf(-1) }
     var inventoryOpen by remember { mutableStateOf(false) }
     var actionHeld by remember { mutableStateOf(false) }
+    var menuOpen by remember { mutableStateOf(false) }
+    var menuMessage by remember { mutableStateOf<String?>(null) }
 
     // Floating joystick state: drag vector in stick-radius units, (-1..1) on each axis.
     var stickX by remember { mutableFloatStateOf(0f) }
@@ -248,7 +252,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
         while (true) {
             val nanos = withFrameNanos { it }
             val timer = ((nanos - startNanos) / 16_666_667L).toInt() // engine ticks, 60 per second
-            val paused = foundItem >= 0 || inventoryOpen || ui.gameOverShown || ui.exitShown || ui.endShown || ui.picture != null || game.pendingRead != null
+            val paused = foundItem >= 0 || inventoryOpen || menuOpen || ui.gameOverShown || ui.exitShown || ui.endShown || ui.picture != null || game.pendingRead != null
             if (!paused) gameClock += (timer - lastTimer).coerceAtLeast(0)
             lastTimer = timer
             ui.expire(System.nanoTime())
@@ -403,11 +407,22 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
 
         BackButton(onClick = onExit)
 
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = 130.dp, bottom = 12.dp)
+                .background(Color.Black.copy(alpha = 0.5f))
+                .clickable { menuMessage = null; menuOpen = true }
+                .padding(horizontal = 10.dp, vertical = 6.dp)
+        ) {
+            BitmapText(text = "Menu", scale = 2f, color = Color(0xFFF2E4B8))
+        }
+
         if (game.allowInventory && game.inventory.isNotEmpty()) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
-                    .padding(start = 120.dp, bottom = 12.dp)
+                    .padding(start = 230.dp, bottom = 12.dp)
                     .background(Color.Black.copy(alpha = 0.5f))
                     .clickable { inventoryOpen = true }
                     .padding(horizontal = 10.dp, vertical = 6.dp)
@@ -441,6 +456,28 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
             InventoryOverlay(game, onClose = { inventoryOpen = false }) { item, action ->
                 inventoryOpen = false
                 game.useItem(item, action)
+            }
+        }
+        if (menuOpen) {
+            GameMenu(
+                slotLabel = { SaveStore.label(context, it) },
+                canLoad = { SaveStore.savedAt(context, it) != null },
+                message = menuMessage,
+            ) { action, slot ->
+                when (action) {
+                    GameMenuAction.RESUME -> menuOpen = false
+                    GameMenuAction.QUIT -> onExit()
+                    GameMenuAction.SAVE -> menuMessage = if (SaveStore.save(context, slot, game)) "Game saved." else "Saving failed."
+                    GameMenuAction.LOAD -> {
+                        if (SaveStore.load(context, slot, game)) {
+                            foundItem = -1
+                            menuOpen = false
+                            ui.music(game.vm.currentMusic.coerceAtLeast(0), true)
+                        } else {
+                            menuMessage = "Loading failed."
+                        }
+                    }
+                }
             }
         }
         game.pendingRead?.let { read ->

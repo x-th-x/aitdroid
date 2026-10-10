@@ -231,3 +231,41 @@ fun BookReader(game: AtticGame, index: Int, type: Int, onClose: () -> Unit) {
         ) { BitmapText(text = "< Back", scale = 2f, color = TEXT) }
     }
 }
+
+/** What the game menu asks for: [SAVE]/[LOAD] with a slot number, or one of the plain commands. */
+enum class GameMenuAction { RESUME, SAVE, LOAD, QUIT }
+
+/**
+ * The menu of the game: save to a slot, load from a slot, back to the game, quit to the main menu. [slotLabel] gives the text of each slot; [message] shows the
+ * result of the last action.
+ */
+@Composable
+fun GameMenu(slotLabel: (Int) -> String, canLoad: (Int) -> Boolean, message: String?, onAction: (GameMenuAction, Int) -> Unit) {
+    BackHandler { onAction(GameMenuAction.RESUME, 0) }
+    var mode by remember { mutableIntStateOf(0) } // 0 main, 1 save, 2 load
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.7f)).clickable(enabled = false) {}) {
+        GameCanvas(Modifier.fillMaxSize()) {
+            Box(Modifier.offset(x = gx(50), y = gy(20)).size(gx(220), gy(160)).background(Color.Black.copy(alpha = 0.92f)).border(unit * 1.5f, GOLD))
+            when (mode) {
+                0 -> {
+                    CenteredText("Menu", 30)
+                    Choice("Save game", 160, 58, false) { mode = 1 }
+                    Choice("Load game", 160, 78, false) { mode = 2 }
+                    Choice("Back to the game", 160, 98, false) { onAction(GameMenuAction.RESUME, 0) }
+                    Choice("Quit to main menu", 160, 118, false) { onAction(GameMenuAction.QUIT, 0) }
+                }
+                else -> {
+                    CenteredText(if (mode == 1) "Save game" else "Load game", 30)
+                    for (slot in 0 until SaveStore.SLOTS) {
+                        val enabled = mode == 1 || canLoad(slot)
+                        Choice(slotLabel(slot), 160, 56 + slot * 20, false) {
+                            if (enabled) { onAction(if (mode == 1) GameMenuAction.SAVE else GameMenuAction.LOAD, slot); mode = 0 }
+                        }
+                    }
+                    Choice("< Back", 160, 128, false) { mode = 0 }
+                }
+            }
+            if (message != null) CenteredText(message, 152, DIM)
+        }
+    }
+}

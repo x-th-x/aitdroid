@@ -989,6 +989,90 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     }
 
 
+    // ------------------------------------------------------------------------------------------------------------------ saving
+
+    /** Writes everything that makes up the state of the game: variables, world objects, inventory, the room the player is in and what moves in it. */
+    fun saveState(out: java.io.DataOutputStream) {
+        out.writeInt(stage); out.writeInt(room)
+        out.writeInt(vm.vars.size); for (v in vm.vars) out.writeShort(v.toInt())
+        out.writeInt(vm.cvars.size); for (v in vm.cvars) out.writeShort(v.toInt())
+        out.writeInt(inventory.size); for (i in inventory) out.writeInt(i)
+        out.writeInt(vm.inHand); out.writeInt(cameraTarget); out.writeBoolean(allowInventory); out.writeBoolean(lightOff); out.writeInt(vm.currentMusic)
+        out.writeInt(objects.size)
+        for (g in objects) {
+            val w = g.w
+            for (v in intArrayOf(w.body, w.flags, w.typeZv, w.foundBody, w.foundName, w.foundFlag, w.foundLife, w.x, w.y, w.z, w.alpha, w.beta, w.gamma, w.stage, w.room,
+                w.lifeMode, w.life, w.floorLife, w.anim, w.frame, w.animType, w.animInfo, w.trackMode, w.trackNumber, w.weight, w.mark, w.hitForce, w.falling,
+                time - w.chronoStart, time - w.roomChronoStart)) out.writeInt(v)
+            out.writeBoolean(w.active)
+            val a = g.actor
+            out.writeBoolean(a != null)
+            if (a != null) {
+                out.writeInt(a.beta); out.writeInt(a.trackMode); out.writeInt(a.trackNumber); out.writeInt(a.positionInTrack); out.writeInt(a.mark)
+                out.writeBoolean(a.wallCollision); out.writeBoolean(a.triggersOn); out.writeInt(a.memoX); out.writeInt(a.memoY); out.writeInt(a.memoZ)
+            }
+        }
+    }
+
+    /** Puts the game back into a state written by [saveState]; false when the saved room cannot be read. */
+    fun loadState(inp: java.io.DataInputStream): Boolean {
+        val newStage = inp.readInt()
+        val newRoom = inp.readInt()
+        val view = try { data.rooms.room(newStage, newRoom) } catch (_: Exception) { return false }
+        val varCount = inp.readInt(); val vars = IntArray(varCount) { inp.readShort().toInt() }
+        val cvarCount = inp.readInt(); val cvars = IntArray(cvarCount) { inp.readShort().toInt() }
+        val inv = IntArray(inp.readInt()) { inp.readInt() }
+        val inHand = inp.readInt(); val target = inp.readInt(); val allow = inp.readBoolean(); val dark = inp.readBoolean(); val music = inp.readInt()
+        val count = inp.readInt()
+        if (count != objects.size) return false
+        class Saved(val f: IntArray, val active: Boolean, val actor: IntArray?, val flags: BooleanArray?)
+        val saved = Array(count) {
+            val f = IntArray(30) { inp.readInt() }
+            val active = inp.readBoolean()
+            if (inp.readBoolean()) {
+                val ints = intArrayOf(inp.readInt(), inp.readInt(), inp.readInt(), inp.readInt(), inp.readInt())
+                val wall = inp.readBoolean(); val trig = inp.readBoolean()
+                val memo = intArrayOf(inp.readInt(), inp.readInt(), inp.readInt())
+                Saved(f, active, ints + memo, booleanArrayOf(wall, trig))
+            } else {
+                Saved(f, active, null, null)
+            }
+        }
+        // the scene is rebuilt from nothing
+        for (g in objects) { g.actor = null; g.asset = null; g.w.active = false; g.actionType = 0; g.fallTicks = -1; g.flightTicks = -1 }
+        stage = newStage; room = newRoom; roomView = view; roomVersion++
+        for (i in 0 until minOf(varCount, vm.vars.size)) vm.vars[i] = vars[i].toShort()
+        for (i in 0 until minOf(cvarCount, vm.cvars.size)) vm.cvars[i] = cvars[i].toShort()
+        inventory.clear(); for (i in inv) inventory.add(i)
+        vm.inHand = inHand; cameraTarget = target; allowInventory = allow; lightOff = dark; vm.currentMusic = music
+        pendingFound = -1; pendingRead = null; exited = false; gameOver = false; effects.clear()
+        for ((i, s) in saved.withIndex()) {
+            val w = objects[i].w
+            val f = s.f
+            w.body = f[0]; w.flags = f[1]; w.typeZv = f[2]; w.foundBody = f[3]; w.foundName = f[4]; w.foundFlag = f[5]; w.foundLife = f[6]
+            w.x = f[7]; w.y = f[8]; w.z = f[9]; w.alpha = f[10]; w.beta = f[11]; w.gamma = f[12]; w.stage = f[13]; w.room = f[14]
+            w.lifeMode = f[15]; w.life = f[16]; w.floorLife = f[17]; w.anim = f[18]; w.frame = f[19]; w.animType = f[20]; w.animInfo = f[21]
+            w.trackMode = f[22]; w.trackNumber = f[23]; w.weight = f[24]; w.mark = f[25]; w.hitForce = f[26]; w.falling = f[27]
+        }
+        for ((i, s) in saved.withIndex()) {
+            if (!s.active) continue
+            val g = objects[i]
+            activate(g)
+            val w = g.w
+            w.chronoStart = time - s.f[28]; w.roomChronoStart = time - s.f[29]
+            val a = g.actor
+            val x = s.actor
+            val fl = s.flags
+            if (a != null && x != null && fl != null) {
+                a.teleport(w.x, w.y, w.z, x[0])
+                a.restoreMove(x[1], x[2], x[3], x[4])
+                a.wallCollision = fl[0]; a.triggersOn = fl[1]
+                a.memoX = x[5]; a.memoY = x[6]; a.memoZ = x[7]
+            }
+        }
+        return true
+    }
+
     companion object {
         const val PLAYER_SCRIPT = 549
         const val AF_TRIGGER = 0x40

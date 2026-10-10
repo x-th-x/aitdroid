@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -38,7 +40,7 @@ import androidx.compose.ui.unit.dp
 import com.aitddemo.original.GameFiles
 import kotlinx.coroutines.delay
 
-private enum class Screen { LOGO_STATIC, LOGO_3D, TITLE, MENU, SELECT, MODELS, MUSIC, INTRO, ATTIC, OPTIONS }
+private enum class Screen { LOGO_STATIC, LOGO_3D, TITLE, MENU, SELECT, LOAD, MODELS, MUSIC, INTRO, ATTIC, OPTIONS }
 
 private val TEXT_COLOR = Color(0xFFF2E4B8)
 
@@ -92,6 +94,7 @@ private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: 
         mutableStateOf(if (devControlMode == "dpad") ControlMode.DPAD else ControlMode.STEERING)
     }
 
+    var loadSlot by remember { mutableStateOf<Int?>(null) } // a saved game to continue from when the attic opens
     // Developer Mode: off by default. Shows the world position and camera in the attic.
     var developerMode by remember { mutableStateOf(devAutoAttic) }
 
@@ -133,7 +136,7 @@ private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: 
                 onSelect = { index ->
                     when (index) {
                         0 -> screen = Screen.SELECT
-                        1 -> Toast.makeText(context, "Only playable in the original (demo)", Toast.LENGTH_SHORT).show()
+                        1 -> if (SaveStore.hasAny(context)) screen = Screen.LOAD else Toast.makeText(context, "There is no saved game yet", Toast.LENGTH_SHORT).show()
                         2 -> screen = Screen.OPTIONS
                         3 -> screen = Screen.MODELS
                         4 -> screen = Screen.MUSIC
@@ -146,16 +149,21 @@ private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: 
                 // Carnby starts the intro and the attic; Emily's game is not available yet.
                 onAttemptStart = { name ->
                     if (name == "Edward Carnby") {
+                        loadSlot = null
                         screen = Screen.INTRO
                     } else {
                         Toast.makeText(context, "Would start as $name (demo only)", Toast.LENGTH_SHORT).show()
                     }
                 }
             )
-            Screen.INTRO -> IntroScreen(onFinished = { screen = Screen.ATTIC })
+            Screen.LOAD -> LoadScreen(
+                onBack = { screen = Screen.MENU },
+                onPick = { slot -> loadSlot = slot; screen = Screen.ATTIC },
+            )
+            Screen.INTRO -> IntroScreen(onFinished = { loadSlot = null; screen = Screen.ATTIC })
             Screen.MODELS -> ModelsScreen(onExit = { screen = Screen.MENU })
             Screen.MUSIC -> MusicViewerScreen(onExit = { screen = Screen.MENU })
-            Screen.ATTIC -> AtticScreen(onExit = { screen = Screen.MENU }, controlMode = controlMode, developerMode = developerMode, devItems = devItems, devPos = devPos)
+            Screen.ATTIC -> AtticScreen(onExit = { screen = Screen.MENU }, controlMode = controlMode, developerMode = developerMode, devItems = devItems, devPos = devPos, loadSlot = loadSlot)
             Screen.OPTIONS -> OptionsScreen(
                 controlMode = controlMode,
                 onControlModeChange = { controlMode = it },
@@ -269,4 +277,25 @@ private fun IntroText(text: String) {
             .background(Color.Black.copy(alpha = 0.55f))
             .padding(10.dp)
     )
+}
+
+/** The list of saved games of the main menu. */
+@Composable
+private fun LoadScreen(onBack: () -> Unit, onPick: (Int) -> Unit) {
+    BackHandler { onBack() }
+    val context = LocalContext.current
+    Box(Modifier.fillMaxSize().background(Color(0xFF14080A))) {
+        StartPictureImage(StartPicture.MENU)
+        GameCanvas(Modifier.fillMaxSize()) {
+            Box(Modifier.offset(x = gx(0), y = gy(60)).size(gx(320), gy(112)).background(Color.Black.copy(alpha = 0.5f)).border(unit * 1.5f, Color(0xFF8A6D3B)))
+            for (slot in 0 until SaveStore.SLOTS) {
+                val label = SaveStore.label(context, slot)
+                val has = SaveStore.savedAt(context, slot) != null
+                Box(Modifier.offset(x = unit * (160 - bitmapTextWidth(label) / 2), y = gy(84 + slot * 20)).clickable(enabled = has) { onPick(slot) }) {
+                    BitmapText(text = label, scale = unit.value, color = if (has) Color(0xFFF2E4B8) else Color(0xFF9C8B6E))
+                }
+            }
+        }
+        BackButton(onClick = onBack)
+    }
 }

@@ -208,24 +208,7 @@ class Actor(
     var hardDec = -1
 
     private fun resetZv() {
-        val b = rig.zv
-        val box = when (typeZv) {
-            0 -> {
-                val h = maxOf(b[1] - b[0], b[5] - b[4]) / 2
-                intArrayOf(-h, h, b[2], b[3], -h, h)
-            }
-            2 -> {
-                val h = (b[1] + b[5]) / 2
-                intArrayOf(-h, h, b[2], b[3], -h, h)
-            }
-            else -> b
-        }
-        zv[0] = box[0] + worldX
-        zv[1] = box[1] + worldX
-        zv[2] = box[2] + worldY
-        zv[3] = box[3] + worldY
-        zv[4] = box[4] + worldZ
-        zv[5] = box[5] + worldZ
+        boxFor(rig.zv, typeZv, worldX, worldY, worldZ, beta).copyInto(zv)
     }
 
     /** Setzt die Figur an eine neue Stelle (STAGE-Befehl des Skripts): Position, Blickrichtung, Hüllquader neu. */
