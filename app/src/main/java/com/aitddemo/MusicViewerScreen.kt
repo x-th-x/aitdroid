@@ -49,6 +49,7 @@ private fun MusicList(tracks: List<MusicTrack>, onExit: () -> Unit) {
     var playing by remember { mutableIntStateOf(-1) }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+        StartPictureImage(StartPicture.MENU)
         GameCanvas(modifier = Modifier.fillMaxSize()) {
             Box(
                 modifier = Modifier

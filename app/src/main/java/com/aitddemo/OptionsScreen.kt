@@ -42,6 +42,7 @@ fun OptionsScreen(
     val secretTapWindowMs = 600L
 
     Box(modifier = Modifier.fillMaxSize().background(Color(0xFF14080A))) {
+        StartPictureImage(StartPicture.MENU)
         GameCanvas(modifier = Modifier.fillMaxSize()) {
             Box(
                 modifier = Modifier

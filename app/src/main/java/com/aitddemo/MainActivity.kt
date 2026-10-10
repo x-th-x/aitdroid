@@ -10,10 +10,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -23,13 +28,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import com.aitddemo.original.GameFiles
 import kotlinx.coroutines.delay
 
-private enum class Screen { LOGO, TITLE, MENU, SELECT, MUSIC, INTRO, ATTIC, OPTIONS }
+private enum class Screen { LOGO_STATIC, LOGO_3D, TITLE, MENU, SELECT, MODELS, MUSIC, INTRO, ATTIC, OPTIONS }
 
-private val SCREEN_BACKGROUND = Color(0xFF14080A)
 private val TEXT_COLOR = Color(0xFFF2E4B8)
 
 class MainActivity : ComponentActivity() {
@@ -41,19 +51,34 @@ class MainActivity : ComponentActivity() {
         val devAutoIntro = intent?.getBooleanExtra("devAutoIntro", false) ?: false
         val devAutoMusic = intent?.getBooleanExtra("devAutoMusic", false) ?: false
         val devControlMode = intent?.getStringExtra("devControlMode")
-        setContent { DemoApp(devAutoAttic = devAutoAttic, devAutoIntro = devAutoIntro, devAutoMusic = devAutoMusic, devControlMode = devControlMode) }
+        setContent { StartGate(devAutoAttic, devAutoIntro, devAutoMusic, devControlMode) }
+    }
+}
+
+/** The start sequence, the menus and the font need files from the original game: read them first, show the error screen when they are missing. */
+@Composable
+private fun StartGate(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: Boolean, devControlMode: String?) {
+    val context = LocalContext.current
+    val loader = rememberOriginalFiles(missing = { StartOriginalReader.missingFiles(it) }, cacheKey = "start") { files: GameFiles -> StartOriginalReader.read(files) }
+    when (val s = loader.state) {
+        is OriginalState.Loading -> Box(Modifier.fillMaxSize().background(Color.Black))
+        is OriginalState.Failed -> OriginalFilesErrorScreen(s.message, loader.chooseFolder, onExit = { (context as? Activity)?.finish() })
+        is OriginalState.Ready -> {
+            if (StartAssets.original !== s.data) StartAssets.install(s.data)
+            if (StartAssets.original != null) DemoApp(devAutoAttic, devAutoIntro, devAutoMusic, devControlMode)
+        }
     }
 }
 
 @Composable
-private fun DemoApp(devAutoAttic: Boolean = false, devAutoIntro: Boolean = false, devAutoMusic: Boolean = false, devControlMode: String? = null) {
+private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: Boolean, devControlMode: String?) {
     var screen by remember {
         mutableStateOf(
             when {
                 devAutoAttic -> Screen.ATTIC
                 devAutoIntro -> Screen.INTRO
                 devAutoMusic -> Screen.MUSIC
-                else -> Screen.LOGO
+                else -> Screen.LOGO_STATIC
             }
         )
     }
@@ -66,10 +91,21 @@ private fun DemoApp(devAutoAttic: Boolean = false, devAutoIntro: Boolean = false
     // Developer Mode: off by default. Needed to start the (work-in-progress) intro/attic flow from the character screen.
     var developerMode by remember { mutableStateOf(devAutoAttic) }
 
+    fun advance() {
+        screen = when (screen) {
+            Screen.LOGO_STATIC -> Screen.LOGO_3D
+            Screen.LOGO_3D -> Screen.TITLE
+            Screen.TITLE -> Screen.MENU
+            else -> screen
+        }
+    }
+
+    // boot sequence of the original: Infogrames logo, the spinning Tatou with thunder, then the title picture
     LaunchedEffect(screen) {
-        if (screen == Screen.LOGO) {
-            delay(1500)
-            if (screen == Screen.LOGO) screen = Screen.TITLE
+        when (screen) {
+            Screen.LOGO_STATIC -> { delay(1800); advance() }
+            Screen.LOGO_3D -> { StartAssets.playThunder(); delay(6000); advance() }
+            else -> {}
         }
     }
 
@@ -82,22 +118,22 @@ private fun DemoApp(devAutoAttic: Boolean = false, devAutoIntro: Boolean = false
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .clickable(enabled = screen == Screen.LOGO || screen == Screen.TITLE) {
-                screen = if (screen == Screen.LOGO) Screen.TITLE else Screen.MENU
-            },
+            .clickable(enabled = screen == Screen.LOGO_STATIC || screen == Screen.LOGO_3D || screen == Screen.TITLE) { advance() },
         contentAlignment = Alignment.Center
     ) {
         when (screen) {
-            Screen.LOGO -> TitleText("AITDroid", scale = 5f)
-            Screen.TITLE -> TitleText("AITDroid", scale = 5f, subtitle = "Tap to continue")
+            Screen.LOGO_STATIC -> StartPictureImage(StartPicture.LOGO)
+            Screen.LOGO_3D -> TatouSpinner(modifier = Modifier.fillMaxSize())
+            Screen.TITLE -> StartPictureImage(StartPicture.TITLE)
             Screen.MENU -> MenuScreen(
                 onSelect = { index ->
                     when (index) {
                         0 -> screen = Screen.SELECT
-                        1 -> Toast.makeText(context, "Not implemented yet", Toast.LENGTH_SHORT).show()
+                        1 -> Toast.makeText(context, "Only playable in the original (demo)", Toast.LENGTH_SHORT).show()
                         2 -> screen = Screen.OPTIONS
-                        3 -> screen = Screen.MUSIC
-                        4 -> (context as? Activity)?.finish()
+                        3 -> screen = Screen.MODELS
+                        4 -> screen = Screen.MUSIC
+                        5 -> (context as? Activity)?.finish()
                     }
                 }
             )
@@ -114,6 +150,7 @@ private fun DemoApp(devAutoAttic: Boolean = false, devAutoIntro: Boolean = false
                 }
             )
             Screen.INTRO -> IntroScreen(onFinished = { screen = Screen.ATTIC })
+            Screen.MODELS -> ModelsScreen(onExit = { screen = Screen.MENU })
             Screen.MUSIC -> MusicViewerScreen(onExit = { screen = Screen.MENU })
             Screen.ATTIC -> AtticScreen(onExit = { screen = Screen.MENU }, controlMode = controlMode, developerMode = developerMode)
             Screen.OPTIONS -> OptionsScreen(
@@ -128,39 +165,105 @@ private fun DemoApp(devAutoAttic: Boolean = false, devAutoIntro: Boolean = false
 }
 
 @Composable
-private fun TitleText(title: String, scale: Float, subtitle: String? = null) {
-    Box(modifier = Modifier.fillMaxSize().background(SCREEN_BACKGROUND), contentAlignment = Alignment.Center) {
-        BitmapText(text = title, scale = scale, color = TEXT_COLOR)
-        if (subtitle != null) {
-            Box(modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp)) {
-                BitmapText(text = subtitle, scale = 1.6f, color = Color(0xFF9C8B6E))
+private fun SelectScreen(onBack: () -> Unit, onAttemptStart: (String) -> Unit) {
+    // One picture holds both characters: Emily at her desk on the left, Carnby at the bar on the right. After the choice the screen splits:
+    // the character's body (rotating) on the left, the first-person letter on the right.
+    var selected by remember { mutableStateOf<Int?>(null) }
+
+    // the original plays a page-turning sound when the text appears
+    LaunchedEffect(selected) {
+        if (selected != null) StartAssets.playPageTurn()
+    }
+
+    BackHandler(enabled = selected != null) { selected = null }
+    BackHandler(enabled = selected == null) { onBack() }
+
+    val picked = selected
+    if (picked == null) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            StartPictureImage(StartPicture.SELECT)
+            Row(modifier = Modifier.fillMaxSize()) {
+                HeroHalf(onClick = { selected = 0 })
+                HeroHalf(onClick = { selected = 1 })
             }
+            BackButton(onClick = onBack)
         }
+    } else {
+        CharacterResultScreen(
+            isEmily = picked == 0,
+            onBack = { selected = null },
+            onStartIntro = { onAttemptStart(if (picked == 0) "Emily Hartwood" else "Edward Carnby") }
+        )
     }
 }
 
 @Composable
-private fun SelectScreen(onBack: () -> Unit, onAttemptStart: (String) -> Unit) {
-    BackHandler { onBack() }
-    Box(modifier = Modifier.fillMaxSize().background(SCREEN_BACKGROUND)) {
+private fun RowScope.HeroHalf(onClick: () -> Unit) {
+    Box(modifier = Modifier.weight(1f).fillMaxHeight().clickable(onClick = onClick))
+}
+
+@Composable
+private fun CharacterResultScreen(isEmily: Boolean, onBack: () -> Unit, onStartIntro: () -> Unit) {
+    val original = StartAssets.original ?: return
+    val introText = if (isEmily) original.storyEmily else original.storyCarnby
+    val loader = rememberOriginalFiles(missing = { ModelLibraryReader.missingFiles(it) }, cacheKey = "models") { files: GameFiles -> ModelLibraryReader.read(files) }
+
+    Box(modifier = Modifier.fillMaxSize()) {
         Row(modifier = Modifier.fillMaxSize()) {
-            HeroHalf("Emily Hartwood", Modifier.weight(1f)) { onAttemptStart("Emily Hartwood") }
-            HeroHalf("Edward Carnby", Modifier.weight(1f)) { onAttemptStart("Edward Carnby") }
+            // left: the character's body, drawn from LISTBODY.PAK / LISTBOD2.PAK (Carnby as he looks with the lamp, body 11); tap to start
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .background(Color.Black)
+                    .border(2.dp, Color(0xFF8A6D3B))
+                    .clickable(onClick = onStartIntro)
+            ) {
+                val library = (loader.state as? OriginalState.Ready)?.data
+                val entry = library?.entries?.firstOrNull { if (isEmily) it.pak == 1 && it.raw == 13 else it.pak == 0 && it.raw == 12 }
+                if (library != null && entry != null) {
+                    val mesh = remember(entry) { library.mesh(entry) }
+                    ModelSpinner(vertices = mesh.vertices, triangles = mesh.triangles, rotationSpeed = PREVIEW_ROTATION_SPEED, modifier = Modifier.fillMaxSize())
+                }
+            }
+            // right: the character's half of the picture (not stretched), with the letter on top
+            Box(modifier = Modifier.weight(1f).fillMaxHeight().clickable(onClick = onStartIntro)) {
+                CharacterPictureHalf(original.select.let { StartAssets.picture(it) }, showLeftHalf = isEmily, modifier = Modifier.fillMaxSize())
+                IntroText(introText)
+            }
         }
         BackButton(onClick = onBack)
     }
 }
 
 @Composable
-private fun HeroHalf(name: String, modifier: Modifier, onClick: () -> Unit) {
-    Box(
-        modifier = modifier
-            .fillMaxHeight()
-            .padding(24.dp)
-            .border(2.dp, Color(0xFF8A6D3B))
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        BitmapText(text = name, scale = 2.2f, color = TEXT_COLOR)
+private fun CharacterPictureHalf(picture: ImageBitmap, showLeftHalf: Boolean, modifier: Modifier = Modifier) {
+    val halfWidth = picture.width / 2
+    val painter = remember(showLeftHalf) {
+        BitmapPainter(
+            image = picture,
+            srcOffset = IntOffset(if (showLeftHalf) 0 else halfWidth, 0),
+            srcSize = IntSize(halfWidth, picture.height)
+        )
     }
+    Image(painter = painter, contentDescription = null, contentScale = ContentScale.Crop, modifier = modifier.background(Color.Black))
+}
+
+@Composable
+private fun IntroText(text: String) {
+    // leave room at the bottom so the text does not overlap the "< Back" button; the block scrolls
+    BitmapParagraphs(
+        text = text,
+        scale = 1.6f,
+        color = Color(0xFFF0E6C8),
+        maxWidthUnits = 200,
+        lineSpacing = 3f,
+        modifier = Modifier
+            .fillMaxWidth()
+            .fillMaxHeight()
+            .padding(start = 34.dp, top = 14.dp, end = 8.dp, bottom = 50.dp)
+            .verticalScroll(rememberScrollState())
+            .background(Color.Black.copy(alpha = 0.55f))
+            .padding(10.dp)
+    )
 }

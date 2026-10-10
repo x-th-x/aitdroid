@@ -17,13 +17,14 @@ import androidx.compose.ui.graphics.Color
 
 // Menu layout on the 320x200 grid: framed box, lines from y=76 in steps of 16, centered at x=160,
 // highlighted entry gets a background bar and a shadow.
-private val MENU_ITEMS = listOf("Begin a new game", "Resume a saved game", "Options", "Music Viewer", "Return to Homescreen")
+private val MENU_ITEMS = listOf("Begin a new game", "Resume a saved game", "Options", "Model Viewer", "Music Viewer", "Return to Homescreen")
 
 @Composable
 fun MenuScreen(onSelect: (Int) -> Unit) {
     var selected by remember { mutableIntStateOf(0) }
 
     Box(modifier = Modifier.fillMaxSize().background(Color(0xFF14080A))) {
+        StartPictureImage(StartPicture.MENU)
         GameCanvas(modifier = Modifier.fillMaxSize()) {
             Box(
                 modifier = Modifier
