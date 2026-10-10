@@ -270,7 +270,22 @@ class AtticSceneRenderer {
                     canvas.drawLine(tri.ax, tri.ay, tri.bx, tri.by, paint)
                     paint.style = Paint.Style.FILL
                 }
-                else -> canvas.drawCircle(tri.ax, tri.ay, tri.bx, paint)
+                else -> {
+                    if (tri.color ushr 24 == 0xFC) {
+                        // shaded ball (the evaporation bubbles): a highlight up and to the left, the colour in the middle, a darker rim, so it looks round
+                        val r = tri.bx
+                        val base = tri.color or (0xFF shl 24)
+                        paint.shader = android.graphics.RadialGradient(
+                            tri.ax - r * 0.35f, tri.ay - r * 0.4f, r * 1.35f,
+                            intArrayOf(mix(base, 0xFFFFFFFF.toInt(), 0.75f), mix(base, 0xFFFFFFFF.toInt(), 0.3f), base, mix(base, 0xFF000000.toInt(), 0.55f)),
+                            floatArrayOf(0f, 0.25f, 0.6f, 1f), android.graphics.Shader.TileMode.CLAMP,
+                        )
+                        canvas.drawCircle(tri.ax, tri.ay, r, paint)
+                        paint.shader = null
+                    } else {
+                        canvas.drawCircle(tri.ax, tri.ay, tri.bx, paint)
+                    }
+                }
             }
         }
         return floatArrayOf(max(0f, l - 2f), max(0f, t - 2f), min(W.toFloat(), r + 2f), min(H.toFloat(), b + 2f))
@@ -321,6 +336,12 @@ class AtticSceneRenderer {
             0xFC -> android.graphics.LinearGradient(0f, minY, 0f, minY + 16f * S, colors, positions, android.graphics.Shader.TileMode.CLAMP)
             else -> android.graphics.LinearGradient(0f, minY, 0f, minY + 32f * S, colors, positions, android.graphics.Shader.TileMode.CLAMP)
         }
+    }
+
+    /** [a] mixed with [b] ([t] of b), both opaque ARGB. */
+    private fun mix(a: Int, b: Int, t: Float): Int {
+        fun ch(shift: Int) = (((a shr shift) and 0xFF) * (1 - t) + ((b shr shift) and 0xFF) * t).toInt().coerceIn(0, 255)
+        return (0xFF shl 24) or (ch(16) shl 16) or (ch(8) shl 8) or ch(0)
     }
 
     /** Noise fill of the original's dither material: a small tile of the colour with random brightness per pixel (fixed seed, so it does not flicker). */

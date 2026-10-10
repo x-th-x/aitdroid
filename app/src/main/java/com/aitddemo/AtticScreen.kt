@@ -199,7 +199,7 @@ private fun effectActor(e: Effect, now: Int, palette: IntArray): AtticActor {
         verts[i * 3] = x; verts[i * 3 + 1] = y; verts[i * 3 + 2] = z
         if (e.kind == 0) {
             if (age > lifeTicks) continue // this bubble is gone
-            spheres.add(i); spheres.add(size); spheres.add(bubbleColor)
+            spheres.add(i); spheres.add(size); spheres.add((bubbleColor and 0xFFFFFF) or (0xFC shl 24)) // alpha 0xFC: drawn as a shaded ball
             continue
         }
         val shade = (255 * fade).toInt().coerceIn(0, 255)
