@@ -116,10 +116,10 @@ private fun GameObject.toActor(minX: Int, maxX: Int, minZ: Int, maxZ: Int): Atti
 
 /** Entry point: reads the room from the original game files, shows an error message when that is not possible. */
 @Composable
-fun AtticScreen(onExit: () -> Unit, controlMode: ControlMode = ControlMode.STEERING, developerMode: Boolean = false, devItems: List<Int> = emptyList()) {
+fun AtticScreen(onExit: () -> Unit, controlMode: ControlMode = ControlMode.STEERING, developerMode: Boolean = false, devItems: List<Int> = emptyList(), devPos: List<Int>? = null) {
     val loader = rememberOriginalFiles(AtticOriginalReader::missingFiles, cacheKey = "attic") { files -> AtticOriginalReader.read(files) }
     when (val state = loader.state) {
-        is OriginalState.Ready -> AtticRoom(state.data, onExit, controlMode, developerMode, devItems)
+        is OriginalState.Ready -> AtticRoom(state.data, onExit, controlMode, developerMode, devItems, devPos)
         is OriginalState.Failed -> OriginalFilesErrorScreen(state.message, onChooseFolder = loader.chooseFolder, onExit = onExit)
         OriginalState.Loading -> Box(Modifier.fillMaxSize().background(Color.Black)) {
             BitmapText(text = "Lade Originaldateien...", scale = 2f, color = Color(0xFFF2E4B8), modifier = Modifier.align(Alignment.Center))
@@ -129,10 +129,8 @@ fun AtticScreen(onExit: () -> Unit, controlMode: ControlMode = ControlMode.STEER
 }
 
 @Composable
-private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: ControlMode, developerMode: Boolean, devItems: List<Int>) {
+private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: ControlMode, developerMode: Boolean, devItems: List<Int>, devPos: List<Int>?) {
     BackHandler { onExit() }
-    remember(world) { AtticData.install(world) } // masks of this room
-    val cameras = world.cameras
     // the attic plays the first track of LISTMUS.PAK in a loop (the intro music stops); leaving the attic stops it
     DisposableEffect(world) {
         GameMusic.setLooping(true, AtticOriginalReader.ATTIC_MUSIC, world.music) // the attic loops its music
@@ -143,14 +141,22 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     val sounds = remember(world) { IntroSounds { world.game.sample(it) } }
     DisposableEffect(sounds) { onDispose { sounds.release() } }
     val ui = remember(world) { AtticUi(world, sounds) }
-    val game = remember(world) { AtticGame(world.game, ui).also { g -> devItems.forEach { g.take(it) } } }
-    val bounds = remember(world) {
-        val h = world.game.hardcols
-        intArrayOf(h.minOf { it.x1 }, h.maxOf { it.x2 }, h.minOf { it.z1 }, h.maxOf { it.z2 })
+    val game = remember(world) { AtticGame(world.game, ui).also { g ->
+        devItems.forEach { g.take(it) }
+        devPos?.let { p -> g.player?.actor?.teleport(p[0], 0, p[1], p[2]) }
+    } }
+    // the room behind the attic stairs is read in the background, so the change of floor does not stop the game
+    LaunchedEffect(world) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try { world.game.rooms.room(1, 6) } catch (_: Exception) { }
+        }
     }
     val startNanos = remember { System.nanoTime() }
     var frameTick by remember { mutableIntStateOf(0) }
     var cameraIndex by remember { mutableIntStateOf(ATTIC_INITIAL_CAMERA_INDEX) }
+    // the room the game is in; its cameras, pictures and masks are prepared the first time it is shown
+    val roomCache = remember(world) { HashMap<RoomView, List<android.graphics.Bitmap>>() }
+    var shownRoom by remember { mutableStateOf<RoomView?>(null) }
     var playerX by remember { mutableFloatStateOf(0f) }
     var playerZ by remember { mutableFloatStateOf(0f) }
 
@@ -172,13 +178,6 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     var dpadRight by remember { mutableStateOf(false) }
 
     val renderer = remember { AtticSceneRenderer() }
-    val backgrounds = remember(world) {
-        // photo of each camera, scaled once to the renderer's resolution (nearest neighbour keeps the pixel look)
-        world.photos.map { argb ->
-            val bmp = android.graphics.Bitmap.createBitmap(argb, 320, 200, android.graphics.Bitmap.Config.ARGB_8888)
-            android.graphics.Bitmap.createScaledBitmap(bmp, AtticSceneRenderer.W, AtticSceneRenderer.H, false)
-        }
-    }
     val blackBackground = remember { android.graphics.Bitmap.createBitmap(AtticSceneRenderer.W, AtticSceneRenderer.H, android.graphics.Bitmap.Config.ARGB_8888).also { it.eraseColor(android.graphics.Color.BLACK) } }
 
     // Toggle: hide the camera photo and show only the 3D actors on black.
@@ -207,7 +206,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
                 when (controlMode) {
                     ControlMode.STEERING -> if (player != null && hypot(stickX, stickY) > stickDeadzone) {
                         // stick up = away from the camera, right = screen right, in the active camera's own ground directions
-                        val camBeta = cameras[cameraIndex].angleBeta * angleUnitToRad
+                        val camBeta = (game.roomView.cameras.getOrNull(cameraIndex) ?: game.roomView.cameras[0]).angleBeta * angleUnitToRad
                         val fwd = -stickY
                         val dirX = sin(camBeta) * fwd + cos(camBeta) * stickX
                         val dirZ = cos(camBeta) * fwd - sin(camBeta) * stickX
@@ -235,18 +234,32 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
                     playerZ = it.renderZ.toFloat()
                 }
                 // the room's camera follows the player by the engine's zone rule (checkIfCameraChangeIsRequired)
-                cameraIndex = resolveAtticCamera(playerX, playerZ, cameraIndex, cameras)
+                val view = game.roomView
+                if (shownRoom !== view) { // a new room: the camera of the zone the player stands in
+                    shownRoom = view
+                    cameraIndex = resolveAtticCamera(playerX, playerZ, 0, view.cameras)
+                } else {
+                    cameraIndex = resolveAtticCamera(playerX, playerZ, cameraIndex, view.cameras)
+                }
             }
             frameTick++
         }
     }
 
-    val camera = cameras[cameraIndex]
+    val view = game.roomView
+    val camera = view.cameras.getOrNull(cameraIndex) ?: view.cameras[0]
+    val backgrounds = roomCache.getOrPut(view) {
+        // photo of each camera, scaled once to the renderer's resolution (nearest neighbour keeps the pixel look)
+        view.photos.map { argb ->
+            val bmp = android.graphics.Bitmap.createBitmap(argb, 320, 200, android.graphics.Bitmap.Config.ARGB_8888)
+            android.graphics.Bitmap.createScaledBitmap(bmp, AtticSceneRenderer.W, AtticSceneRenderer.H, false)
+        }
+    }
     // one frame of the room: photo, objects and player through the camera matrix, masks over them (AtticSceneRenderer)
     val roomImage = run {
         frameTick // the poses change every frame
-        val actors = game.objects.mapNotNull { it.toActor(bounds[0], bounds[1], bounds[2], bounds[3]) }
-        renderer.render(camera, if (showBackground) backgrounds[cameraIndex] else blackBackground, actors)
+        val actors = game.objects.mapNotNull { it.toActor(view.bounds[0], view.bounds[1], view.bounds[2], view.bounds[3]) }
+        renderer.render(camera, if (showBackground) backgrounds[camera.index.coerceIn(0, backgrounds.size - 1)] else blackBackground, actors, view.masks.getOrNull(camera.index) ?: emptyList())
         renderer.bitmap.asImageBitmap()
     }
 

@@ -2,7 +2,6 @@ package com.aitddemo
 
 import com.aitddemo.game.GameData
 import com.aitddemo.game.GameTexts
-import com.aitddemo.game.Zone
 import com.aitddemo.original.GameFiles
 import com.aitddemo.original.Pak
 import com.aitddemo.original.s16
@@ -13,17 +12,11 @@ import com.aitddemo.original.u8
 /** Thrown when the original game files are missing or not in the expected format; the message is shown to the player. */
 class OriginalFilesException(message: String) : Exception(message)
 
-/** Everything the attic needs, parsed from the original files. [photos] are the 320x200 camera pictures as ARGB. */
+/** Everything the game needs from the original files: the music of the first scene and the game data (objects, scripts, rooms, bodies, sounds, texts). */
 class AtticOriginal(
-    val cameras: List<AtticCameraDef>,
-    val hardcols: IntArray,
-    val masks: List<List<AtticData.Mask>>,
-    val photos: List<IntArray>,
-    /** Scene zones of the room (x1, x2, y1, y2, z1, z2, parameter, type; 8 values each): exits, triggers and floor kinds. */
-    val zones: IntArray,
     /** The attic music: AdLib track (ADLM file) of LISTMUS.PAK. */
     val music: ByteArray,
-    /** Objects, scripts, bodies, animations, sounds and texts of the game logic. */
+    /** Objects, scripts, rooms, bodies, animations, sounds and texts of the game logic. */
     val game: GameData,
     /** Music tracks of LISTMUS.PAK by number (the scripts start music by number). */
     val musicTrack: (Int) -> ByteArray?,
@@ -41,7 +34,7 @@ object AtticOriginalReader {
     const val OBJECT_FILE = "OBJETS.ITD"
     const val BODY_FILE = "LISTBODY.PAK"
     const val ANIM_FILE = "LISTANIM.PAK"
-    val REQUIRED = listOf(STAGE_FILE, CAMERA_FILE, RESOURCE_FILE, OBJECT_FILE, BODY_FILE, ANIM_FILE, MusicOriginalReader.FILE, SAMPLE_FILE, LIFE_FILE, VARS_FILE, TEXT_FILE)
+    val REQUIRED = listOf(STAGE_FILE, CAMERA_FILE, RESOURCE_FILE, OBJECT_FILE, BODY_FILE, ANIM_FILE, MusicOriginalReader.FILE, SAMPLE_FILE, LIFE_FILE, VARS_FILE, TEXT_FILE, TRACK_FILE)
 
     private const val STAGE = 0
     private const val ROOM = 0
@@ -53,6 +46,7 @@ object AtticOriginalReader {
     const val LIFE_FILE = "LISTLIFE.PAK"
     const val VARS_FILE = "VARS.ITD"
     const val TEXT_FILE = "ENGLISH.PAK"
+    const val TRACK_FILE = "LISTTRAK.PAK"
 
 
     fun missingFiles(files: GameFiles): List<String> = REQUIRED.filter { !files.exists(it) }
@@ -72,20 +66,7 @@ object AtticOriginalReader {
     private fun readAll(files: GameFiles): AtticOriginal {
         val palette = readPalette(Pak(files.read(RESOURCE_FILE)!!).get(PALETTE_ENTRY) ?: throw OriginalFilesException("$RESOURCE_FILE: Palette fehlt"))
 
-        // ---- ETAGE00.PAK / CAMERA00.PAK: room 0 of stage 0 with its cameras, masks and pictures
-        val stage = OriginalStage.open(files, STAGE)
-        val room = stage.rooms.firstOrNull { it.index == ROOM } ?: throw OriginalFilesException("$STAGE_FILE: Raum $ROOM fehlt")
-        val hardcols = room.hardcols
-        val roomCameras = room.cameraIds.map { stage.camera(ROOM, it) }
-        val cameras = roomCameras.mapIndexed { index, c -> c.camera.copy(index = index) }
-        val masks = roomCameras.map { it.masks }
-        val photos = room.cameraIds.map { stage.picture(it, palette) }
-
         // ---- the game logic: objects, scripts, variables, bodies, animations, sounds, texts
-        fun zones(v: IntArray) = List(v.size / AtticData.HARDCOL_STRIDE) { i ->
-            val o = i * AtticData.HARDCOL_STRIDE
-            Zone(v[o], v[o + 1], v[o + 2], v[o + 3], v[o + 4], v[o + 5], v[o + 6], v[o + 7])
-        }
         val textPak = Pak(files.read(TEXT_FILE)!!)
         val resourcePak = Pak(files.read(RESOURCE_FILE)!!)
         val varBytes = files.read(VARS_FILE)!!
@@ -93,12 +74,13 @@ object AtticOriginalReader {
         val musicPak = Pak(files.read(MusicOriginalReader.FILE)!!)
         val game = GameData(
             files.read(OBJECT_FILE)!!, Pak(files.read(LIFE_FILE)!!), vars, Pak(files.read(BODY_FILE)!!), Pak(files.read(ANIM_FILE)!!),
-            Pak(files.read(SAMPLE_FILE)!!), palette, zones(hardcols), zones(room.zones),
+            Pak(files.read(SAMPLE_FILE)!!), palette, RoomLoader(files, palette),
             GameTexts.parse(textPak.get(1) ?: throw OriginalFilesException("$TEXT_FILE: Texte fehlen")),
-            textPak, resourcePak,
+            textPak, resourcePak, Pak(files.read(TRACK_FILE)!!),
         )
+        game.rooms.room(STAGE, ROOM) // the first room must be readable now (it is cached for the start)
         val music = musicPak.get(ATTIC_MUSIC + 1) ?: throw OriginalFilesException("${MusicOriginalReader.FILE}: Musik $ATTIC_MUSIC fehlt")
-        return AtticOriginal(cameras, hardcols, masks, photos, room.zones, music, game) { n -> musicPak.get(n + 1) }
+        return AtticOriginal(music, game) { n -> musicPak.get(n + 1) }
     }
 
     private fun readPalette(d: ByteArray): IntArray {

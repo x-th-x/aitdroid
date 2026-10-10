@@ -432,27 +432,63 @@ class Actor(
         speed = 4
     }
 
+    /** Nummer des Raums, in dem das Objekt gerade steht (für Wege, die in einen anderen Raum führen). */
+    var roomNumber = 0
+
+    /** Verschiebung (x, y, z) einer Position des Raums [n] in die Koordinaten des aktuellen Raums: x -= a, y += b, z += c; null = unbekannt. */
+    var roomShift: (Int) -> IntArray? = { null }
+
+    /** Hintergrund-Zonen (GereDec) für dieses Objekt aktiv (Pfad-Befehle DEC_OFF/DEC_ON). */
+    var triggersOn = true
+
+    /** Gemerkte Lage (Pfad-Befehl MEMO_COOR), Ausgangspunkt der Treppenwege. */
+    var memoX = startX
+    var memoY = startY
+    var memoZ = startZ
+
+    private var yDelta = 0
+    private var ySteps = 0
+    private var yElapsed = 0
+    private var yApplied = 0
+
+    private fun moveY(dy: Int) {
+        worldY += dy
+        zv[2] += dy
+        zv[3] += dy
+    }
+
+    /** Eine laufende Höhenbewegung (Pfad-Befehl GOTO_3D) einen Schritt weiter. */
+    private fun stepHeight() {
+        if (ySteps == 0) return
+        yElapsed++
+        val target = if (yElapsed >= ySteps) yDelta else yDelta * yElapsed / ySteps
+        moveY(target - yApplied)
+        yApplied = target
+        if (yElapsed >= ySteps) ySteps = 0
+    }
+
+    private fun proportional(x1: Int, x2: Int, y1: Int, y2: Int): Int = if (y1 == 0) x1 else x1 + ((x2 - x1) * y2) / y1
+
+    /** Pfad aus LISTTRAK.PAK (Betriebsart 3), Befehle wie im Original von Alone in the Dark (track.cpp). */
     private fun track(timer: Int) {
         val t = trackSource(trackNumber) ?: run { speed = 0; return }
         if (positionInTrack >= t.size) return
-        var macro = t[positionInTrack].toInt()
-        // TimeGate nummeriert die Befehle ab 5 anders als die Vorgänger (5 = Warten, ab 6 um 3 verschoben)
-        macro = if (macro <= 4) macro else if (macro >= 6) macro + 3 else 7
+        val macro = t[positionInTrack].toInt()
         fun w(i: Int) = t.getOrElse(positionInTrack + i) { 0 }.toInt()
         when (macro) {
-            0 -> { // Sprung an eine Stelle
+            0 -> { // Sprung an eine Stelle (Raum, x, y, z)
                 onTrackWarp?.invoke(w(1), w(2), w(3), w(4))
                 speed = 0
                 direction = 0
                 rotSteps = 0
                 positionInTrack += 5
             }
-            1 -> { // zu einer Stelle gehen
-                val x = w(2)
-                val z = w(3)
+            1 -> { // zu einer Stelle gehen (Raum, x, z)
+                var x = w(2)
+                var z = w(3)
+                if (w(1) != roomNumber) roomShift(w(1))?.let { x -= it[0]; z += it[2] }
                 if (Math.hypot((renderX - x).toDouble(), (renderZ - z).toDouble()) >= TRACK_REACHED) {
                     turnToward(x, z, timer, 64, 15)
-                    speed = 4
                 } else {
                     positionInTrack += 4
                 }
@@ -462,36 +498,72 @@ class Actor(
                 trackNumber = -1
                 trackMode = 0
             }
-            3 -> positionInTrack = 0 // Wiederholen
+            3 -> positionInTrack = 0 // wiederholen
             4 -> { // Marke
                 mark = w(1)
                 positionInTrack += 2
             }
-            7 -> {} // Warten, bis das Skript CONTINUE_TRACK sagt
+            5 -> { speed = 4; positionInTrack++ } // gehen
+            6 -> { speed = 5; positionInTrack++ } // laufen
+            7 -> { speed = 0; positionInTrack++ } // anhalten
+            8 -> { speed = -1; positionInTrack++ } // rückwärts
             9 -> { // auf einen Winkel drehen
                 val target = w(1)
                 direction = if (((beta - target) and 1023) > 512) 1 else -1
                 if (rotSteps == 0) initRot(beta, target, 120, timer)
                 beta = updateRotation(timer)
-                if (beta == target) {
+                if ((beta and 0x3FF) == (target and 0x3FF)) {
                     direction = 0
                     positionInTrack += 2
                 }
             }
-            10 -> { collisionsOn = false; positionInTrack++ }
-            11 -> { collisionsOn = true; positionInTrack++ }
-            13, 14, 16 -> positionInTrack++ // Hintergrund-Zone aus/an, Lage merken
-            15, 17, 18 -> { // zu einer Stelle (auch Höhe/Treppe): nur die Richtung zählt
-                val x = w(2)
-                val z = w(if (macro == 15) 4 else 4)
-                if (Math.hypot((renderX - x).toDouble(), (renderZ - z).toDouble()) >= TRACK_REACHED) {
-                    turnToward(x, z, timer, 256, 60)
-                    speed = 4
+            10 -> { wallCollision = false; positionInTrack++ }
+            11 -> { wallCollision = true; positionInTrack++ }
+            12 -> positionInTrack += 2
+            13 -> { triggersOn = false; positionInTrack++ }
+            14 -> { triggersOn = true; positionInTrack++ }
+            15 -> { // zu einer Stelle mit Höhe (Raum, x, y, z, Zeit)
+                var x = w(2)
+                var y = w(3)
+                var z = w(4)
+                val time = w(5)
+                if (w(1) != roomNumber) roomShift(w(1))?.let { x -= it[0]; y += it[1]; z += it[2] }
+                if (y == renderY && Math.hypot((renderX - x).toDouble(), (renderZ - z).toDouble()) < TRACK_REACHED) {
+                    positionInTrack += 6
                 } else {
-                    positionInTrack += if (macro == 15) 6 else 4
+                    if (ySteps == 0 && y != renderY) {
+                        yDelta = y - renderY
+                        ySteps = time.coerceAtLeast(1)
+                        yElapsed = 0
+                        yApplied = 0
+                    }
+                    val dir = cap(renderX, renderZ, beta, x, z)
+                    if (rotSteps == 0 || direction != dir) initRot(beta, beta - dir * 256, 60, timer)
+                    direction = dir
+                    if (dir == 0) rotSteps = 0 else beta = updateRotation(timer)
                 }
             }
-            19 -> { // Winkel setzen
+            16 -> { // Lage merken
+                memoX = renderX; memoY = renderY; memoZ = renderZ
+                positionInTrack++
+            }
+            17, 18 -> { // Treppe auf x / auf z: die Höhe folgt dem Weg zum Ziel
+                val x = w(1)
+                val y = w(2)
+                val z = w(3)
+                if (renderY < y - 100 || renderY > y + 100) {
+                    val prop = if (macro == 18) proportional(memoY, y, z - memoZ, renderZ - memoZ) else proportional(memoY, y, x - memoX, renderX - memoX)
+                    moveY(prop - worldY)
+                    val dir = cap(renderX, renderZ, beta, x, z)
+                    if (rotSteps == 0 || direction != dir) initRot(beta, beta - (dir shl 8), 60, timer)
+                    direction = dir
+                    if (dir != 0) beta = updateRotation(timer) else rotSteps = 0
+                } else {
+                    moveY(y - worldY)
+                    positionInTrack += 4
+                }
+            }
+            19 -> { // Winkel setzen (alpha, beta, gamma)
                 beta = w(2)
                 direction = 0
                 positionInTrack += 4
@@ -582,6 +654,7 @@ class Actor(
     // ---------------------------------------------------------------- Animation und Bewegung (GereAnim)
 
     fun update(timer: Int) {
+        stepHeight()
         endFrameTick = false
         endAnimTick = false
         collidedWith = -1

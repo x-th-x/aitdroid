@@ -2,6 +2,7 @@ package com.aitddemo.game
 
 import com.aitddemo.AnimatedParts
 import com.aitddemo.OriginalBody
+import com.aitddemo.RoomLoader
 import com.aitddemo.original.Pak
 import com.aitddemo.original.VocSample
 import com.aitddemo.original.u8
@@ -62,16 +63,17 @@ class GameData(
     private val animPak: Pak,
     private val samplePak: Pak?,
     val palette: IntArray,
-    val hardcols: List<Zone>,
-    val zones: List<Zone>,
+    val rooms: RoomLoader,
     val texts: GameTexts,
     private val textPak: Pak,
     private val resourcePak: Pak,
+    private val trackPak: Pak? = null,
 ) {
     private val bodies = HashMap<Int, BodyAsset?>()
     private val anims = HashMap<Int, AnimData?>()
     private val samples = HashMap<Int, VocSample?>()
     private val scripts = HashMap<Int, ShortArray?>()
+    private val tracks = HashMap<Int, ShortArray?>()
 
     /** Life script [n] as 16 bit words. */
     fun script(n: Int): ShortArray? = scripts.getOrPut(n) {
@@ -107,6 +109,11 @@ class GameData(
         val d = resourcePak.get(7 + type) ?: return null
         if (d.size < 64000) return null
         return IntArray(64000) { palette[d[it].toInt() and 0xFF] }
+    }
+
+    /** Movement path [n] (entry n + 1 of LISTTRAK.PAK) as 16 bit words, or null. */
+    fun track(n: Int): ShortArray? = tracks.getOrPut(n) {
+        trackPak?.get(n + 1)?.let { d -> ShortArray(d.size / 2) { ((d[it * 2].toInt() and 0xFF) or (d[it * 2 + 1].toInt() shl 8)).toShort() } }
     }
 
     /** Sound sample [n] (entry n + 1 of LISTSAMP.PAK) or null. */
