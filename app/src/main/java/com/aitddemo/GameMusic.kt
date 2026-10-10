@@ -15,6 +15,9 @@ object GameMusic {
     var current = -1
         private set
 
+    /** Whether music is sounding right now. */
+    val playing: Boolean get() = player.isPlaying
+
     /** Starts music [number] from the beginning (replacing what plays). */
     fun start(number: Int, data: ByteArray) {
         current = number

@@ -45,6 +45,7 @@ object AtticOriginalReader {
     const val SAMPLE_FILE = "LISTSAMP.PAK"
     const val LIFE_FILE = "LISTLIFE.PAK"
     const val VARS_FILE = "VARS.ITD"
+    const val DEFINES_FILE = "DEFINES.ITD"
     const val TEXT_FILE = "ENGLISH.PAK"
     const val TRACK_FILE = "LISTTRAK.PAK"
 
@@ -77,6 +78,8 @@ object AtticOriginalReader {
             Pak(files.read(SAMPLE_FILE)!!), palette, RoomLoader(files, palette),
             GameTexts.parse(textPak.get(1) ?: throw OriginalFilesException("$TEXT_FILE: Texte fehlen")),
             textPak, resourcePak, Pak(files.read(TRACK_FILE)!!),
+            // DEFINES.ITD: 16 bit values, high byte first
+            files.read(DEFINES_FILE)?.let { d -> ShortArray(d.size / 2) { (((d[it * 2].toInt() and 0xFF) shl 8) or (d[it * 2 + 1].toInt() and 0xFF)).toShort() } } ?: ShortArray(0),
         )
         game.rooms.room(STAGE, ROOM) // the first room must be readable now (it is cached for the start)
         val music = musicPak.get(ATTIC_MUSIC + 1) ?: throw OriginalFilesException("${MusicOriginalReader.FILE}: Musik $ATTIC_MUSIC fehlt")

@@ -68,7 +68,44 @@ private class AtticUi(private val world: AtticOriginal, private val sounds: Intr
         for (i in messages.indices) if (messages[i]?.let { now - it.startNanos > MESSAGE_NANOS } == true) messages[i] = null
     }
 
-    override fun playSample(number: Int) = sounds.play(number)
+    private var pitchPercent = 0
+    private val random = java.util.Random()
+
+    /** RND_FREQ: a sample varies its speed by up to half of the given percentage either way. */
+    private fun pitch(): Float = if (pitchPercent == 0) 1f else 1f + (random.nextFloat() * 2f - 1f) * pitchPercent / 200f
+
+    override fun playSample(number: Int) = sounds.play(number, pitch())
+
+    override fun playSampleThen(first: Int, then: Int, repeat: Boolean) = sounds.play(first, pitch(), then = then, thenLoop = repeat)
+
+    override fun stopSamples() = sounds.stopAll()
+
+    override fun randomFrequency(percent: Int) {
+        pitchPercent = percent
+    }
+
+    /** The music that follows the one that plays now, -1 = none. */
+    private var queuedMusic = -1
+
+    override fun nextMusic(number: Int) {
+        if (!GameMusic.playing) {
+            music(number, true)
+        } else {
+            // the music that plays now runs to its end instead of repeating, then the next one starts
+            queuedMusic = number
+            GameMusic.setLooping(false, music, world.musicTrack(music) ?: return)
+        }
+    }
+
+    /** Called every tick: starts the queued music when the one before it has ended. */
+    fun pollMusic() {
+        if (queuedMusic >= 0 && !GameMusic.playing) {
+            val n = queuedMusic
+            queuedMusic = -1
+            music = -1
+            music(n, true)
+        }
+    }
 
     override fun music(number: Int, loop: Boolean) {
         if (number == music) return
@@ -257,6 +294,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
             if (!paused) gameClock += (timer - lastTimer).coerceAtLeast(0)
             lastTimer = timer
             ui.expire(System.nanoTime())
+            ui.pollMusic()
             if (ui.picture != null && System.nanoTime() > ui.pictureNanos) ui.picture = null
             if (!paused) {
                 val player = game.player?.actor

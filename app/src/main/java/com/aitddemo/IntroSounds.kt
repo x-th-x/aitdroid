@@ -11,8 +11,12 @@ class IntroSounds(private val lookup: (Int) -> VocSample?) {
 
     private val active = ArrayList<AudioTrack>()
 
+    /**
+     * Plays sample [number]. [pitch] changes the speed (1 = as recorded), [loop] repeats it until [stopAll], [then] is a sample that follows when this one has
+     * ended ([thenLoop]: and is repeated).
+     */
     @Synchronized
-    fun play(number: Int) {
+    fun play(number: Int, pitch: Float = 1f, loop: Boolean = false, then: Int = -1, thenLoop: Boolean = false) {
         val s = lookup(number) ?: return
         try {
             while (active.size >= MAX_ACTIVE) active.removeAt(0).release()
@@ -27,21 +31,34 @@ class IntroSounds(private val lookup: (Int) -> VocSample?) {
                 .setTransferMode(AudioTrack.MODE_STATIC)
                 .build()
             track.write(s.pcm, 0, s.pcm.size)
-            track.setNotificationMarkerPosition(s.pcm.size)
-            track.setPlaybackPositionUpdateListener(object : AudioTrack.OnPlaybackPositionUpdateListener {
-                override fun onMarkerReached(t: AudioTrack) {
-                    synchronized(this@IntroSounds) {
-                        if (active.remove(t)) t.release()
+            if (pitch != 1f) track.playbackRate = (s.rate * pitch).toInt().coerceIn(2000, 48000)
+            if (loop) {
+                track.setLoopPoints(0, s.pcm.size, -1)
+            } else {
+                track.setNotificationMarkerPosition(s.pcm.size)
+                track.setPlaybackPositionUpdateListener(object : AudioTrack.OnPlaybackPositionUpdateListener {
+                    override fun onMarkerReached(t: AudioTrack) {
+                        val released = synchronized(this@IntroSounds) { active.remove(t) }
+                        if (released) {
+                            t.release()
+                            if (then >= 0) play(then, pitch, thenLoop)
+                        }
                     }
-                }
 
-                override fun onPeriodicNotification(t: AudioTrack) {}
-            })
+                    override fun onPeriodicNotification(t: AudioTrack) {}
+                })
+            }
             active.add(track)
             track.play()
         } catch (_: Exception) {
             // carry on without this sound
         }
+    }
+
+    /** STOP_SAMPLE: everything that sounds is cut off (a sample that was waiting for another one does not start it). */
+    @Synchronized
+    fun stopAll() {
+        release()
     }
 
     @Synchronized

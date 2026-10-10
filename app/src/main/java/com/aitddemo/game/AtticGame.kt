@@ -20,6 +20,18 @@ interface GameUi {
 
     /** The ending of the game. */
     fun endSequence() {}
+
+    /** SAMPLE_THEN / SAMPLE_THEN_REPEAT: [first] sounds, and when it has ended [then] (repeated when [repeat]). */
+    fun playSampleThen(first: Int, then: Int, repeat: Boolean) { playSample(first) }
+
+    /** STOP_SAMPLE: everything that sounds is cut off. */
+    fun stopSamples() {}
+
+    /** RND_FREQ: the samples that follow vary their pitch by up to [percent] (0 = as recorded). */
+    fun randomFrequency(percent: Int) {}
+
+    /** NEXT_MUSIC: [number] plays when the music that is playing has ended (at once when nothing plays). */
+    fun nextMusic(number: Int) { music(number, true) }
 }
 
 /** A short lived visual effect (SPECIAL): 0 evaporation, 1 blood or dust at a blow, 4 smoke. */
@@ -35,6 +47,9 @@ class GameObject(val w: WorldObject) {
     var actionGroup = -1
     var actionForce = 0
     var actionParam = 0
+
+    /** Where the last shot of this object hit something, relative to the object (null = none); the hit effect uses it instead of the hand. */
+    var shotPoint: IntArray? = null
 
     /** A turn of the alpha angle in progress (SET_ALPHA): the target (-1 none), where it started and when. */
     var alphaTarget = -1
@@ -73,7 +88,7 @@ class GameObject(val w: WorldObject) {
  */
 class AtticGame(val data: GameData, private val ui: GameUi, private var stage: Int = 0, private var room: Int = 0) : LifeHost {
     override var time = 0
-    val vm = LifeVm({ data.script(it) }, data.objectData, data.vars, this)
+    val vm = LifeVm({ data.script(it) }, data.objectData, data.vars, this).also { for (i in data.defines.indices) if (i < it.cvars.size) it.cvars[i] = data.defines[i] }
     val objects: Array<GameObject> = Array(vm.objects.size) { GameObject(vm.objects[it]) }
 
     /** The room the game is in now (colliders, zones, cameras); it changes when the player enters another room or floor. */
@@ -654,12 +669,14 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             if (x > 20000 || x < -20000 || z > 20000 || z < -20000) return
             if (roomView.hardcols.any { h -> h.x1 < x + p && x - p < h.x2 && h.y1 < y + p && y - p < h.y2 && h.z1 < z + p && z - p < h.z2 }) return // a wall stops the shot
             for (other in objects) {
-                if (other === g || !other.w.active) continue
+                if (other === g || !other.w.active || other.w.flags and AF_SPECIAL != 0) continue // (effects cannot be hit)
                 val zv = other.actor?.zv ?: continue
                 if (zv[0] < x + p && x - p < zv[1] && zv[2] < y + p && y - p < zv[3] && zv[4] < z + p && z - p < zv[5]) {
                     g.w.hit = other.w.index
                     other.w.hitBy = g.w.index
                     other.w.hitForce = g.actionForce
+                    // the place of the impact is the hot point from now on (the hit effect appears there)
+                    g.shotPoint = intArrayOf(x - a.renderX, y - a.renderY, z - a.renderZ)
                     return
                 }
             }
@@ -798,6 +815,26 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         ui.music(n, true)
     }
 
+    override fun nextMusic(n: Int) {
+        ui.nextMusic(n)
+    }
+
+    override fun sampleThen(first: Int, then: Int) {
+        ui.playSampleThen(first, then, false)
+    }
+
+    override fun sampleThenRepeat(first: Int, then: Int) {
+        ui.playSampleThen(first, then, true)
+    }
+
+    override fun stopSample() {
+        ui.stopSamples()
+    }
+
+    override fun randomFrequency(percent: Int) {
+        ui.randomFrequency(percent)
+    }
+
     override fun fadeMusic(n: Int) {
         ui.music(n, true)
     }
@@ -815,7 +852,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             0 -> if (a != null) effects.add(Effect(0, a.renderX, a.renderY, a.renderZ, time, a.zv.copyOf()))
             1 -> { // flow at the hand of the one that hit this object
                 val by = objects.getOrNull(g.w.hitBy)
-                val h = by?.let { hotPoint(it, it.actionGroup) }
+                val h = by?.let { b -> b.shotPoint?.also { b.shotPoint = null } ?: hotPoint(b, b.actionGroup) }
                 val b = by?.actor
                 if (b != null) effects.add(Effect(1, b.renderX + (h?.get(0) ?: 0), b.renderY + (h?.get(1) ?: 0), b.renderZ + (h?.get(2) ?: 0), time, null))
             }
@@ -974,6 +1011,16 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         val item = vm.objects.getOrNull(g.actionParam) ?: return
         val a = g.actor ?: return
         val hot = hotPoint(g, g.actionGroup) ?: intArrayOf(0, 0, 0)
+        // a wall at the hand: the item is not thrown, it is put down at the thrower
+        val ib = data.body(item.body)?.zv
+        if (ib != null) {
+            val hx = a.renderX + hot[0]; val hy = a.renderY + hot[1]; val hz = a.renderZ + hot[2]
+            if (roomView.hardcols.any { h -> h.x1 < hx + ib[1] && hx + ib[0] < h.x2 && h.y1 < hy + ib[3] && hy + ib[2] < h.y2 && h.z1 < hz + ib[5] && hz + ib[4] < h.z2 }) {
+                g.actionType = 0
+                putAt(item.index, g.w.index)
+                return
+            }
+        }
         removeFromInventory(item.index)
         item.x = a.renderX + hot[0]; item.y = a.renderY + hot[1]; item.z = a.renderZ + hot[2]
         item.stage = stage; item.room = room
@@ -989,7 +1036,10 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         thrown.actionForce = g.actionForce
     }
 
-    /** A thrown item flies 3000 units in 60 ticks along the heading of the thrower; a wall or an object ends the flight (an object that is hit gets HIT_BY and the force). */
+    /**
+     * A thrown item flies 3000 units in 60 ticks along the heading of the thrower. A wall, or an object that is hit (it gets HIT_BY and the force), stops it; the
+     * object named by the CVar REVERSE_OBJECT sends it back. It lands at floor height on the last place that is free of walls (throwStoppedAt of the original).
+     */
     private fun processFlight(g: GameObject) {
         val a = g.actor ?: run { g.flightTicks = -1; return }
         g.flightTicks++
@@ -997,24 +1047,33 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         val ang = (g.flightBeta and 0x3FF) * 2.0 * Math.PI / 1024.0
         val nx = g.flightX + (dist * Math.sin(ang)).toInt()
         val nz = g.flightZ - (dist * Math.cos(ang)).toInt()
-        val b = g.asset?.zv ?: intArrayOf(-100, 100, -100, 100, -100, 100)
-        val box = intArrayOf(nx + b[0], nx + b[1], a.renderY + b[2], a.renderY + b[3], nz + b[4], nz + b[5])
+        val y = a.renderY
+        // the original tests a box of 200 units around the item
+        val box = intArrayOf(nx - 200, nx + 200, y - 200, y + 200, nz - 200, nz + 200)
         fun hits(z: IntArray) = z[0] < box[1] && box[0] < z[1] && z[2] < box[3] && box[2] < z[3] && z[4] < box[5] && box[4] < z[5]
         var stop = roomView.hardcols.any { h -> hits(intArrayOf(h.x1, h.x2, h.y1, h.y2, h.z1, h.z2)) }
         for (o in objects) {
             if (o === g || !o.w.active || o.w.index == g.flightThrower) continue
             val zo = o.actor?.zv ?: continue
-            if (hits(zo)) {
-                g.w.hit = o.w.index
-                o.w.hitBy = g.w.index
-                o.w.hitForce = g.actionForce
-                stop = true
+            if (!hits(zo)) continue
+            if (o.w.index == vm.cvars[CVAR_REVERSE_OBJECT].toInt()) {
+                // it flies back from where it is, and the thrower is now the one that sent it back
+                g.flightThrower = o.w.index
+                g.flightBeta = (g.flightBeta + 0x200) and 0x3FF
+                g.flightX = g.w.x
+                g.flightZ = g.w.z
+                g.flightTicks = 0
+                return
             }
+            g.w.hit = o.w.index
+            o.w.hitBy = g.w.index
+            o.w.hitForce = g.actionForce
+            stop = true
         }
         if (stop || g.flightTicks >= 60) {
+            ui.playSample(vm.cvars[CVAR_SAMPLE_CHOC].toInt())
+            landThrown(g, g.w.x, g.w.z)
             g.flightTicks = -1
-            g.w.flags = g.w.flags or AF_FALLABLE // the item drops to the floor where it stopped
-            ui.playSample(SAMPLE_CHOC)
             return
         }
         a.pushBy(nx - a.renderX, nz - a.renderZ)
@@ -1022,6 +1081,31 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         g.w.z = nz
     }
 
+    /** The item comes to rest at floor height at the last free place on its way back from (x, z): 100 units at a time against its flight until no wall touches it. */
+    private fun landThrown(g: GameObject, x: Int, z: Int) {
+        val a = g.actor ?: return
+        val b = g.asset?.zv ?: intArrayOf(-100, 100, -100, 100, -100, 100)
+        val floorY = (a.renderY / 2000) * 2000
+        val back = ((g.flightBeta + 0x200) and 0x3FF) * 2.0 * Math.PI / 1024.0
+        var step = 0
+        var px = x
+        var pz = z
+        while (step < 6000) {
+            px = x + (step * Math.sin(back)).toInt()
+            pz = z - (step * Math.cos(back)).toInt()
+            val free = roomView.hardcols.none { h ->
+                h.x1 < px + b[1] && px + b[0] < h.x2 && h.y1 < floorY + b[3] && floorY + b[2] < h.y2 && h.z1 < pz + b[5] && pz + b[4] < h.z2
+            }
+            if (free) break
+            step += 100
+        }
+        a.pushBy(px - a.renderX, pz - a.renderZ)
+        a.moveYBy(floorY - a.renderY)
+        g.w.x = px
+        g.w.y = floorY
+        g.w.z = pz
+        g.w.gamma = 0
+    }
 
     // ------------------------------------------------------------------------------------------------------------------ saving
 
@@ -1109,15 +1193,18 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     companion object {
         const val PLAYER_SCRIPT = 549
+        const val AF_SPECIAL = 0x20
         const val AF_TRIGGER = 0x40
         const val AF_FOUNDABLE = 0x80
         const val AF_MOVABLE = 0x10
         const val AF_FALLABLE = 0x100
         const val EFFECT_TICKS = 70
-        const val SAMPLE_CHOC = 15
+        /** Positions in the CVars (DEFINES.ITD): the sound of an impact, the weight limit, the object that sends a thrown item back. */
+        const val CVAR_SAMPLE_CHOC = 9
+        const val CVAR_REVERSE_OBJECT = 11
         const val ACTION_CLICK = 0x2000
         const val ACTION_TAKE = 0x800
-        const val MAX_WEIGHT_CVAR = 0
+        const val MAX_WEIGHT_CVAR = 2
         const val REOPEN_TICKS = 300
         private val POS_REL = intArrayOf(4, 1, 8, 2, 4, 1, 8, 0)
     }

@@ -113,6 +113,7 @@ interface LifeHost {
     fun repSample(n: Int) {}
     fun stopSample() {}
     fun sampleThen(first: Int, then: Int) {}
+    fun sampleThenRepeat(first: Int, then: Int) { sampleThen(first, then) }
     fun randomFrequency(percent: Int) {}
     fun music(n: Int) {}
     fun nextMusic(n: Int) {}
@@ -456,7 +457,8 @@ class LifeVm(
                     "SAMPLE" -> { val n = eval(); if (n >= 0) host.sample(n) }
                     "REP_SAMPLE" -> { val n = eval(); s16(); if (n >= 0) host.repSample(n) }
                     "STOP_SAMPLE" -> host.stopSample()
-                    "SAMPLE_THEN", "SAMPLE_THEN_REPEAT" -> { val a = eval(); val b = eval(); if (a >= 0) host.sampleThen(a, b) }
+                    "SAMPLE_THEN" -> { val a = eval(); val b = eval(); if (a >= 0) host.sampleThen(a, b) }
+                    "SAMPLE_THEN_REPEAT" -> { val a = eval(); val b = eval(); if (a >= 0) host.sampleThenRepeat(a, b) }
                     "RND_FREQ" -> host.randomFrequency(s16())
                     "MUSIC" -> { val n = s16(); currentMusic = n; host.music(n) }
                     "NEXT_MUSIC" -> host.nextMusic(s16())
