@@ -106,6 +106,9 @@ class Actor(
 
     private var stopPending = false
 
+    /** Eine schon angeforderte, noch nicht begonnene Animation (Nummer, Art, Folgeanimation) oder null. */
+    val pendingAnim: IntArray? get() = if (newAnim != -1) intArrayOf(newAnim, newAnimType, newAnimInfo) else null
+
     /** flagEndAnim des Originals: die letzte Animation ist zu Ende gelaufen (bleibt gesetzt, bis eine neue beginnt). */
     var flagEndAnim = false
         private set
@@ -450,6 +453,9 @@ class Actor(
     private var ySteps = 0
     private var yElapsed = 0
     private var yApplied = 0
+
+    /** Raises or lowers the object by dy (height and box). */
+    fun moveYBy(dy: Int) = moveY(dy)
 
     private fun moveY(dy: Int) {
         worldY += dy

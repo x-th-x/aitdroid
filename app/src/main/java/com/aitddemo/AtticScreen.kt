@@ -30,6 +30,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import com.aitddemo.game.AtticGame
+import com.aitddemo.game.Effect
 import com.aitddemo.game.GameObject
 import com.aitddemo.game.GameUi
 import com.aitddemo.game.Joy
@@ -48,6 +49,11 @@ private class AtticUi(private val world: AtticOriginal, private val sounds: Intr
     val messages = arrayOfNulls<MessageSlot>(5)
     var gameOverShown by mutableStateOf(false)
     var exitShown by mutableStateOf(false)
+    var endShown by mutableStateOf(false)
+
+    /** A full screen picture of the game being shown (from PICTURE) and until when (engine ticks of the screen clock). */
+    var picture by mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null)
+    var pictureNanos = 0L
     private var music = AtticOriginalReader.ATTIC_MUSIC
 
     override fun message(text: String) {
@@ -78,6 +84,17 @@ private class AtticUi(private val world: AtticOriginal, private val sounds: Intr
 
     override fun leftRoom(stage: Int, room: Int) {
         exitShown = true
+    }
+
+    override fun endSequence() {
+        endShown = true
+    }
+
+    override fun picture(index: Int, ticks: Int, sample: Int) {
+        val argb = world.game.picture(index) ?: return
+        picture = StartAssets.picture(argb)
+        pictureNanos = System.nanoTime() + ticks * 16_666_667L
+        if (sample >= 0) sounds.play(sample)
     }
 
     private companion object {
@@ -112,6 +129,42 @@ private fun GameObject.toActor(minX: Int, maxX: Int, minZ: Int, maxZ: Int): Atti
     } else {
         AtticActor(out, asset.triangles, x.toFloat(), y.toFloat(), z.toFloat(), (lowX / 10).toInt(), (highX / 10).toInt(), (lowZ / 10).toInt(), (highZ / 10).toInt(), asset.lines, asset.spheres)
     }
+}
+
+/** A short lived effect as particles: points with a radius and a colour that change with the age of the effect (drawn as the body's spheres). */
+private fun effectActor(e: Effect, now: Int): AtticActor {
+    val age = (now - e.born).coerceAtLeast(0)
+    val life = AtticGame.EFFECT_TICKS
+    val rnd = java.util.Random(e.born * 31L + e.kind)
+    val count = when (e.kind) { 0 -> 30; 1 -> 14; else -> 10 }
+    val verts = FloatArray(count * 3)
+    val spheres = IntArray(count * 3)
+    val fade = (1f - age.toFloat() / life).coerceIn(0f, 1f)
+    for (i in 0 until count) {
+        var x = e.x.toFloat(); var y = e.y.toFloat(); var z = e.z.toFloat()
+        val box = e.box
+        if (box != null) {
+            x = box[0] + rnd.nextFloat() * (box[1] - box[0])
+            y = box[3] + (box[2] - box[3]) * rnd.nextFloat()
+            z = box[4] + rnd.nextFloat() * (box[5] - box[4])
+        }
+        val vx = (rnd.nextFloat() - 0.5f) * (if (e.kind == 1) 40f else 8f)
+        val vz = (rnd.nextFloat() - 0.5f) * (if (e.kind == 1) 40f else 8f)
+        val vy = when (e.kind) { 1 -> -10f + rnd.nextFloat() * 6f; 4 -> -(3f + rnd.nextFloat() * 4f); else -> -(8f + rnd.nextFloat() * 14f) }
+        val g = if (e.kind == 1) 1.1f * age else 0f
+        x += vx * age; z += vz * age; y += vy * age + g * age / 2f
+        verts[i * 3] = x; verts[i * 3 + 1] = y; verts[i * 3 + 2] = z
+        val shade = (255 * fade).toInt().coerceIn(0, 255)
+        val color = when (e.kind) {
+            1 -> (0xFF shl 24) or ((150 * fade + 60).toInt().coerceIn(0, 255) shl 16) or (20 shl 8) or 20
+            4 -> (0xFF shl 24) or (shade / 2 + 60 shl 16) or (shade / 2 + 60 shl 8) or (shade / 2 + 60)
+            else -> (0xFF shl 24) or (shade shl 16) or (shade shl 8) or shade
+        }
+        spheres[i * 3] = i
+        spheres[i * 3 + 1] = if (e.kind == 1) 14 else 24
+        spheres[i * 3 + 2] = color
+    }
+    return AtticActor(verts, IntArray(0), e.x.toFloat(), e.y.toFloat(), e.z.toFloat(), e.x / 10 - 5, e.x / 10 + 5, e.z / 10 - 5, e.z / 10 + 5, IntArray(0), spheres)
 }
 
 /** Entry point: reads the room from the original game files, shows an error message when that is not possible. */
@@ -195,10 +248,11 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
         while (true) {
             val nanos = withFrameNanos { it }
             val timer = ((nanos - startNanos) / 16_666_667L).toInt() // engine ticks, 60 per second
-            val paused = foundItem >= 0 || inventoryOpen || ui.gameOverShown || ui.exitShown || game.pendingRead != null
+            val paused = foundItem >= 0 || inventoryOpen || ui.gameOverShown || ui.exitShown || ui.endShown || ui.picture != null || game.pendingRead != null
             if (!paused) gameClock += (timer - lastTimer).coerceAtLeast(0)
             lastTimer = timer
             ui.expire(System.nanoTime())
+            if (ui.picture != null && System.nanoTime() > ui.pictureNanos) ui.picture = null
             if (!paused) {
                 val player = game.player?.actor
                 var joy = 0
@@ -262,8 +316,9 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     // one frame of the room: photo, objects and player through the camera matrix, masks over them (AtticSceneRenderer)
     val roomImage = run {
         frameTick // the poses change every frame
-        val actors = game.objects.mapNotNull { it.toActor(view.bounds[0], view.bounds[1], view.bounds[2], view.bounds[3]) }
-        renderer.render(camera, if (showBackground) backgrounds[camera.index.coerceIn(0, backgrounds.size - 1)] else blackBackground, actors, view.masks.getOrNull(camera.index) ?: emptyList())
+        val actors = game.objects.mapNotNull { it.toActor(view.bounds[0], view.bounds[1], view.bounds[2], view.bounds[3]) } + game.effects.map { effectActor(it, game.time) }
+        val dark = game.lightOff
+        renderer.render(camera, if (showBackground && !dark) backgrounds[camera.index.coerceIn(0, backgrounds.size - 1)] else blackBackground, actors, if (dark) emptyList() else view.masks.getOrNull(camera.index) ?: emptyList())
         renderer.bitmap.asImageBitmap()
     }
 
@@ -390,6 +445,16 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
         }
         game.pendingRead?.let { read ->
             BookReader(game, read[0], read[1]) { game.finishRead() }
+        }
+        ui.picture?.let { pic ->
+            Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+                Image(bitmap = pic, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+            }
+        }
+        if (ui.endShown) {
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.85f)).clickable { onExit() }, contentAlignment = Alignment.Center) {
+                BitmapText(text = "The End", scale = 4f, color = Color(0xFFF2E4B8))
+            }
         }
         if (ui.exitShown) {
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.8f)).clickable { onExit() }, contentAlignment = Alignment.Center) {

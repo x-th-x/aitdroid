@@ -47,11 +47,12 @@ fun ModelView(
     zoom: Float = 1f,
     panX: Float = 0f,
     panY: Float = 0f,
+    pitch: Float = 0f,
 ) {
     val raster = remember { ModelRaster() }
     Canvas(modifier = modifier.fillMaxSize()) {
         if (size.width > 0f && size.height > 0f) {
-            raster.render(vertices, triangles, angle, size.width, size.height, zoom, panX, panY)
+            raster.render(vertices, triangles, angle, size.width, size.height, zoom, panX, panY, pitch)
             drawImage(image = raster.bitmap.asImageBitmap(), dstSize = IntSize(size.width.toInt(), size.height.toInt()))
         }
     }
@@ -197,7 +198,8 @@ private class ModelRaster {
         canvasH: Float,
         zoom: Float,
         panX: Float,
-        panY: Float
+        panY: Float,
+        pitch: Float = 0f,
     ) {
         val aspect = canvasW / canvasH
         val w: Int
@@ -233,6 +235,16 @@ private class ModelRaster {
             rx[i] = x * cosA + z * sinA
             rz[i] = -x * sinA + z * cosA
             ry[i] = -y // engine space is y-down; flip so the model renders upright
+        }
+        if (pitch != 0f) { // tipped forwards or backwards (a view the player turns by hand)
+            val cp = cos(pitch)
+            val sp = sin(pitch)
+            for (i in 0 until n) {
+                val y = ry[i]
+                val z = rz[i]
+                ry[i] = y * cp - z * sp
+                rz[i] = y * sp + z * cp
+            }
         }
 
         var minX = Float.MAX_VALUE; var maxX = -Float.MAX_VALUE

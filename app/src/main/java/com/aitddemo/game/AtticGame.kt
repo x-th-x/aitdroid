@@ -14,7 +14,16 @@ interface GameUi {
 
     /** The player was sent to another room or floor by a script; that part of the game is not available yet. */
     fun leftRoom(stage: Int, room: Int)
+
+    /** A full screen picture of the game (ITD_RESS.PAK entry index + 1) for ticks engine ticks, with a sound. */
+    fun picture(index: Int, ticks: Int, sample: Int) {}
+
+    /** The ending of the game. */
+    fun endSequence() {}
 }
+
+/** A short lived visual effect (SPECIAL): 0 evaporation, 1 blood or dust at a blow, 4 smoke. */
+class Effect(val kind: Int, val x: Int, val y: Int, val z: Int, val born: Int, val box: IntArray?)
 
 /** An object of the world with its actor (animation, position, collision box) while it is part of the scene. */
 class GameObject(val w: WorldObject) {
@@ -25,6 +34,18 @@ class GameObject(val w: WorldObject) {
     var actionRange = 0
     var actionGroup = -1
     var actionForce = 0
+    var actionParam = 0
+
+    /** A fall in progress: the height it started at and the ticks since (the original YHandler 0 to 2000 over 40). */
+    var fallStartY = 0
+    var fallTicks = -1
+
+    /** A thrown item in flight: where and how it started. */
+    var flightX = 0
+    var flightZ = 0
+    var flightBeta = 0
+    var flightTicks = -1
+    var flightThrower = -1
 
     /** Box of an object whose box is a collider of the room (OBJETS type 4, "hard ZV"); such objects are invisible helpers of the furniture scripts. */
     var fixedZv: IntArray? = null
@@ -83,6 +104,16 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     /** Set when the player was sent out of this room (to another floor); the screen shows the end of what is available. */
     var exited = false
         private set
+
+    /** For testing: notable decisions of the game logic are reported here. */
+    var trace: ((String) -> Unit)? = null
+
+    /** Dark room (LIGHT 0): the room picture is not shown, only the objects. */
+    var lightOff = false
+        private set
+
+    /** The effects that are alive now (SPECIAL). */
+    val effects = ArrayList<Effect>()
 
     /** Keys of this tick (bits of [Joy]) and whether the action key was pressed. */
     private var joy = 0
@@ -163,6 +194,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         if (w.typeZv == 3) Actor.boxFor(asset.zv, 3, a.worldX, a.worldY, a.worldZ, a.beta).copyInto(a.zv)
         old?.let { a.restoreMove(it.trackMode, it.trackNumber, it.positionInTrack, it.mark) }
         if (old == null) a.restoreMove(w.trackMode, w.trackNumber, 0, -1)
+        old?.pendingAnim?.let { a.playAnim(it[0], it[1], it[2]) } // an animation that was just requested survives the change of body
         g.actor = a
     }
 
@@ -224,7 +256,11 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             }
             if (w.flags and AF_TRIGGER != 0 && a.triggersOn) checkZones(g)
             if (g.actionType != 0) processAction(g)
+            if (w.flags and AF_FALLABLE != 0) processFall(g)
+            if (g.flightTicks >= 0) processFlight(g)
         }
+
+        effects.removeAll { time - it.born > EFFECT_TICKS }
 
         // the life scripts of all active objects
         for (g in objects) {
@@ -454,6 +490,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     override fun body(obj: Int) {
         val g = objects[obj]
         if (!g.w.active) return
+        if (g.asset?.number == g.w.body) return // the same body again changes nothing (LM_BODY of the original)
         val a = g.actor
         val anim = a?.currentAnim ?: g.w.anim
         createActor(g, if (anim != -1) anim else -1, 0, -1)
@@ -546,6 +583,25 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                         g.actionType = 0
                         return
                     }
+                }
+            }
+            6 -> {
+                if (w.anim != g.actionAnim) return
+                val a = g.actor ?: return
+                val item = vm.objects.getOrNull(g.actionParam) ?: return
+                val hot = hotPoint(g, g.actionGroup) ?: intArrayOf(0, 0, 0)
+                val bz = data.body(item.body)?.zv ?: intArrayOf(-50, 50, -50, 50, -50, 50)
+                val x = a.renderX + hot[0]
+                val y = a.renderY + hot[1]
+                val z = a.renderZ + hot[2]
+                val inWall = roomView.hardcols.any { h -> h.x1 < x + bz[1] && x + bz[0] < h.x2 && h.y1 < y + bz[3] && y + bz[2] < h.y2 && h.z1 < z + bz[5] && z + bz[4] < h.z2 }
+                if (inWall) { // the hand is in a wall: the item just drops at his feet
+                    trace?.invoke("throw: hand at $x,$y,$z in wall ${roomView.hardcols.firstOrNull { h -> h.x1 < x + bz[1] && x + bz[0] < h.x2 && h.y1 < y + bz[3] && y + bz[2] < h.y2 && h.z1 < z + bz[5] && z + bz[4] < h.z2 }?.let { "${it.x1}..${it.x2} ${it.y1}..${it.y2} ${it.z1}..${it.z2}" }} bz=${bz.toList()}")
+                    g.actionType = 0
+                    putAt(item.index, w.index)
+                } else if (w.frame == g.actionFrame) {
+                    g.actionType = 0
+                    releaseThrow(g)
                 }
             }
             4 -> {
@@ -729,13 +785,218 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         ui.gameOver()
     }
 
-    override fun special(obj: Int, kind: Int) {}
+    /** SPECIAL: a visual effect at the object (0 evaporation around its box, 1 hit effect at the hand of what hit it, 4 smoke). */
+    override fun special(obj: Int, kind: Int) {
+        val g = objects.getOrNull(obj) ?: return
+        val a = g.actor
+        when (kind) {
+            0 -> if (a != null) effects.add(Effect(0, a.renderX, a.renderY, a.renderZ, time, a.zv.copyOf()))
+            1 -> { // flow at the hand of the one that hit this object
+                val by = objects.getOrNull(g.w.hitBy)
+                val h = by?.let { hotPoint(it, it.actionGroup) }
+                val b = by?.actor
+                if (b != null) effects.add(Effect(1, b.renderX + (h?.get(0) ?: 0), b.renderY + (h?.get(1) ?: 0), b.renderZ + (h?.get(2) ?: 0), time, null))
+            }
+            4 -> if (a != null) effects.add(Effect(4, a.renderX, a.renderY, a.renderZ, time, a.zv.copyOf()))
+        }
+    }
+
+    override fun light(on: Int) {
+        lightOff = on == 0
+    }
+
+    override fun picture(index: Int, ticks: Int, sample: Int) {
+        ui.picture(index, ticks, sample)
+    }
+
+    override fun endSequence() {
+        exited = true
+        ui.endSequence()
+    }
+
+    override fun upCoorY(obj: Int) {
+        objects.getOrNull(obj)?.actor?.moveYBy(-2000)
+    }
+
+    override fun setAlpha(obj: Int, alpha: Int, speed: Int) {
+        val w = objects.getOrNull(obj)?.w ?: return
+        // the alpha angle turns by steps towards the target over speed ticks
+        if (w.alpha != alpha) {
+            val diff = ((alpha - w.alpha + 512) and 1023) - 512
+            w.alpha = (w.alpha + (if (speed <= 1) diff else diff / speed)) and 1023
+        }
+    }
+
+    /** DEF_ZV, DEF_ABS_ZV and the DO_..._ZV commands: the box of the object is set or recomputed from its body. */
+    override fun zv(obj: Int, op: String, values: IntArray) {
+        val g = objects.getOrNull(obj) ?: return
+        val a = g.actor ?: return
+        val z = a.zv
+        val x = a.renderX
+        val y = a.renderY
+        val zz = a.renderZ
+        val b = g.asset?.zv
+        when (op) {
+            "DEF_ZV" -> { z[0] = x + values[0]; z[1] = x + values[1]; z[2] = y + values[2]; z[3] = y + values[3]; z[4] = zz + values[4]; z[5] = zz + values[5] }
+            "DEF_ABS_ZV" -> values.copyInto(z, 0, 0, 6)
+            "DO_MAX_ZV" -> if (b != null) Actor.boxFor(b, 0, x, y, zz, a.beta).copyInto(z)
+            "DO_CARRE_ZV" -> if (b != null) Actor.boxFor(b, 2, x, y, zz, a.beta).copyInto(z)
+            "DO_NORMAL_ZV" -> if (b != null) Actor.boxFor(b, 1, x, y, zz, a.beta).copyInto(z)
+            "DO_ROT_ZV" -> if (b != null) Actor.boxFor(b, 3, x, y, zz, a.beta).copyInto(z)
+            "DO_REAL_ZV" -> realBox(g)?.let { r -> intArrayOf(x + r[0], x + r[1], y + r[2], y + r[3], zz + r[4], zz + r[5]).copyInto(z) }
+        }
+    }
+
+    /** The box around the posed, turned body (computeScreenBox and setupRealZv of the original), relative to the object place; null when it has no body. */
+    private fun realBox(g: GameObject): IntArray? {
+        val v = g.posedVertices() ?: return null
+        val a = g.actor ?: return null
+        val ang = (a.beta and 0x3FF) * 2.0 * Math.PI / 1024.0
+        val c = Math.cos(ang)
+        val s = Math.sin(ang)
+        var x1 = Int.MAX_VALUE; var x2 = Int.MIN_VALUE; var y1 = Int.MAX_VALUE; var y2 = Int.MIN_VALUE; var z1 = Int.MAX_VALUE; var z2 = Int.MIN_VALUE
+        for (i in 0 until v.size / 3) {
+            val px = (v[i * 3] * c - v[i * 3 + 2] * s).toInt()
+            val pz = (v[i * 3] * s + v[i * 3 + 2] * c).toInt()
+            val py = v[i * 3 + 1].toInt()
+            x1 = minOf(x1, px); x2 = maxOf(x2, px); y1 = minOf(y1, py); y2 = maxOf(y2, py); z1 = minOf(z1, pz); z2 = maxOf(z2, pz)
+        }
+        return intArrayOf(x1, x2, y1, y2, z1, z2)
+    }
+
+    // ------------------------------------------------------------------------------------------------------------------ falling
+
+    /**
+     * An object with the fall flag that has nothing under it falls: 2000 units over 40 ticks, until its box meets the floor, a collider or another object.
+     * While it falls FALLING reads 1 (the player script plays the fall animation and rates the fall by ROOMY).
+     */
+    private fun processFall(g: GameObject) {
+        val a = g.actor ?: return
+        val w = g.w
+        fun blocked(box: IntArray): Boolean =
+            roomView.hardcols.any { h -> h.x1 < box[1] && box[0] < h.x2 && h.y1 < box[3] && box[2] < h.y2 && h.z1 < box[5] && box[4] < h.z2 } ||
+                objects.any { o ->
+                    o !== g && o.w.active && o.actor?.let { b ->
+                        val zb = b.zv
+                        zb[0] < box[1] && box[0] < zb[1] && zb[2] < box[3] && box[2] < zb[3] && zb[4] < box[5] && box[4] < zb[5]
+                    } == true
+                }
+        if (g.fallTicks < 0) {
+            // standing? the box 100 units lower meets something, or he is at the floor
+            val under = a.zv.copyOf()
+            under[3] += 100
+            if (a.renderY >= -10 || blocked(under)) {
+                w.falling = 0
+            } else {
+                g.fallStartY = a.renderY
+                g.fallTicks = 0
+                w.falling = 1
+            }
+            return
+        }
+        g.fallTicks++
+        val target = (g.fallStartY + 2000 * g.fallTicks / 40).coerceAtMost(0)
+        val dy = target - a.renderY
+        val moved = a.zv.copyOf()
+        moved[2] += dy
+        moved[3] += dy
+        if (target >= 0 || blocked(moved) || g.fallTicks >= 40) {
+            // landed: he stops at the floor or on what carries him
+            if (target >= 0) a.moveYBy(-a.renderY)
+            g.fallTicks = -1
+            w.falling = 0
+        } else {
+            a.moveYBy(dy)
+            w.falling = 1
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------------------------ throwing
+
+    /** THROW: the throw animation plays; at its frame the item leaves the hand and flies along the heading (animAction.cpp states 6, 7, 9). */
+    override fun throwObject(obj: Int, args: IntArray) {
+        val g = objects.getOrNull(obj) ?: return
+        if (g.actor?.playAnim(args[0], 2, args[6]) != true) return
+        g.actionType = 6
+        g.actionAnim = args[0]; g.actionFrame = args[1]; g.actionGroup = args[2]; g.actionParam = args[3]; g.actionForce = args[5]
+        val item = vm.objects.getOrNull(args[3]) ?: return
+        if (args[4] == 0) item.gamma -= 0x100
+        item.foundFlag = item.foundFlag or 0x1000
+    }
+
+    /** HIT_OBJECT / STOP_HIT_OBJECT: a state of the original that nothing evaluates; kept so the calls of the scripts are understood. */
+    override fun hitObject(obj: Int, a: Int, b: Int) {
+        val g = objects.getOrNull(obj) ?: return
+        g.actionType = 8; g.actionParam = a; g.actionForce = b
+    }
+
+    override fun stopHitObject(obj: Int) {
+        val g = objects.getOrNull(obj) ?: return
+        if (g.actionType == 8) { g.actionType = 0; g.actionParam = 0; g.actionForce = 0 }
+    }
+
+    /** The throw animation reached its frame: the item appears at the hand and starts to fly. */
+    private fun releaseThrow(g: GameObject) {
+        val item = vm.objects.getOrNull(g.actionParam) ?: return
+        val a = g.actor ?: return
+        val hot = hotPoint(g, g.actionGroup) ?: intArrayOf(0, 0, 0)
+        removeFromInventory(item.index)
+        item.x = a.renderX + hot[0]; item.y = a.renderY + hot[1]; item.z = a.renderZ + hot[2]
+        item.stage = stage; item.room = room
+        item.alpha = g.w.alpha; item.beta = (a.beta + 0x200) and 0x3FF
+        item.foundFlag = item.foundFlag and 0xBFFF
+        item.flags = (item.flags or 0x85) and 0x20.inv()
+        moved(item.index)
+        val thrown = objects[item.index]
+        thrown.flightX = item.x; thrown.flightZ = item.z
+        thrown.flightBeta = a.beta
+        thrown.flightThrower = g.w.index
+        thrown.flightTicks = 0
+        thrown.actionForce = g.actionForce
+    }
+
+    /** A thrown item flies 3000 units in 60 ticks along the heading of the thrower; a wall or an object ends the flight (an object that is hit gets HIT_BY and the force). */
+    private fun processFlight(g: GameObject) {
+        val a = g.actor ?: run { g.flightTicks = -1; return }
+        g.flightTicks++
+        val dist = 3000 * minOf(g.flightTicks, 60) / 60
+        val ang = (g.flightBeta and 0x3FF) * 2.0 * Math.PI / 1024.0
+        val nx = g.flightX + (dist * Math.sin(ang)).toInt()
+        val nz = g.flightZ - (dist * Math.cos(ang)).toInt()
+        val b = g.asset?.zv ?: intArrayOf(-100, 100, -100, 100, -100, 100)
+        val box = intArrayOf(nx + b[0], nx + b[1], a.renderY + b[2], a.renderY + b[3], nz + b[4], nz + b[5])
+        fun hits(z: IntArray) = z[0] < box[1] && box[0] < z[1] && z[2] < box[3] && box[2] < z[3] && z[4] < box[5] && box[4] < z[5]
+        var stop = roomView.hardcols.any { h -> hits(intArrayOf(h.x1, h.x2, h.y1, h.y2, h.z1, h.z2)) }
+        for (o in objects) {
+            if (o === g || !o.w.active || o.w.index == g.flightThrower) continue
+            val zo = o.actor?.zv ?: continue
+            if (hits(zo)) {
+                g.w.hit = o.w.index
+                o.w.hitBy = g.w.index
+                o.w.hitForce = g.actionForce
+                stop = true
+            }
+        }
+        if (stop || g.flightTicks >= 60) {
+            g.flightTicks = -1
+            g.w.flags = g.w.flags or AF_FALLABLE // the item drops to the floor where it stopped
+            ui.playSample(SAMPLE_CHOC)
+            return
+        }
+        a.pushBy(nx - a.renderX, nz - a.renderZ)
+        g.w.x = nx
+        g.w.z = nz
+    }
+
 
     companion object {
         const val PLAYER_SCRIPT = 549
         const val AF_TRIGGER = 0x40
         const val AF_FOUNDABLE = 0x80
         const val AF_MOVABLE = 0x10
+        const val AF_FALLABLE = 0x100
+        const val EFFECT_TICKS = 70
+        const val SAMPLE_CHOC = 15
         const val ACTION_CLICK = 0x2000
         const val ACTION_TAKE = 0x800
         const val MAX_WEIGHT_CVAR = 0

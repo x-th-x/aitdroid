@@ -116,6 +116,17 @@ class GameData(
         trackPak?.get(n + 1)?.let { d -> ShortArray(d.size / 2) { ((d[it * 2].toInt() and 0xFF) or (d[it * 2 + 1].toInt() shl 8)).toShort() } }
     }
 
+    /** A full screen picture of ITD_RESS.PAK (entry index + 1: 64000 pixels, with their own colours when 770 bytes of header come first), 320 x 200 ARGB, or null. */
+    fun picture(index: Int): IntArray? {
+        val d = resourcePak.get(index + 1) ?: return null
+        if (d.size < 64000) return null
+        val own = d.size >= 64770
+        return IntArray(64000) { i ->
+            val c = d[d.size - 64000 + i].toInt() and 0xFF
+            if (own) 0xFF000000.toInt() or ((d[2 + c * 3].toInt() and 0xFF) shl 16) or ((d[3 + c * 3].toInt() and 0xFF) shl 8) or (d[4 + c * 3].toInt() and 0xFF) else palette[c]
+        }
+    }
+
     /** Sound sample [n] (entry n + 1 of LISTSAMP.PAK) or null. */
     fun sample(n: Int): VocSample? = samples.getOrPut(n) {
         try {

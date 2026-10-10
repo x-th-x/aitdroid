@@ -103,7 +103,7 @@ class AtticSceneRenderer {
     private val p0 = FloatArray(3)
 
     /** One thing to draw: a triangle (kind 0), a line (kind 1, from a to b) or a filled circle (kind 2, centre a, radius in [bx]); sorted by depth with the others. */
-    private class Tri(val depth: Float, val ax: Float, val ay: Float, val bx: Float, val by: Float, val cx: Float, val cy: Float, val color: Int, val kind: Int = 0)
+    private class Tri(val depth: Float, val ax: Float, val ay: Float, val bx: Float, val by: Float, val cx: Float, val cy: Float, val color: Int, val kind: Int = 0, val pts: FloatArray? = null)
 
     /** A plain picture without actors (for example a full-screen picture of the game). */
     fun renderPicture(picture: Bitmap) {
@@ -172,26 +172,36 @@ class AtticSceneRenderer {
         var l = Float.MAX_VALUE; var t = Float.MAX_VALUE; var r = -Float.MAX_VALUE; var b = -Float.MAX_VALUE
         val tris = ArrayList<Tri>(a.triangles.size / 4)
         val v = a.worldVertices
-        val poly = FloatArray(4 * 3)
-        for (k in 0 until a.triangles.size / 4) {
-            val ia = a.triangles[k * 4]; val ib = a.triangles[k * 4 + 1]; val ic = a.triangles[k * 4 + 2]
-            if (cz[ia] < CLIP && cz[ib] < CLIP && cz[ic] < CLIP) continue
-            // the original draws the polygons of a body in their palette colour, the shading is part of the model's colours
-            val col = a.triangles[k * 4 + 3]
-            // clip the triangle against the near plane (z >= CLIP); at most one corner is cut off into two, giving up to four points
-            val count = clipNear(cx, cy, cz, ia, ib, ic, poly)
-            if (count < 3) continue
-            val sx = FloatArray(count)
-            val sy = FloatArray(count)
-            var depth = 0f
-            for (q in 0 until count) {
-                proj.screen(poly[q * 3], poly[q * 3 + 1], poly[q * 3 + 2], p0)
-                sx[q] = p0[0] * S; sy[q] = p0[1] * S
-                depth += poly[q * 3 + 2]
-                l = min(l, sx[q]); r = max(r, sx[q]); t = min(t, sy[q]); b = max(b, sy[q])
+        // The polygons of a body arrive as fans of triangles (same first corner, same colour, each continuing the last); the original draws a polygon as one
+        // piece and sorts whole polygons, so the fans are put back together instead of sorting their triangles one by one.
+        val tr = a.triangles
+        val total = tr.size / 4
+        val ids = IntArray(total + 2)
+        var poly = FloatArray(32 * 3)
+        var k = 0
+        while (k < total) {
+            val first = tr[k * 4]
+            val col = tr[k * 4 + 3]
+            var count = 0
+            ids[count++] = first; ids[count++] = tr[k * 4 + 1]; ids[count++] = tr[k * 4 + 2]
+            var j = k + 1
+            while (j < total && tr[j * 4] == first && tr[j * 4 + 1] == ids[count - 1] && tr[j * 4 + 3] == col) {
+                ids[count++] = tr[j * 4 + 2]
+                j++
             }
-            depth /= count
-            for (q in 1 until count - 1) tris.add(Tri(depth, sx[0], sy[0], sx[q], sy[q], sx[q + 1], sy[q + 1], col))
+            k = j
+            if (poly.size < (count + 2) * 3) poly = FloatArray((count + 2) * 3)
+            val m = clipPolygon(cx, cy, cz, ids, count, poly)
+            if (m < 3) continue
+            val pts = FloatArray(m * 2)
+            var depth = 0f
+            for (q in 0 until m) {
+                proj.screen(poly[q * 3], poly[q * 3 + 1], poly[q * 3 + 2], p0)
+                pts[q * 2] = p0[0] * S; pts[q * 2 + 1] = p0[1] * S
+                depth += poly[q * 3 + 2]
+                l = min(l, pts[q * 2]); r = max(r, pts[q * 2]); t = min(t, pts[q * 2 + 1]); b = max(b, pts[q * 2 + 1])
+            }
+            tris.add(Tri(depth / m, 0f, 0f, 0f, 0f, 0f, 0f, col, 3, pts))
         }
         // lines: cut at the near plane, drawn two pixels wide (one plate pixel)
         var li = 0
@@ -238,6 +248,17 @@ class AtticSceneRenderer {
                     canvas.drawPath(path, paint)
                     paint.shader = null
                 }
+                3 -> {
+                    paint.shader = if (tri.color ushr 24 == 0xFE) ditherShader(tri.color or (0xFF shl 24)) else null
+                    path.reset()
+                    val q = tri.pts!!
+                    path.moveTo(q[0], q[1])
+                    var i = 2
+                    while (i + 1 < q.size) { path.lineTo(q[i], q[i + 1]); i += 2 }
+                    path.close()
+                    canvas.drawPath(path, paint)
+                    paint.shader = null
+                }
                 1 -> {
                     paint.style = Paint.Style.STROKE
                     paint.strokeWidth = S.toFloat()
@@ -248,6 +269,29 @@ class AtticSceneRenderer {
             }
         }
         return floatArrayOf(max(0f, l - 2f), max(0f, t - 2f), min(W.toFloat(), r + 2f), min(H.toFloat(), b + 2f))
+    }
+
+    /** Clips the polygon ids[0 until n] in camera space against the near plane (Sutherland-Hodgman); writes the (x, y, z) points to [out], returns their count. */
+    private fun clipPolygon(cx: FloatArray, cy: FloatArray, cz: FloatArray, ids: IntArray, n: Int, out: FloatArray): Int {
+        var count = 0
+        for (i in 0 until n) {
+            val p = ids[i]
+            val q = ids[(i + 1) % n]
+            val pIn = cz[p] >= CLIP
+            val qIn = cz[q] >= CLIP
+            if (pIn) {
+                out[count * 3] = cx[p]; out[count * 3 + 1] = cy[p]; out[count * 3 + 2] = cz[p]
+                count++
+            }
+            if (pIn != qIn) {
+                val f = (CLIP - cz[p]) / (cz[q] - cz[p])
+                out[count * 3] = cx[p] + (cx[q] - cx[p]) * f
+                out[count * 3 + 1] = cy[p] + (cy[q] - cy[p]) * f
+                out[count * 3 + 2] = CLIP
+                count++
+            }
+        }
+        return count
     }
 
     /** Clips the triangle (ia, ib, ic) in camera space against the near plane; writes up to four (x, y, z) points to [out], returns their count. */

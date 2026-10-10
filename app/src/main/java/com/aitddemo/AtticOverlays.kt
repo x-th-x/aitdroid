@@ -168,12 +168,13 @@ fun InventoryOverlay(game: AtticGame, onClose: () -> Unit, onUse: (Int, Int) -> 
     }
 }
 
-/** A closer look at an item: one finger turns it around, two fingers zoom it; "< Back" returns to the inventory. */
+/** A closer look at an item: one finger turns it around completely (left/right and up/down), two fingers zoom it; "< Back" returns to the inventory. */
 @Composable
 private fun ZoomedItem(name: String, vertices: FloatArray, triangles: IntArray, onClose: () -> Unit) {
     BackHandler { onClose() }
     var angle by remember { mutableFloatStateOf(0.6f) }
-    var zoom by remember { mutableFloatStateOf(1.5f) }
+    var pitch by remember { mutableFloatStateOf(0f) }
+    var zoom by remember { mutableFloatStateOf(1f) }
     Box(
         Modifier
             .fillMaxSize()
@@ -181,15 +182,19 @@ private fun ZoomedItem(name: String, vertices: FloatArray, triangles: IntArray, 
             .pointerInput(Unit) {
                 detectTransformGestures { _, pan, gestureZoom, _ ->
                     angle += pan.x * 0.012f
-                    zoom = (zoom * gestureZoom).coerceIn(0.5f, 6f)
+                    pitch += pan.y * 0.012f
+                    zoom = (zoom * gestureZoom).coerceIn(0.4f, 6f)
                 }
             },
     ) {
-        ModelView(vertices = vertices, triangles = triangles, angle = angle, zoom = zoom, modifier = Modifier.fillMaxSize())
+        ModelView(vertices = vertices, triangles = triangles, angle = angle, pitch = pitch, zoom = zoom, modifier = Modifier.fillMaxSize())
         Box(Modifier.align(Alignment.TopCenter).padding(12.dp)) { BitmapText(text = name, scale = 2.5f, color = TEXT) }
         Box(
             Modifier.align(Alignment.BottomStart).padding(12.dp).background(Color.Black.copy(alpha = 0.5f)).clickable(onClick = onClose).padding(horizontal = 10.dp, vertical = 6.dp),
         ) { BitmapText(text = "< Back", scale = 2f, color = TEXT) }
+        Box(
+            Modifier.align(Alignment.BottomEnd).padding(12.dp).background(Color.Black.copy(alpha = 0.5f)).clickable { angle = 0.6f; pitch = 0f; zoom = 1f }.padding(horizontal = 10.dp, vertical = 6.dp),
+        ) { BitmapText(text = "Reset", scale = 2f, color = TEXT) }
     }
 }
 

@@ -56,6 +56,8 @@ class WorldObject(val index: Int, private val d: ByteArray) {
 
     companion object {
         const val SIZE = 52
+        /** The object type bits a script may set: animated, movable, trigger, foundable, fallable, water. */
+        const val AF_MASK = 0x1 + 0x10 + 0x40 + 0x80 + 0x100 + 0x400
     }
 }
 
@@ -102,6 +104,8 @@ interface LifeHost {
     fun read(index: Int, type: Int) {} // type 0 = letter, 1 = book, 2 = notebook; index = text entry of ENGLISH.PAK
     fun special(obj: Int, kind: Int) {}
     fun lifeChanged(obj: Int, life: Int) {}
+    fun upCoorY(obj: Int) {} // UP_COOR_Y: the object is lifted 2000 units (after a climb)
+    fun endSequence() {}
 
     // ---- presentation
     fun message(id: Int) {}
@@ -337,7 +341,7 @@ class LifeVm(
                         t.body = eval()
                         if (t.active) host.body(target)
                     }
-                    "TYPE" -> t.flags = (t.flags and 1) or s16()
+                    "TYPE" -> t.flags = (t.flags and WorldObject.AF_MASK.inv()) + (s16() and WorldObject.AF_MASK)
                     "ANIM_ONCE" -> {
                         val a = s16()
                         val info = s16()
@@ -463,7 +467,9 @@ class LifeVm(
                     "SHAKING" -> host.shaking(s16())
                     "WATER" -> host.water(s16())
                     "CALL_INVENTORY" -> host.callInventory()
-                    "SPEED", "CAMERA", "STOP_BETA", "UP_COOR_Y", "GET_HARD_CLIP", "END_SEQUENCE" -> {
+                    "UP_COOR_Y" -> host.upCoorY(target)
+                    "END_SEQUENCE" -> host.endSequence()
+                    "SPEED", "CAMERA", "STOP_BETA", "GET_HARD_CLIP" -> {
                         skip(name)
                         note(name, target)
                     }
