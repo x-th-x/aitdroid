@@ -203,8 +203,48 @@ private fun evaporationActor(e: Effect, now: Int, palette: IntArray): AtticActor
     return AtticActor(verts, IntArray(0), e.x.toFloat(), e.y.toFloat(), e.z.toFloat(), e.x / 10 - 5, e.x / 10 + 5, e.z / 10 - 5, e.z / 10 + 5, IntArray(0), spheres.toIntArray())
 }
 
+/**
+ * The dots of a hit (mode 1, palette colour 85, red) and of a shot that lands (mode 2, colour 15, white), as the original does them: 30 single pixels at random places
+ * within 100 units of the point; each has a random direction and an upward speed of 50 to a downward 10, every frame it gets 6 more downward speed, moves by its
+ * speed and 10 units along its direction, and it is gone when it reaches the floor (y = 0). The cloud is turned by the angle of the object.
+ */
+private fun dotsActor(e: Effect, now: Int, palette: IntArray): AtticActor {
+    val frames = (now - e.born).coerceAtLeast(0) / SPECIAL_FRAME_TICKS
+    val rnd = java.util.Random(e.born * 31L + e.kind)
+    val count = 30
+    val px = FloatArray(count); val py = FloatArray(count); val pz = FloatArray(count)
+    for (i in 0 until count) {
+        px[i] = (rnd.nextInt(200) - 100).toFloat()
+        py[i] = e.y + (rnd.nextInt(200) - 100).toFloat()
+        pz[i] = (rnd.nextInt(200) - 100).toFloat()
+    }
+    val ang = IntArray(count); val vy = FloatArray(count)
+    for (i in 0 until count) { ang[i] = rnd.nextInt(0x3FF); vy[i] = (rnd.nextInt(60) - 50).toFloat() }
+    for (f in 0 until frames) {
+        for (i in 0 until count) {
+            if (py[i] >= 0f) continue
+            vy[i] += 6f
+            py[i] += vy[i]
+            val a = ang[i] * 2.0 * Math.PI / 1024.0
+            px[i] += (10 * Math.cos(a)).toFloat()
+            pz[i] += (10 * Math.sin(a)).toFloat()
+        }
+    }
+    val color = palette.getOrElse(if (e.kind == 1) 85 else 15) { 0xFFFFFFFF.toInt() }
+    val rot = initRot(e.alpha, e.beta, e.gamma)
+    val verts = FloatArray(count * 3)
+    val spheres = ArrayList<Int>(count * 3)
+    for (i in 0 until count) {
+        val (rx, ry, rz) = rotatePoint(px[i], py[i], pz[i], rot)
+        verts[i * 3] = e.x + rx; verts[i * 3 + 1] = ry; verts[i * 3 + 2] = e.z + rz
+        if (py[i] < 0f) { spheres.add(i); spheres.add(-2); spheres.add(color) }
+    }
+    return AtticActor(verts, IntArray(0), e.x.toFloat(), e.y.toFloat(), e.z.toFloat(), e.x / 10 - 5, e.x / 10 + 5, e.z / 10 - 5, e.z / 10 + 5, IntArray(0), spheres.toIntArray())
+}
+
 private fun effectActor(e: Effect, now: Int, palette: IntArray): AtticActor {
     if (e.kind == 0) return evaporationActor(e, now, palette)
+    if (e.kind == 1 || e.kind == 2) return dotsActor(e, now, palette)
     val age = (now - e.born).coerceAtLeast(0)
     val life = AtticGame.EFFECT_TICKS
     val rnd = java.util.Random(e.born * 31L + e.kind)
@@ -271,6 +311,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
         for ((i, v) in DevOptions.vars) if (i in g.vm.vars.indices) g.vm.vars[i] = v.toShort()
         if (DevOptions.vars.any { it.first == 19 }) g.objects[9].w.chronoStart = g.time
         if (DevOptions.vars.any { it.first == 999 }) g.special(1, 0) // shows the evaporation effect around the player (for testing)
+        if (DevOptions.vars.any { it.first == 998 }) g.player?.actor?.let { g.effects.add(Effect(1, it.renderX, it.renderY - 1000, it.renderZ, g.time, null)) } // the dots of a hit in front of the player (for testing)
         if (loadSlot != null) SaveStore.load(context, loadSlot, g)
     } }
     // the room behind the attic stairs is read in the background, so the change of floor does not stop the game

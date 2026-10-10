@@ -677,6 +677,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                     other.w.hitForce = g.actionForce
                     // the place of the impact is the hot point from now on (the hit effect appears there)
                     g.shotPoint = intArrayOf(x - a.renderX, y - a.renderY, z - a.renderZ)
+                    effects.add(Effect(2, x, y, z, time, null, 0, (-a.beta) and 0x3FF, 0))
                     return
                 }
             }
@@ -854,7 +855,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                 val by = objects.getOrNull(g.w.hitBy)
                 val h = by?.let { b -> b.shotPoint?.also { b.shotPoint = null } ?: hotPoint(b, b.actionGroup) }
                 val b = by?.actor
-                if (b != null) effects.add(Effect(1, b.renderX + (h?.get(0) ?: 0), b.renderY + (h?.get(1) ?: 0), b.renderZ + (h?.get(2) ?: 0), time, null))
+                if (b != null) effects.add(Effect(1, b.renderX + (h?.get(0) ?: 0), b.renderY + (h?.get(1) ?: 0), b.renderZ + (h?.get(2) ?: 0), time, null, 0, (-b.beta) and 0x3FF, 0))
             }
             4 -> if (a != null) effects.add(Effect(4, a.renderX, a.renderY, a.renderZ, time, a.zv.copyOf()))
         }
@@ -1198,7 +1199,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         const val AF_FOUNDABLE = 0x80
         const val AF_MOVABLE = 0x10
         const val AF_FALLABLE = 0x100
-        const val EFFECT_TICKS = 80
+        const val EFFECT_TICKS = 120
 
         /** The evaporation lasts until its largest bubble (300 units, 5 less every frame) is gone: 60 frames of the original, 3 engine ticks each. */
         const val EVAPORATION_TICKS = 190
