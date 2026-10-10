@@ -114,7 +114,7 @@ fun FoundWindow(game: AtticGame, item: Int, onChoice: (Boolean) -> Unit) {
             CenteredText(texts[w.foundName] ?: "?", 44)
             if (asset != null) {
                 Box(Modifier.offset(x = gx(100), y = gy(62)).size(gx(120), gy(70))) {
-                    ModelSpinner(vertices = asset.vertices, triangles = asset.triangles, rotationSpeed = 1.2f, modifier = Modifier.fillMaxSize())
+                    ModelSpinner(vertices = asset.vertices, triangles = asset.triangles, rotationSpeed = 0.4f, modifier = Modifier.fillMaxSize())
                 }
             }
             if (heavy) {
@@ -152,7 +152,7 @@ fun InventoryOverlay(game: AtticGame, onClose: () -> Unit, onUse: (Int, Int) -> 
             Box(Modifier.offset(x = gx(10), y = gy(8)).size(gx(300), gy(184)).background(Color.Black.copy(alpha = 0.92f)).border(unit * 1.5f, GOLD))
             CenteredText(name, 14)
             Box(Modifier.offset(x = gx(105), y = gy(34)).size(gx(110), gy(100)).background(Color(0xFF0C0608)).border(unit, GOLD).clickable(enabled = asset != null) { zoomed = true }) {
-                if (asset != null) ModelSpinner(vertices = asset.vertices, triangles = asset.triangles, rotationSpeed = 0.9f, modifier = Modifier.fillMaxSize())
+                if (asset != null) ModelSpinner(vertices = asset.vertices, triangles = asset.triangles, rotationSpeed = 0.35f, modifier = Modifier.fillMaxSize())
             }
             if (items.size > 1) {
                 Choice("<", 125, 142, false) { selected = (sel + items.size - 1) % items.size }

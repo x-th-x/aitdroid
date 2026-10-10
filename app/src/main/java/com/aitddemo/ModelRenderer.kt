@@ -275,6 +275,24 @@ private class ModelRaster {
         val lightX = -0.4f; val lightY = -0.6f; val lightZ = -0.7f
         val triCount = tris.size / 4
 
+        // The ramp materials (alpha 0xFD marble, 0xFC and 0xFB copper) run over a whole polygon, which arrives as a fan of triangles: find the screen box of each fan.
+        val rampMinX = FloatArray(triCount); val rampMaxX = FloatArray(triCount); val rampMinY = FloatArray(triCount)
+        var fanStart = 0
+        while (fanStart < triCount) {
+            val col = tris[fanStart * 4 + 3]
+            var fanEnd = fanStart + 1
+            if (col ushr 24 in 0xFB..0xFD) {
+                while (fanEnd < triCount && tris[fanEnd * 4] == tris[fanStart * 4] && tris[fanEnd * 4 + 1] == tris[(fanEnd - 1) * 4 + 2] && tris[fanEnd * 4 + 3] == col) fanEnd++
+                var x0 = Float.MAX_VALUE; var x1 = -Float.MAX_VALUE; var y0 = Float.MAX_VALUE
+                for (t in fanStart until fanEnd) for (k in 0..2) {
+                    val v = tris[t * 4 + k]
+                    x0 = min(x0, sx[v]); x1 = max(x1, sx[v]); y0 = min(y0, sy[v])
+                }
+                for (t in fanStart until fanEnd) { rampMinX[t] = x0; rampMaxX[t] = x1; rampMinY[t] = y0 }
+            }
+            fanStart = fanEnd
+        }
+
         for (t in 0 until triCount) {
             val a = tris[t * 4]; val b = tris[t * 4 + 1]; val c = tris[t * 4 + 2]
             val colorInt = tris[t * 4 + 3]
@@ -309,6 +327,17 @@ private class ModelRaster {
             val shadedG = (baseG * lambert).toInt().coerceIn(0, 255)
             val shadedB = (baseB * lambert).toInt().coerceIn(0, 255)
             val shadedColor = (0xFF shl 24) or (shadedR shl 16) or (shadedG shl 8) or shadedB
+            val material = colorInt ushr 24
+            val ramp = if (material in 0xFB..0xFD) BodyRamps.ramps[colorInt] else null
+            val shadedRamp = ramp?.let { r ->
+                IntArray(16) {
+                    val c = r[it]
+                    (0xFF shl 24) or ((((c shr 16) and 0xFF) * lambert).toInt().coerceIn(0, 255) shl 16) or ((((c shr 8) and 0xFF) * lambert).toInt().coerceIn(0, 255) shl 8) or
+                        (((c and 0xFF) * lambert).toInt().coerceIn(0, 255))
+                }
+            }
+            val rampWidth = (rampMaxX[t] - rampMinX[t]).coerceAtLeast(1f)
+            val scanline = h / 200f // one scanline of the original's 320 x 200 screen
 
             val za = rz[a]; val zb = rz[b]; val zc = rz[c]
 
@@ -326,7 +355,13 @@ private class ModelRaster {
                     val idx = rowBase + px
                     if (z < depth[idx]) {
                         depth[idx] = z
-                        pixels[idx] = shadedColor
+                        pixels[idx] = if (shadedRamp == null) shadedColor else shadedRamp[
+                            when (material) {
+                                0xFD -> ((pxf - rampMinX[t]) / rampWidth * 16f).toInt()
+                                0xFC -> ((pyf - rampMinY[t]) / scanline).toInt()
+                                else -> ((pyf - rampMinY[t]) / scanline / 2f).toInt()
+                            }.coerceIn(0, 15)
+                        ]
                     }
                 }
             }
