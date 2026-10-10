@@ -57,6 +57,8 @@ class MainActivity : ComponentActivity() {
         val devItems = intent?.getStringExtra("devItems")?.split(",")?.mapNotNull { it.trim().toIntOrNull() } ?: emptyList()
         // `--es devPos 7000,4000,0` places the player (x, z, heading) when the attic starts (for testing)
         val devPos = intent?.getStringExtra("devPos")?.split(",")?.mapNotNull { it.trim().toIntOrNull() }?.takeIf { it.size == 3 }
+        // `--es devVars 19=1,20=0` sets script variables when the attic starts (for testing; 19=1 starts the second creature)
+        DevOptions.vars = intent?.getStringExtra("devVars")?.split(",")?.mapNotNull { e -> e.split("=").takeIf { it.size == 2 }?.let { p -> p[0].trim().toIntOrNull()?.let { i -> p[1].trim().toIntOrNull()?.let { v -> i to v } } } } ?: emptyList()
         setContent { StartGate(devAutoAttic, devAutoIntro, devAutoMusic, devControlMode, devItems, devPos) }
     }
 }
@@ -298,4 +300,9 @@ private fun LoadScreen(onBack: () -> Unit, onPick: (Int) -> Unit) {
         }
         BackButton(onClick = onBack)
     }
+}
+
+/** Settings for testing that come in as intent extras. */
+object DevOptions {
+    var vars: List<Pair<Int, Int>> = emptyList()
 }

@@ -236,6 +236,8 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     val game = remember(world) { AtticGame(world.game, ui).also { g ->
         devItems.forEach { g.take(it) }
         devPos?.let { p -> g.player?.actor?.teleport(p[0], 0, p[1], p[2]) }
+        for ((i, v) in DevOptions.vars) if (i in g.vm.vars.indices) g.vm.vars[i] = v.toShort()
+        if (DevOptions.vars.any { it.first == 19 }) g.objects[9].w.chronoStart = g.time
         if (loadSlot != null) SaveStore.load(context, loadSlot, g)
     } }
     // the room behind the attic stairs is read in the background, so the change of floor does not stop the game
