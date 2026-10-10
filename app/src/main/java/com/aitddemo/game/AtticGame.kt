@@ -36,6 +36,11 @@ class GameObject(val w: WorldObject) {
     var actionForce = 0
     var actionParam = 0
 
+    /** A turn of the alpha angle in progress (SET_ALPHA): the target (-1 none), where it started and when. */
+    var alphaTarget = -1
+    var alphaStart = 0
+    var alphaStartTime = 0
+
     /** A fall in progress: the height it started at and the ticks since (the original YHandler 0 to 2000 over 40). */
     var fallStartY = 0
     var fallTicks = -1
@@ -820,10 +825,22 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     override fun setAlpha(obj: Int, alpha: Int, speed: Int) {
         val w = objects.getOrNull(obj)?.w ?: return
-        // the alpha angle turns by steps towards the target over speed ticks
-        if (w.alpha != alpha) {
-            val diff = ((alpha - w.alpha + 512) and 1023) - 512
-            w.alpha = (w.alpha + (if (speed <= 1) diff else diff / speed)) and 1023
+        val g = objects[obj]
+        val target = alpha and 1023
+        if (w.alpha == target) { g.alphaTarget = -1; return }
+        // the angle turns the short way to the target in a straight line over [speed] ticks (updateActorRotation of the original); a new target starts a new turn
+        if (g.alphaTarget != target) {
+            g.alphaTarget = target
+            g.alphaStart = w.alpha
+            g.alphaStartTime = time
+        }
+        val elapsed = time - g.alphaStartTime
+        if (speed <= 1 || elapsed >= speed) {
+            w.alpha = target
+            g.alphaTarget = -1
+        } else {
+            val diff = ((target - g.alphaStart + 512) and 1023) - 512
+            w.alpha = (g.alphaStart + diff * elapsed / speed) and 1023
         }
     }
 
@@ -1039,7 +1056,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             }
         }
         // the scene is rebuilt from nothing
-        for (g in objects) { g.actor = null; g.asset = null; g.w.active = false; g.actionType = 0; g.fallTicks = -1; g.flightTicks = -1 }
+        for (g in objects) { g.actor = null; g.asset = null; g.w.active = false; g.actionType = 0; g.fallTicks = -1; g.flightTicks = -1; g.alphaTarget = -1 }
         stage = newStage; room = newRoom; roomView = view; roomVersion++
         for (i in 0 until minOf(varCount, vm.vars.size)) vm.vars[i] = vars[i].toShort()
         for (i in 0 until minOf(cvarCount, vm.cvars.size)) vm.cvars[i] = cvars[i].toShort()
