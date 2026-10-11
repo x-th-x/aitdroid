@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -210,6 +212,12 @@ private fun flashActor(e: Effect, data: com.aitddemo.game.GameData): AtticActor 
     return AtticActor(out, asset.triangles, e.x.toFloat(), e.y.toFloat(), e.z.toFloat(), e.x / 10 - 5, e.x / 10 + 5, e.z / 10 - 5, e.z / 10 + 5, asset.lines, asset.spheres)
 }
 
+/** The photo of each camera of [view], scaled once to the renderer's resolution (nearest neighbour keeps the pixel look). */
+private fun scaledPhotos(view: RoomView): List<android.graphics.Bitmap> = view.photos.map { argb ->
+    val bmp = android.graphics.Bitmap.createBitmap(argb, 320, 200, android.graphics.Bitmap.Config.ARGB_8888)
+    android.graphics.Bitmap.createScaledBitmap(bmp, AtticSceneRenderer.W, AtticSceneRenderer.H, false)
+}
+
 /** One frame of the original (the evaporation is stepped per frame of the main loop) in engine ticks; the original ran as fast as the machine allowed, 20 per second is typical. */
 private const val SPECIAL_FRAME_TICKS = 3
 
@@ -368,7 +376,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     var frameTick by remember { mutableIntStateOf(0) }
     var cameraIndex by remember { mutableIntStateOf(ATTIC_INITIAL_CAMERA_INDEX) }
     // the room the game is in; its cameras, pictures and masks are prepared the first time it is shown
-    val roomCache = remember(world) { HashMap<RoomView, List<android.graphics.Bitmap>>() }
+    val roomCache = remember(world) { java.util.concurrent.ConcurrentHashMap<RoomView, List<android.graphics.Bitmap>>() }
     var shownRoom by remember { mutableStateOf<RoomView?>(null) }
     var playerX by remember { mutableFloatStateOf(0f) }
     var playerZ by remember { mutableFloatStateOf(0f) }
@@ -469,11 +477,19 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
 
     val view = game.roomView
     val camera = view.cameras.getOrNull(cameraIndex) ?: view.cameras[0]
-    val backgrounds = roomCache.getOrPut(view) {
-        // photo of each camera, scaled once to the renderer's resolution (nearest neighbour keeps the pixel look)
-        view.photos.map { argb ->
-            val bmp = android.graphics.Bitmap.createBitmap(argb, 320, 200, android.graphics.Bitmap.Config.ARGB_8888)
-            android.graphics.Bitmap.createScaledBitmap(bmp, AtticSceneRenderer.W, AtticSceneRenderer.H, false)
+    val backgrounds = roomCache.getOrPut(view) { scaledPhotos(view) }
+    // the rooms next to this one (doors of the room) are read and their pictures scaled in the background, so walking through a door does not wait
+    LaunchedEffect(view) {
+        withContext(Dispatchers.Default) {
+            for (zone in view.zones) {
+                if (zone.type != 0) continue
+                try {
+                    val next = world.game.rooms.room(view.stage, zone.parameter)
+                    roomCache.getOrPut(next) { scaledPhotos(next) }
+                } catch (_: Exception) {
+                    // a room the files do not have: nothing to prepare
+                }
+            }
         }
     }
     // one frame of the room: photo, objects and player through the camera matrix, masks over them (AtticSceneRenderer)
