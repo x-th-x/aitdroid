@@ -9,14 +9,19 @@ or Atari. *Alone in the Dark* and all related assets remain the property of thei
 
 ## Status
 
-Work in progress.
+Work in progress. The game logic of the original is re-implemented: the life scripts (LISTLIFE.PAK) run on the world objects (OBJETS.ITD), the engine moves, animates
+and collides the actors and draws them through the original cameras over the original pictures.
 
-- Attic scene (stage 0, room 0): camera pictures, furniture and player body read from the original files, fixed cameras with zone based camera switching, background masks, wall collision
-- Intro: played by the game engine from the original scripts (stage 7: car, frog, driver, his walk through the house up to the attic; ends with the script's GAME_OVER)
-- Music viewer: plays the original AdLib tracks through a software OPL2 emulation
-- Player actor: original animations, tank style controls and root motion (stick or D-pad), footstep samples
-- Life script interpreter: early work in progress (not yet driving the game)
+- Floors: attic, floor 1, 2 and 3 (stages 0 to 3) are playable; floors 4 to 6 (stages 4 to 6) run but are not yet reviewed in detail
+- Rooms and cameras (ETAGEnn.PAK, CAMERAnn.PAK): camera zones and the original camera choice, background masks (each room a camera sees has its own), objects of neighbouring rooms
+- Intro: played by the game engine from the original scripts of stage 7 (car, frog, driver, his walk through the house up to the attic; the script's GAME_OVER ends it)
+- Characters: Edward Carnby and Emily Hartwood (her own bodies and animations, LISTBOD2.PAK and LISTANI2.PAK)
+- Music (AdLib tracks through a software OPL2 emulation) and sound with the priorities of the original (PRIORITY.ITD)
+- Saved games, inventory, fights, items, books
+- Main menu with a floor selection (floor, room, items, waiting times) for testing
 - Menus use plain system fonts and solid colours (the original art is not embedded)
+
+Known gaps: floors 4 to 6 are not reviewed in detail; the frame rate of effects is an estimate; the pitch of sounds is unknown (the drivers are external programs).
 
 ## Game files
 
@@ -33,4 +38,4 @@ Requirements: Android Studio (or JDK 17+ and the Android SDK, platform 34), Grad
 3. Install `app/build/outputs/apk/debug/app-debug.apk` on a device (minSdk 24).
 
 Developer shortcuts (adb): `--ez devAutoAttic true`, `--ez devAutoIntro true`, `--ez devAutoMusic true`,
-`--es devControlMode dpad`.
+`--es devControlMode dpad`, `--es devVars 990=<stage*100+room>,991=1` (start in a room, skip the waiting times).
