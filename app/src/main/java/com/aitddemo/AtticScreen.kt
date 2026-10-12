@@ -361,6 +361,9 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     val context = androidx.compose.ui.platform.LocalContext.current
     val game = remember(world) { AtticGame(world.game, ui).also { g ->
         devItems.forEach { g.take(it) }
+        // for testing: devVars 990=104 starts in room 4 of floor 1 (stage * 100 + room), 991=1 lets everything that waits for a minute in its room go off at once
+        DevOptions.vars.firstOrNull { it.first == 990 }?.let { v -> g.player?.let { pl -> pl.w.stage = v.second / 100; pl.w.room = v.second % 100; g.moved(g.playerIndex) } }
+        if (DevOptions.vars.any { it.first == 991 }) for (o in g.objects) o.w.roomChronoStart = g.time - 3660
         devPos?.let { p -> g.player?.actor?.teleport(p[0], 0, p[1], p[2]) }
         for ((i, v) in DevOptions.vars) if (i in g.vm.vars.indices) g.vm.vars[i] = v.toShort()
         if (DevOptions.vars.any { it.first == 19 }) g.objects[9].w.chronoStart = g.time
