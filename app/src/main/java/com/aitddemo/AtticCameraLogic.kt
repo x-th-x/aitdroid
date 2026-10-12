@@ -95,7 +95,7 @@ fun resolveAtticCamera(x1: Int, x2: Int, z1: Int, z2: Int, beta: Int, currentCam
             best = cam.index
         }
     }
-    return if (best != -1) best else currentCameraIndex // no zone matched at all -> unchanged, exactly as the original does
+    return if (best != -1) best else currentCameraIndex.coerceAtLeast(0) // no zone matched at all -> unchanged, exactly as the original does (a room that was just entered starts with its first camera)
 }
 
 // World -> screen projection (the engine's setupCamera()/projection formula).
