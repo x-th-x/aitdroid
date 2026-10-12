@@ -7,6 +7,11 @@ import com.aitddemo.original.Pak
 import com.aitddemo.original.VocSample
 import com.aitddemo.original.u8
 
+/** Poses a body by code: its vertices (x, y, z each) for the object [o] at the game time [now]. */
+fun interface BodyPoser {
+    fun pose(o: GameObject, now: Int): FloatArray
+}
+
 /** A body of LISTBODY.PAK prepared for the game: its rest mesh, the bone data of an articulated body and the box from its header. */
 class BodyAsset(
     val number: Int,
@@ -16,6 +21,8 @@ class BodyAsset(
     val lines: IntArray,
     val spheres: IntArray,
     val parts: AnimatedParts?,
+    /** A body that is posed by code instead of by animation data (the monkey), or null. */
+    val poser: BodyPoser? = null,
 ) {
     val groupCount: Int get() = parts?.groups?.size?.div(12) ?: 0
 }

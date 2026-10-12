@@ -72,9 +72,16 @@ class GameObject(val w: WorldObject) {
     var actor: Actor? = null
     var asset: BodyAsset? = null
 
+    /** The game time of the frame being drawn (set by the screen), for bodies that are posed by code. */
+    var clock = 0
+
+    /** What the body's poser keeps from frame to frame. */
+    var poseState: Any? = null
+
     /** Posed vertices (x, y, z each) in the object's own space for drawing, or null when it has no body. */
     fun posedVertices(): FloatArray? {
         val a = asset ?: return null
+        a.poser?.let { return it.pose(this, clock) }
         val parts = a.parts ?: return a.vertices
         val act = actor ?: return a.vertices
         return BodyPose.pose(parts.vertices, parts.groups, parts.groupOrder, act.state)

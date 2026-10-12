@@ -28,7 +28,145 @@ object MonkeyBody {
             v[i * 3 + 1] = (vertices[i * 3 + 1] - bottom) * scale
             v[i * 3 + 2] = -vertices[i * 3 + 2] * scale
         }
-        return BodyAsset(number, zv, v, triangles, IntArray(0), IntArray(0), null)
+        base = v
+        return BodyAsset(number, zv, v, triangles, IntArray(0), IntArray(0), null, BodyPoser { o, now -> pose(o, now) })
+    }
+
+    // ------------------------------------------------------------------------------------------------------------------ the animation
+
+    /** The vertices of the monkey in game space (set by [asset]); the poser moves copies of them. */
+    private var base: FloatArray = FloatArray(0)
+
+    /** Where the parts hang, in the monkey's own data (x, y, z): the neck, the two shoulders and elbows, the two hips and the root of the tail. */
+    private val neck = floatArrayOf(0f, -340f, 0f)
+    private val shoulderR = floatArrayOf(112f, -320f, 40f)
+    private val elbowR = floatArrayOf(120f, -190f, 70f)
+    private val shoulderL = floatArrayOf(-112f, -320f, 40f)
+    private val elbowL = floatArrayOf(-120f, -190f, 70f)
+    private val hipR = floatArrayOf(50f, -35f, -10f)
+    private val hipL = floatArrayOf(-50f, -35f, -10f)
+    private val tailRoot = floatArrayOf(0f, -170f, -85f)
+
+    /** What the monkey remembers from frame to frame: how far into a walking step it is, and where it was. */
+    private class State { var phase = 0f; var lastX = 0; var lastZ = 0; var lastClock = -1; var walking = 0f; var dying = 0f }
+
+    /** Units of ground for one full step cycle (both legs). */
+    private const val WALK_STRIDE = 520f
+
+    /** The animation numbers of the creature's scripts: climbing out of the hole, attack, hit, death. */
+    private const val ANIM_CLIMB = 19
+    private const val ANIM_ATTACK = 17
+    private const val ANIM_HIT = 16
+    private const val ANIM_DEATH = 18
+
+    private fun deg(d: Float) = d * Math.PI.toFloat() / 180f
+
+    private fun feetLevel(): Float {
+        var bottom = -Float.MAX_VALUE
+        for (i in 0 until vertices.size / 3) bottom = maxOf(bottom, vertices[i * 3 + 1])
+        return bottom
+    }
+
+    /** The monkey's pose for the object [o] at game time [now]: legs and arms swing as it walks, it reaches up as it climbs, lunges to attack, jerks when hit and falls when it dies. */
+    private fun pose(o: GameObject, now: Int): FloatArray {
+        val st = (o.poseState as? State) ?: State().also { o.poseState = it }
+        val act = o.actor
+        val x = act?.renderX ?: 0
+        val z = act?.renderZ ?: 0
+        val anim = o.w.anim
+        if (now != st.lastClock) {
+            val dt = (now - st.lastClock).coerceIn(1, 20)
+            val moved = if (st.lastClock < 0) 0f else Math.hypot((x - st.lastX).toDouble(), (z - st.lastZ).toDouble()).toFloat()
+            val climbing = anim == ANIM_CLIMB
+            if (!climbing && moved < 400f) st.phase += moved / WALK_STRIDE * 2f * Math.PI.toFloat()
+            // walking fades in and out with the speed so the legs do not jerk
+            val target = if (!climbing && moved > 0.5f * dt) 1f else 0f
+            st.walking += (target - st.walking) * (0.2f * dt).coerceAtMost(1f)
+            st.dying = if (anim == ANIM_DEATH) (st.dying + 0.02f * dt).coerceAtMost(1f) else 0f
+            st.lastX = x; st.lastZ = z; st.lastClock = now
+        }
+        val t = now / 60f
+        val frameProgress = if (o.w.endFrame > 0) (o.w.frame.toFloat() / o.w.endFrame).coerceIn(0f, 1f) else 0f
+
+        val step = Math.sin(st.phase.toDouble()).toFloat()
+        // walking: legs and arms swing against each other, the body rises and falls twice per cycle
+        var swingLegs = deg(38f) * step * st.walking
+        var swingArms = -deg(30f) * step * st.walking
+        var armLift = 0f
+        var bob = -18f * Math.abs(step) * st.walking
+        var headNod = deg(6f) * Math.sin(st.phase * 2.0).toFloat() * st.walking
+        var tailWag = deg(22f) * Math.sin(t * 5.0).toFloat()
+        var lean = 0f
+        // standing: a slow sway of the arms and head
+        val still = 1f - st.walking
+        swingArms += deg(5f) * Math.sin(t * 2.0).toFloat() * still
+        var headTurn = deg(10f) * Math.sin(t * 1.3).toFloat() * still
+        when (anim) {
+            ANIM_CLIMB -> { // pulls itself up out of the hole: arms reach up one after the other, the legs kick
+                val c = Math.sin(t * 7.0).toFloat()
+                swingArms = -deg(110f) - deg(35f) * c
+                armLift = deg(35f) * c
+                swingLegs = deg(25f) * c
+                bob = -10f * Math.abs(c)
+                headNod = -deg(12f)
+                tailWag = deg(30f) * Math.sin(t * 9.0).toFloat()
+            }
+            ANIM_ATTACK -> { // lunges: both arms swing forward and down, the head follows
+                val p = Math.sin(Math.PI * frameProgress).toFloat()
+                swingArms = -deg(110f) * p
+                headNod = deg(18f) * p
+                lean = deg(14f) * p
+                swingLegs = 0f
+            }
+            ANIM_HIT -> { // jerks back and shakes its head
+                val p = 1f - frameProgress
+                lean = -deg(16f) * p
+                headTurn = deg(35f) * Math.sin(t * 40.0).toFloat() * p
+                swingArms = deg(40f) * p
+            }
+        }
+        val fall = st.dying // dying: it tips over backwards
+        val out = FloatArray(base.size)
+        val s = HEIGHT / (feetLevel() - (-520f))
+        val feet = feetLevel()
+        fun place(h: FloatArray) = floatArrayOf(-h[0] * s, (h[1] - feet) * s, -h[2] * s)
+        val pNeck = place(neck); val pShR = place(shoulderR); val pElR = place(elbowR); val pShL = place(shoulderL); val pElL = place(elbowL)
+        val pHipR = place(hipR); val pHipL = place(hipL); val pTail = place(tailRoot)
+        val origin = floatArrayOf(0f, 0f, 0f)
+        val tmp = FloatArray(3)
+        // forward is -z, so a swing about the x axis by a negative angle takes a hanging limb forward
+        fun rotX(h: FloatArray, a: Float, into: FloatArray) {
+            val dy = into[1] - h[1]; val dz = into[2] - h[2]
+            val c = Math.cos(a.toDouble()).toFloat(); val sn = Math.sin(a.toDouble()).toFloat()
+            into[1] = h[1] + dy * c - dz * sn; into[2] = h[2] + dy * sn + dz * c
+        }
+        fun rotY(h: FloatArray, a: Float, into: FloatArray) {
+            val dx = into[0] - h[0]; val dz = into[2] - h[2]
+            val c = Math.cos(a.toDouble()).toFloat(); val sn = Math.sin(a.toDouble()).toFloat()
+            into[0] = h[0] + dx * c + dz * sn; into[2] = h[2] - dx * sn + dz * c
+        }
+        for (i in 0 until base.size / 3) {
+            tmp[0] = base[i * 3]; tmp[1] = base[i * 3 + 1]; tmp[2] = base[i * 3 + 2]
+            when (i) {
+                in 24..127 -> { rotY(pNeck, headTurn, tmp); rotX(pNeck, -headNod, tmp) }
+                in 128..167 -> { // the right arm: the lower arm bends more at the elbow
+                    if (i >= 148) rotX(pElR, swingArms * 0.5f, tmp)
+                    rotX(pShR, swingArms - armLift, tmp)
+                }
+                in 168..207 -> {
+                    if (i >= 188) rotX(pElL, swingArms * 0.5f, tmp)
+                    rotX(pShL, swingArms + armLift, tmp)
+                }
+                in 208..227 -> rotX(pHipR, swingLegs, tmp)
+                in 228..247 -> rotX(pHipL, -swingLegs, tmp)
+                in 248..279 -> rotY(pTail, tailWag, tmp)
+            }
+            // the whole body leans forward or back about its feet, tips over when it dies, and rises with the bob
+            if (lean != 0f) rotX(origin, -lean, tmp)
+            if (fall > 0f) rotX(origin, deg(85f) * fall, tmp)
+            out[i * 3] = tmp[0]; out[i * 3 + 1] = tmp[1] + bob; out[i * 3 + 2] = tmp[2]
+        }
+        return out
     }
 
     val vertices: FloatArray = floatArrayOf(
