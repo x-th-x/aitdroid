@@ -202,20 +202,20 @@ private fun smokeActor(e: Effect, now: Int, palette: IntArray): AtticActor {
 }
 
 /**
- * The smoke out of the trapdoor hole (an addition to the original, built from the cigar smoke: the same grey, half transparent puffs). 24 puffs start one after the
- * other during the first 540 ticks at a random place within 250 units of the hole; each rises for 240 ticks at its own speed, drifts a little, and swells to 300 units
+ * The smoke out of the trapdoor hole (an addition to the original, built from the cigar smoke: the same grey, half transparent puffs). 40 puffs start one after the
+ * other during the first 900 ticks at a random place within 250 units of the hole; each rises for 240 ticks at its own speed, drifts a little, and swells to 300 units
  * and shrinks again as it goes.
  */
 private fun holeSmokeActor(e: Effect, now: Int, palette: IntArray): AtticActor {
     val t = (now - e.born).coerceAtLeast(0)
     val rnd = java.util.Random(e.born * 31L + e.kind)
     val key = (palette.getOrElse(176) { 0xFFFFFFFF.toInt() } and 0xFFFFFF) or (0xFA shl 24)
-    val count = 24
+    val count = 40
     val life = 240
     val verts = FloatArray(count * 3)
     val spheres = ArrayList<Int>(count * 3)
     for (i in 0 until count) {
-        val delay = rnd.nextInt(540)
+        val delay = rnd.nextInt(900)
         val sx = rnd.nextInt(500) - 250
         val sz = rnd.nextInt(500) - 250
         val rise = 2.5f + rnd.nextFloat() * 2f

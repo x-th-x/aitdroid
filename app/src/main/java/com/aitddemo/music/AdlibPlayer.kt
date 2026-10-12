@@ -28,6 +28,7 @@ class AdlibPlayer {
         stop()
         looping = loop
         val mine = ++generation
+        playing = true // from now on, not only when the player thread has its audio: a NEXT_MUSIC right after MUSIC must wait for this track to end
         val t = Thread {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
             val rate = 44100

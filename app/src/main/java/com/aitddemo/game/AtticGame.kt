@@ -96,37 +96,50 @@ class GameObject(val w: WorldObject) {
  */
 class AtticGame(val data: GameData, private val ui: GameUi, private var stage: Int = 0, private var room: Int = 0) : LifeHost {
     override var time = 0
-    /** The world object that is the monkey: one more than the original has, a copy of the creature of the trapdoor that waits outside the scene until it is spawned. */
-    private val monkeyIndex = data.objectData.u16(0)
+    /** The first of the world objects added for the monkeys: copies of the creature of the trapdoor that wait outside the scene until they are spawned (the first monkey is the creature itself). */
+    private val monkeyBase = data.objectData.u16(0)
     private val patchedScripts = HashMap<Int, ShortArray?>()
 
-    /** The scripts of the original, except the ones changed for the monkey: the creature no longer closes the trapdoor (the monkey does, when it is out), and the monkey has its own copies. */
+    /** Monkeys still to come out of the hole: (index of the added object, game time). */
+    private val pendingMonkeys = ArrayList<Pair<Int, Int>>()
+
+    /**
+     * The scripts of the original, except the ones changed for the monkeys: the creature of the trapdoor is a monkey (its BODY), it does not close the trapdoor (the last
+     * monkey does, when it is out), and every added monkey runs copies of the climb and fight scripts with its own object number (script number 1000 + 100 * k + original).
+     */
     private fun scriptFor(n: Int): ShortArray? = patchedScripts.getOrPut(n) {
         if (!data.useMonkey) return@getOrPut data.script(n)
-        when (n) {
-            LIFE_CREATURE_CLIMBED -> data.script(n)?.let { src ->
-                ScriptPatch.patch(src) { name, ow, start, w ->
-                    // [ow=8] LIFE 6 (the trapdoor closes) becomes VAR 511 0, which does nothing
-                    if (name == "LIFE" && ow == OBJ_TRAPDOOR && w[start].toInt() == LIFE_TRAPDOOR_CLOSING) {
-                        w[start - 2] = ScriptPatch.opcode("VAR"); w[start - 1] = 511; w[start] = 0
-                    }
-                }
+        fun noClose(name: String, ow: Int, start: Int, w: ShortArray) {
+            // [ow=8] LIFE 6 (the trapdoor closes) becomes [ow=8] LIFE -1: the trapdoor has no life script at that time, so nothing changes
+            if (name == "LIFE" && ow == OBJ_TRAPDOOR && w[start].toInt() == LIFE_TRAPDOOR_CLOSING) w[start] = -1
+        }
+        when {
+            n == LIFE_CREATURE_CLIMB -> data.script(n)?.let { src ->
+                // BODY takes an expression: a marker word, then the number
+                ScriptPatch.patch(src) { name, _, start, w -> if (name == "BODY" && w[start + 1].toInt() == CREATURE_BODY) w[start + 1] = MonkeyBody.BODY.toShort() }
             }
-            LIFE_CREATURE_CLIMBED + MONKEY_SCRIPTS, LIFE_CREATURE_FIGHT + MONKEY_SCRIPTS -> data.script(n - MONKEY_SCRIPTS)?.let { src ->
-                ScriptPatch.patch(src) { name, ow, start, w ->
-                    val v = w[start].toInt()
-                    if (ow < 0 && name == "LIFE" && v in LIFE_CREATURE_CLIMB..LIFE_CREATURE_FIGHT) w[start] = (v + MONKEY_SCRIPTS).toShort()
-                    if (ow < 0 && (name == "DELETE" || name == "CAMERA_TARGET") && v == OBJ_HOLE_CREATURE) w[start] = monkeyIndex.toShort()
+            n == LIFE_CREATURE_CLIMBED -> data.script(n)?.let { src -> ScriptPatch.patch(src) { name, ow, start, w -> noClose(name, ow, start, w) } }
+            n >= MONKEY_SCRIPTS -> {
+                val k = (n - MONKEY_SCRIPTS) / 100
+                val original = (n - MONKEY_SCRIPTS) % 100
+                val self = monkeyBase + k
+                data.script(original)?.let { src ->
+                    ScriptPatch.patch(src) { name, ow, start, w ->
+                        val v = w[start].toInt()
+                        if (ow < 0 && name == "LIFE" && v in LIFE_CREATURE_CLIMB..LIFE_CREATURE_FIGHT) w[start] = (MONKEY_SCRIPTS + 100 * k + v).toShort()
+                        if (ow < 0 && (name == "DELETE" || name == "CAMERA_TARGET") && v == OBJ_HOLE_CREATURE) w[start] = self.toShort()
+                        if (k != MONKEYS - 2) noClose(name, ow, start, w)
+                    }
                 }
             }
             else -> data.script(n)
         }
     }
 
-    val vm = LifeVm({ scriptFor(it) }, withMonkeyObject(data.objectData), data.vars, this).also { for (i in data.defines.indices) if (i < it.cvars.size) it.cvars[i] = data.defines[i] }
+    val vm = LifeVm({ scriptFor(it) }, withMonkeyObjects(data.objectData), data.vars, this).also { for (i in data.defines.indices) if (i < it.cvars.size) it.cvars[i] = data.defines[i] }
     init {
-        // the monkey is not in the scene until the creature of the trapdoor has climbed out
-        if (data.useMonkey) vm.objects[monkeyIndex].let { it.stage = -1; it.room = -1; it.life = -1; it.body = -1 }
+        // the added monkeys are not in the scene until they climb out of the hole
+        for (k in 0 until MONKEYS - 1) vm.objects[monkeyBase + k].let { it.stage = -1; it.room = -1; it.life = -1; it.body = -1 }
     }
     val objects: Array<GameObject> = Array(vm.objects.size) { GameObject(vm.objects[it]) }
 
@@ -263,6 +276,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     fun tick(timer: Int, keys: Int, action: Boolean, runHint: Boolean) {
         if (pendingFound >= 0 || pendingRead != null || exited || gameOver) return
         time = timer
+        spawnDueMonkeys()
         joy = keys
         run = runHint
         vm.joyd = keys
@@ -834,30 +848,36 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     }
 
     override fun lifeChanged(obj: Int, life: Int) {
-        // the creature of the trapdoor has climbed out and starts to fight: now the monkey climbs out too
-        if (obj == OBJ_HOLE_CREATURE && life == LIFE_CREATURE_FIGHT) spawnMonkey()
-        // not in the original: when the trapdoor starts to open, smoke comes out of the hole, until the creature has climbed out
+        // the creature of the trapdoor (a monkey) starts to climb out: the other monkeys follow, one every two seconds
+        if (data.useMonkey && obj == OBJ_HOLE_CREATURE && life == LIFE_CREATURE_CLIMBED && pendingMonkeys.isEmpty()) {
+            for (k in 0 until MONKEYS - 1) pendingMonkeys.add(k to time + (k + 1) * MONKEY_INTERVAL_TICKS)
+        }
+        // not in the original: when the trapdoor starts to open, smoke comes out of the hole, until the last monkey is out
         if (obj == OBJ_TRAPDOOR && life == LIFE_TRAPDOOR_OPENING) {
             vm.objects.getOrNull(OBJ_HOLE_CREATURE)?.let { effects.add(Effect(5, it.x, 0, it.z, time, null)) }
         }
     }
 
-    /** The monkey climbs out of the hole behind the creature, by the same scripts (copies with its own numbers) and the same path; it closes the trapdoor when it is out. */
-    private fun spawnMonkey() {
-        if (!data.useMonkey) return
-        val m = vm.objects[monkeyIndex]
-        if (m.stage >= 0) return
+    private fun spawnDueMonkeys() {
+        while (pendingMonkeys.isNotEmpty() && time >= pendingMonkeys[0].second) spawnMonkey(pendingMonkeys.removeAt(0).first)
+    }
+
+    /** Monkey number [k] (an added object) climbs out of the hole like the creature does: same scripts (copies), same path, same sound. */
+    private fun spawnMonkey(k: Int) {
+        val index = monkeyBase + k
+        val m = vm.objects[index]
+        val hole = vm.objects[OBJ_HOLE_CREATURE]
+        if (m.stage >= 0 || hole.stage != stage || hole.room != room) return
         val src = WorldObject(OBJ_HOLE_CREATURE, data.objectData)
         m.body = MonkeyBody.BODY; m.flags = src.flags; m.typeZv = src.typeZv
         m.x = src.x; m.y = src.y; m.z = src.z; m.alpha = src.alpha; m.beta = src.beta; m.gamma = src.gamma
         m.stage = stage; m.room = room
-        m.lifeMode = src.lifeMode; m.life = LIFE_CREATURE_CLIMBED + MONKEY_SCRIPTS; m.floorLife = -1
+        m.lifeMode = src.lifeMode; m.life = MONKEY_SCRIPTS + 100 * k + LIFE_CREATURE_CLIMBED; m.floorLife = -1
         m.anim = ANIM_CLIMB; m.animType = src.animType; m.animInfo = src.animInfo; m.frame = 0
         m.trackMode = 3; m.trackNumber = 0
-        moved(monkeyIndex)
-        anim(monkeyIndex, ANIM_CLIMB, 1, -1)
-        trackMode(monkeyIndex, 3, 0)
-        cameraTarget = monkeyIndex
+        moved(index)
+        anim(index, ANIM_CLIMB, 1, -1)
+        trackMode(index, 3, 0)
         vm.vars[20] = (vm.vars[20] + 1).toShort()
         ui.playSample(61)
     }
@@ -1279,15 +1299,15 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         /** The smoke of a cigar (mode 4) lasts 660 ticks of the 60 per second timer. */
         const val SMOKE_TICKS = 660
 
-        /** The smoke out of the trapdoor hole (an addition to the original): puffs rise for 9 seconds, each lives 4 seconds. */
-        const val HOLE_SMOKE_TICKS = 540 + 240
+        /** The smoke out of the trapdoor hole (an addition to the original): puffs rise for 15 seconds, each lives 4 seconds. */
+        const val HOLE_SMOKE_TICKS = 900 + 240
 
         /** The trapdoor object of the attic, the life script that opens it, and the creature that climbs out of the hole. */
         const val OBJ_TRAPDOOR = 8
         const val LIFE_TRAPDOOR_OPENING = 5
         const val OBJ_HOLE_CREATURE = 9
 
-        /** Life scripts of the creature of the trapdoor: the climb (16), the end of the climb (17) and the fight (18); the monkey runs copies numbered 1000 higher. */
+        /** Life scripts of the creature of the trapdoor: the climb (16), the end of the climb (17) and the fight (18); the added monkeys run copies (1000 + 100 * k + number). */
         const val LIFE_CREATURE_CLIMB = 16
         const val LIFE_CREATURE_CLIMBED = 17
         const val LIFE_CREATURE_FIGHT = 18
@@ -1295,14 +1315,23 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         const val MONKEY_SCRIPTS = 1000
         const val ANIM_CLIMB = 19
 
-        /** The object table with one more entry (a copy of the creature of the trapdoor) at the end, for the monkey. */
-        fun withMonkeyObject(d: ByteArray): ByteArray {
+        /** The body the creature of the trapdoor has in the original (the monkey takes its place). */
+        const val CREATURE_BODY = 23
+
+        /** How many monkeys come out of the hole (the creature of the trapdoor is the first) and how long they wait for each other (ticks). */
+        const val MONKEYS = 5
+        const val MONKEY_INTERVAL_TICKS = 120
+
+        /** The object table with the entries for the added monkeys (copies of the creature of the trapdoor) at the end. */
+        fun withMonkeyObjects(d: ByteArray): ByteArray {
             val count = d.u16(0)
-            val out = d.copyOf(d.size + WorldObject.SIZE)
-            System.arraycopy(d, 2 + OBJ_HOLE_CREATURE * WorldObject.SIZE, out, 2 + count * WorldObject.SIZE, WorldObject.SIZE)
-            out[0] = ((count + 1) and 0xFF).toByte(); out[1] = ((count + 1) shr 8).toByte()
+            val extra = MONKEYS - 1
+            val out = d.copyOf(d.size + extra * WorldObject.SIZE)
+            for (k in 0 until extra) System.arraycopy(d, 2 + OBJ_HOLE_CREATURE * WorldObject.SIZE, out, 2 + (count + k) * WorldObject.SIZE, WorldObject.SIZE)
+            out[0] = ((count + extra) and 0xFF).toByte(); out[1] = ((count + extra) shr 8).toByte()
             return out
         }
+
         /** Positions in the CVars (DEFINES.ITD): the sound of an impact, the weight limit, the object that sends a thrown item back. */
         const val CVAR_SAMPLE_CHOC = 9
         const val CVAR_REVERSE_OBJECT = 11
