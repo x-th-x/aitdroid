@@ -203,31 +203,34 @@ class AtticSceneRenderer {
             }
             k = j
             if (poly.size < (count + 2) * 3) poly = FloatArray((count + 2) * 3)
-            val m = clipPolygon(cx, cy, cz, ids, count, poly)
-            if (m < 3) continue
+            // like the original: a polygon with a corner at or behind the camera is not drawn at all (no cutting), and polygons are sorted by their farthest corner
+            if (count < 3) continue
+            var nearest = Float.MAX_VALUE
+            var farthest = -Float.MAX_VALUE
+            for (q in 0 until count) { nearest = min(nearest, cz[ids[q]]); farthest = max(farthest, cz[ids[q]]) }
+            if (nearest <= 0f) continue
+            val m = count
+            for (q in 0 until count) { poly[q * 3] = cx[ids[q]]; poly[q * 3 + 1] = cy[ids[q]]; poly[q * 3 + 2] = cz[ids[q]] }
             val pts = FloatArray(m * 2)
-            var depth = 0f
             for (q in 0 until m) {
                 proj.screen(poly[q * 3], poly[q * 3 + 1], poly[q * 3 + 2], p0)
                 pts[q * 2] = p0[0] * S; pts[q * 2 + 1] = p0[1] * S
-                depth += poly[q * 3 + 2]
                 l = min(l, pts[q * 2]); r = max(r, pts[q * 2]); t = min(t, pts[q * 2 + 1]); b = max(b, pts[q * 2 + 1])
             }
-            tris.add(Tri(depth / m, 0f, 0f, 0f, 0f, 0f, 0f, col, 3, pts))
+            tris.add(Tri(farthest, 0f, 0f, 0f, 0f, 0f, 0f, col, 3, pts))
         }
         // lines: cut at the near plane, drawn two pixels wide (one plate pixel)
         var li = 0
         while (li + 2 < a.lines.size) {
             val ia = a.lines[li]; val ib = a.lines[li + 1]; val col = a.lines[li + 2]
             li += 3
-            if (cz[ia] < CLIP && cz[ib] < CLIP) continue
-            var ax = cx[ia]; var ay = cy[ia]; var az = cz[ia]
-            var bx = cx[ib]; var by = cy[ib]; var bz = cz[ib]
-            if (az < CLIP) { val f = (CLIP - az) / (bz - az); ax += (bx - ax) * f; ay += (by - ay) * f; az = CLIP }
-            if (bz < CLIP) { val f = (CLIP - bz) / (az - bz); bx += (ax - bx) * f; by += (ay - by) * f; bz = CLIP }
+            // like the original: a line with an end at or behind the camera is not drawn, and a line is sorted by its farther end
+            if (cz[ia] <= 0f || cz[ib] <= 0f) continue
+            val ax = cx[ia]; val ay = cy[ia]; val az = cz[ia]
+            val bx = cx[ib]; val by = cy[ib]; val bz = cz[ib]
             proj.screen(ax, ay, az, p0); val sax = p0[0] * S; val say = p0[1] * S
             proj.screen(bx, by, bz, p0); val sbx = p0[0] * S; val sby = p0[1] * S
-            tris.add(Tri((az + bz) / 2f - 0.5f, sax, say, sbx, sby, 0f, 0f, col, 1))
+            tris.add(Tri(max(az, bz) - 0.5f, sax, say, sbx, sby, 0f, 0f, col, 1))
             l = min(l, min(sax, sbx)); r = max(r, max(sax, sbx)); t = min(t, min(say, sby)); b = max(b, max(say, sby))
         }
         // spheres: a filled circle whose radius follows the perspective
@@ -235,7 +238,7 @@ class AtticSceneRenderer {
         while (si + 2 < a.spheres.size) {
             val ic = a.spheres[si]; val radius = a.spheres[si + 1]; val col = a.spheres[si + 2]
             si += 3
-            if (cz[ic] < CLIP) continue
+            if (cz[ic] <= 0f) continue
             proj.screen(cx[ic], cy[ic], cz[ic], p0)
             val sx = p0[0] * S; val sy = p0[1] * S
             // radius > 0: sphere (units, scaled by perspective); -2 point (a dot of one plate pixel), -6 big point, -7 zixel (20 units)
