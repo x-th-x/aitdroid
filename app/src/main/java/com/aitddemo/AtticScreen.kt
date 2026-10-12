@@ -357,10 +357,10 @@ private fun effectActor(e: Effect, now: Int, palette: IntArray, data: com.aitdde
 
 /** Entry point: reads the room from the original game files, shows an error message when that is not possible. */
 @Composable
-fun AtticScreen(onExit: () -> Unit, controlMode: ControlMode = ControlMode.STEERING, developerMode: Boolean = false, devItems: List<Int> = emptyList(), devPos: List<Int>? = null, loadSlot: Int? = null, floorStart: FloorStart? = null) {
+fun AtticScreen(onExit: () -> Unit, controlMode: ControlMode = ControlMode.STEERING, developerMode: Boolean = false, devItems: List<Int> = emptyList(), devPos: List<Int>? = null, loadSlot: Int? = null, floorStart: FloorStart? = null, intro: Boolean = false) {
     val loader = rememberOriginalFiles(AtticOriginalReader::missingFiles, cacheKey = "attic") { files -> AtticOriginalReader.read(files) }
     when (val state = loader.state) {
-        is OriginalState.Ready -> AtticRoom(state.data, onExit, controlMode, developerMode, devItems, devPos, loadSlot, floorStart)
+        is OriginalState.Ready -> AtticRoom(state.data, onExit, controlMode, developerMode, devItems, devPos, loadSlot, floorStart, intro)
         is OriginalState.Failed -> OriginalFilesErrorScreen(state.message, onChooseFolder = loader.chooseFolder, onExit = onExit)
         OriginalState.Loading -> Box(Modifier.fillMaxSize().background(Color.Black)) {
             BitmapText(text = "Lade Originaldateien...", scale = 2f, color = Color(0xFFF2E4B8), modifier = Modifier.align(Alignment.Center))
@@ -370,7 +370,7 @@ fun AtticScreen(onExit: () -> Unit, controlMode: ControlMode = ControlMode.STEER
 }
 
 @Composable
-private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: ControlMode, developerMode: Boolean, devItems: List<Int>, devPos: List<Int>?, loadSlot: Int?, floorStart: FloorStart?) {
+private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: ControlMode, developerMode: Boolean, devItems: List<Int>, devPos: List<Int>?, loadSlot: Int?, floorStart: FloorStart?, intro: Boolean) {
     BackHandler { onExit() }
     // the attic plays the first track of LISTMUS.PAK in a loop (the intro music stops); leaving the attic stops it
     DisposableEffect(world) {
@@ -381,7 +381,9 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     DisposableEffect(sounds) { onDispose { sounds.release() } }
     val ui = remember(world) { AtticUi(world, sounds) }
     val context = androidx.compose.ui.platform.LocalContext.current
-    val game = remember(world) { AtticGame(world.game, ui).also { g ->
+    // the intro is the film of stage 7 that the life scripts play (startGame(7, 1) of the original): the car, the driver, his walk through the house up to the attic stairs
+    val game = remember(world) { (if (intro) AtticGame(world.game, ui, 7, 1, true) else AtticGame(world.game, ui)).also { g ->
+        if (intro) return@also
         devItems.forEach { g.take(it) }
         floorStart?.let { f ->
             g.startAt(f.stage, f.room)
@@ -471,7 +473,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
                         val dirX = sin(camBeta) * fwd + cos(camBeta) * stickX
                         val dirZ = cos(camBeta) * fwd - sin(camBeta) * stickX
                         // turn the body towards that direction with the engine's tank keys: turn left/right while it is off, walk when it faces it
-                        val target = IntroTimeline.headingOf(dirX, dirZ)
+                        val target = headingOf(dirX, dirZ)
                         var diff = (target - (player.beta and 0x3FF)) % 1024f
                         if (diff > 512f) diff -= 1024f
                         if (diff < -512f) diff += 1024f
@@ -496,11 +498,13 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
                 // the room's camera follows the player by the engine's zone rule (checkIfCameraChangeIsRequired)
                 val view = game.roomView
                 // the camera follows the object the scripts point it at (the player, or for a moment a creature entering)
-                val target = game.objects.getOrNull(game.cameraTarget)?.takeIf { it.w.active }?.actor ?: game.player?.actor
-                val camX = target?.renderX?.toFloat() ?: playerX
+                val targetObject = game.objects.getOrNull(game.cameraTarget)?.takeIf { it.w.active }
+                val target = targetObject?.actor ?: game.player?.actor
+                // an object without a body (the helper places of the intro) has no box: its place counts
+                val camX = target?.renderX?.toFloat() ?: targetObject?.w?.x?.toFloat() ?: playerX
                 val tz = target?.zv
                 val tx1 = tz?.get(0) ?: camX.toInt(); val tx2 = tz?.get(1) ?: camX.toInt()
-                val camZ = target?.renderZ?.toFloat() ?: playerZ
+                val camZ = target?.renderZ?.toFloat() ?: targetObject?.w?.z?.toFloat() ?: playerZ
                 val tz1 = tz?.get(4) ?: camZ.toInt(); val tz2 = tz?.get(5) ?: camZ.toInt()
                 val tBeta = target?.beta?.and(0x3FF) ?: 0
                 if (shownRoom !== view) { // a new room: the camera of the zone the target stands in
@@ -514,9 +518,25 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
         }
     }
 
+    // the script ends the film with GAME_OVER: on to the game
+    if (intro) LaunchedEffect(ui.gameOverShown) { if (ui.gameOverShown) onExit() }
+
     val view = game.roomView
     val camera = view.cameras.getOrNull(cameraIndex) ?: view.cameras[0]
     val backgrounds = roomCache.getOrPut(view) { scaledPhotos(view) }
+    // the intro walks through rooms of four floors: they are read and their pictures scaled in the background while the car drives
+    if (intro) LaunchedEffect(world) {
+        withContext(Dispatchers.Default) {
+            for ((st, rm) in listOf(7 to 0, 3 to 1, 3 to 0, 3 to 5, 2 to 2, 1 to 7, 1 to 1, 1 to 0)) {
+                try {
+                    val next = world.game.rooms.room(st, rm)
+                    roomCache.getOrPut(next) { scaledPhotos(next) }
+                } catch (_: Exception) {
+                    // a room the files do not have: nothing to prepare
+                }
+            }
+        }
+    }
     // the rooms next to this one (doors of the room) are read and their pictures scaled in the background, so walking through a door does not wait
     LaunchedEffect(view) {
         withContext(Dispatchers.Default) {
@@ -547,7 +567,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
 
         // Floating joystick: appears where the thumb touches; drag distance is clamped and normalized to -1..1.
         val stickRadiusPx = 70f
-        if (controlMode == ControlMode.STEERING) {
+        if (controlMode == ControlMode.STEERING && !intro) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -592,7 +612,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
         }
 
         // Developer mode: world position and active camera index.
-        if (developerMode) {
+        if (developerMode && !intro) {
             Box(modifier = Modifier.align(Alignment.TopStart).padding(12.dp).background(Color.Black.copy(alpha = 0.5f)).padding(6.dp)) {
                 BitmapText(
                     text = "World: (${playerX.toInt()}, ${playerZ.toInt()}) cam=$cameraIndex",
@@ -602,7 +622,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
             }
         }
 
-        if (controlMode == ControlMode.DPAD) {
+        if (controlMode == ControlMode.DPAD && !intro) {
             DPadOverlay(
                 modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 24.dp, end = 16.dp),
                 onUp = { dpadUp = it },
@@ -613,7 +633,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
         }
 
         // the action key of the original (Enter): held while the finger is down; what it does is chosen in the inventory
-        HoldButton(
+        if (!intro) HoldButton(
             label = "Action",
             modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = if (controlMode == ControlMode.DPAD) 24.dp else 40.dp, end = if (controlMode == ControlMode.DPAD) 200.dp else 24.dp),
             onHeld = { actionHeld = it },
@@ -621,7 +641,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
 
         BackButton(onClick = onExit)
 
-        Box(
+        if (!intro) Box(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .padding(start = 130.dp, bottom = 12.dp)
@@ -632,7 +652,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
             BitmapText(text = "Menu", scale = 2f, color = Color(0xFFF2E4B8))
         }
 
-        if (game.allowInventory && game.inventory.isNotEmpty()) {
+        if (!intro && game.allowInventory && game.inventory.isNotEmpty()) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
@@ -646,7 +666,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
         }
 
         // Same visual style as BackButton, opposite corner (top-right).
-        Box(
+        if (!intro) Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(12.dp)
@@ -707,15 +727,21 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
                 BitmapText(text = "The End", scale = 4f, color = Color(0xFFF2E4B8))
             }
         }
-        if (ui.exitShown) {
+        if (ui.exitShown && !intro) {
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.8f)).clickable { onExit() }, contentAlignment = Alignment.Center) {
                 BitmapText(text = "To be continued...", scale = 3f, color = Color(0xFFF2E4B8))
             }
         }
-        if (ui.gameOverShown) {
+        if (ui.gameOverShown && !intro) {
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.7f)).clickable { onExit() }, contentAlignment = Alignment.Center) {
                 BitmapText(text = "Game Over", scale = 4f, color = Color(0xFFF2E4B8))
             }
         }
     }
+}
+
+/** Engine angle (1024 = 360 degrees) of a body that moves in direction (dx, dz): its local -Z axis points that way. */
+private fun headingOf(dx: Float, dz: Float): Float {
+    val a = kotlin.math.atan2(dx, -dz) * 1024f / (2f * PI.toFloat())
+    return ((a % 1024f) + 1024f) % 1024f
 }

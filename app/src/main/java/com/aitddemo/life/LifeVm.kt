@@ -36,6 +36,9 @@ class WorldObject(val index: Int, private val d: ByteArray) {
     var weight = w(25)
     var mark = -1
 
+    /** Where the object is on its track (the original keeps it with the object): an object that leaves the scene and comes back goes on from there. */
+    var trackPos = 0
+
     // ---- runtime state set by the game before the scripts run each frame ----
 
     /** Is the object part of the scene right now (room loaded, actor exists)? Only then are the runtime values valid. */
@@ -348,18 +351,18 @@ class LifeVm(
                     "ANIM_ONCE" -> {
                         val a = s16()
                         val info = s16()
-                        t.anim = a
+                        t.anim = a; t.animType = 0; t.animInfo = info
                         host.anim(target, a, 0, info)
                     }
                     "ANIM_ALL_ONCE" -> {
                         val a = s16()
                         val info = s16()
-                        t.anim = a
+                        t.anim = a; t.animType = 2; t.animInfo = info
                         host.anim(target, a, 2, info)
                     }
                     "ANIM_REPEAT" -> {
                         val a = s16()
-                        t.anim = a
+                        t.anim = a; t.animType = 1; t.animInfo = -1
                         host.anim(target, a, 1, -1)
                     }
                     "ANIM_SAMPLE" -> {

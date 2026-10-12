@@ -166,7 +166,7 @@ private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: 
                 onBack = { screen = Screen.MENU },
                 onPick = { slot -> loadSlot = slot; floorStart = null; screen = Screen.ATTIC },
             )
-            Screen.INTRO -> IntroScreen(onFinished = { loadSlot = null; screen = Screen.ATTIC })
+            Screen.INTRO -> AtticScreen(onExit = { loadSlot = null; floorStart = null; screen = Screen.ATTIC }, controlMode = controlMode, intro = true)
             Screen.FLOORS -> FloorSelectScreen(onStart = { floorStart = it; loadSlot = null; screen = Screen.ATTIC }, onBack = { screen = Screen.MENU })
             Screen.MODELS -> ModelsScreen(onExit = { screen = Screen.MENU })
             Screen.MUSIC -> MusicViewerScreen(onExit = { screen = Screen.MENU })

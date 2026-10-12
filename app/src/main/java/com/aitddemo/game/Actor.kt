@@ -158,6 +158,8 @@ class Actor(
     val renderY: Int get() = worldY
     val renderZ: Int get() = worldZ + stepZ
     val currentAnim: Int get() = anim
+    val currentAnimType: Int get() = animType and 3
+    val currentAnimInfo: Int get() = animInfo
 
     /** Aktuelles Bild (Keyframe) der laufenden Animation. */
     val frameIndex: Int get() = frame
@@ -466,11 +468,12 @@ class Actor(
         fun w(i: Int) = t.getOrElse(positionInTrack + i) { 0 }.toInt()
         when (macro) {
             0 -> { // Sprung an eine Stelle (Raum, x, y, z)
-                onTrackWarp?.invoke(w(1), w(2), w(3), w(4))
+                val room = w(1); val x = w(2); val y = w(3); val z = w(4)
                 speed = 0
                 direction = 0
                 rotSteps = 0
-                positionInTrack += 5
+                positionInTrack += 5 // before the jump: the jump may take the object out of the scene, and it comes back at the next step
+                onTrackWarp?.invoke(room, x, y, z)
             }
             1 -> { // zu einer Stelle gehen (Raum, x, z)
                 var x = w(2)

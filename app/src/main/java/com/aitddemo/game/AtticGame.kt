@@ -95,7 +95,7 @@ class GameObject(val w: WorldObject) {
  * interprets the scripts; this class is its host: it moves the actors, plays their animations, collides them with the room and with each other, and
  * turns script operations (animations, items, messages, sounds) into effects.
  */
-class AtticGame(val data: GameData, private val ui: GameUi, private var stage: Int = 0, private var room: Int = 0) : LifeHost {
+class AtticGame(val data: GameData, private val ui: GameUi, private var stage: Int = 0, private var room: Int = 0, private val intro: Boolean = false) : LifeHost {
     override var time = 0
     val vm = LifeVm({ data.script(it) }, data.objectData, data.vars, this).also { for (i in data.defines.indices) if (i < it.cvars.size) it.cvars[i] = data.defines[i] }
     val objects: Array<GameObject> = Array(vm.objects.size) { GameObject(vm.objects[it]) }
@@ -154,8 +154,17 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     val player: GameObject? get() = objects.getOrNull(playerIndex)
 
+    /**
+     * The object the scene follows: the player in the game; in the intro (a film that the scripts play, startGame(7, 1) of the original) the object the camera is pointed at,
+     * so the loaded room is the room of the car, then of the driver walking through the house.
+     */
+    private val leader: Int get() = if (intro) cameraTarget else playerIndex
+
     private val moveAnims = HashMap<Int, MoveAnims>()
     private var lastCameraTarget = -1
+
+    private val roomWorlds = HashMap<Long, RoomView?>()
+    private val roomGeometry = HashMap<Long, Pair<List<Zone>, List<Zone>>>()
 
     init {
         vm.trace = null
@@ -172,13 +181,11 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
      * room number; their places are moved into the frame of the current room (see [frameDelta]) and the camera draws them only if it sees their room.
      */
     private fun wanted(w: WorldObject, seen: Set<Int>, st: Int, rm: Int): Boolean {
-        if (w.index == playerIndex) return w.stage == st && w.room == rm
+        if (w.index == leader || w.index == playerIndex) return w.stage == st && w.room == rm
         if (w.stage != st) return false
         if (w.life != -1) return when (w.lifeMode) { 0 -> true; 1 -> w.room == rm; 2 -> w.room in seen; else -> false }
         return w.room in seen
     }
-
-    private val roomWorlds = HashMap<Long, RoomView?>()
 
     /** How the places of room [ownRoom] of the current floor are moved into the frame of the current room (what [Actor.moveToRoomOrigin] takes), or null for the same room. */
     private fun frameDelta(ownRoom: Int): IntArray? {
@@ -186,8 +193,6 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         val r = roomWorlds.getOrPut(stage * 1000L + ownRoom) { try { data.rooms.room(stage, ownRoom) } catch (_: Exception) { null } } ?: return null
         return intArrayOf((roomView.worldX - r.worldX) * 10, (roomView.worldY - r.worldY) * 10, (roomView.worldZ - r.worldZ) * 10)
     }
-
-    private val roomGeometry = HashMap<Long, Pair<List<Zone>, List<Zone>>>()
 
     /**
      * The walls (hard colliders) and zones of room [r] of the current floor in the frame of the current room: an object of another room keeps colliding with the walls of its
@@ -234,6 +239,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     }
 
     private fun deactivate(g: GameObject) {
+        g.actor?.let { g.w.trackPos = it.positionInTrack; g.w.anim = it.currentAnim; g.w.animType = it.currentAnimType; g.w.animInfo = it.currentAnimInfo }
         g.w.active = false
         g.actor = null
         g.asset = null
@@ -275,7 +281,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         }
         if (w.typeZv == 3) Actor.boxFor(asset.zv, 3, a.worldX, a.worldY, a.worldZ, a.beta).copyInto(a.zv)
         old?.let { a.restoreMove(it.trackMode, it.trackNumber, it.positionInTrack, it.mark) }
-        if (old == null) a.restoreMove(w.trackMode, w.trackNumber, 0, -1)
+        if (old == null) a.restoreMove(w.trackMode, w.trackNumber, w.trackPos, -1)
         old?.pendingAnim?.let { a.playAnim(it[0], it[1], it[2]) } // an animation that was just requested survives the change of body
         g.actor = a
     }
@@ -418,7 +424,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         for (zone in geometryOf(g.w.room).second) {
             if (!zone.contains(x, y, z)) continue
             when (zone.type) {
-                0 -> if (g.w.index == playerIndex) {
+                0 -> if (g.w.index == leader) {
                     enterNextRoom(g, zone.parameter)
                 } else if (g.w.room != zone.parameter) { // an enemy that walks through a door of its room is in the next room from then on
                     g.w.room = zone.parameter
@@ -447,14 +453,14 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         a.moveToRoomOrigin(dx, dy, dz)
         g.w.room = nextRoom
         g.w.chronoStart = time
-        changeRoom(stage, nextRoom, null)
+        changeRoom(stage, nextRoom, null, leaderMoved = true)
     }
 
     /**
      * The scene changes to room [newRoom] of floor [newStage]: the objects of the old room leave the scene, those of the new room join it, the player stays and
      * is placed at [place] (x, y, z) unless it is null (his coordinates are already those of the new room).
      */
-    private fun changeRoom(newStage: Int, newRoom: Int, place: IntArray?) {
+    private fun changeRoom(newStage: Int, newRoom: Int, place: IntArray?, leaderMoved: Boolean = false) {
         val view = try {
             data.rooms.room(newStage, newRoom)
         } catch (_: Exception) {
@@ -478,20 +484,21 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             if (oldStage == newStage && wanted(g.w, seen, newStage, newRoom)) {
                 val a = g.actor
                 if (a != null) {
-                    if (oldView !== view) a.moveToRoomOrigin(dx, dy, dz)
+                    if (oldView !== view && !(leaderMoved && g.w.index == leader)) a.moveToRoomOrigin(dx, dy, dz)
                     a.hardcols = geometryOf(g.w.room).first
                 }
             } else {
                 deactivate(g)
             }
         }
-        val p = player
+        val p = if (intro) null else player
         p?.w?.stage = newStage
         p?.w?.room = newRoom
-        p?.actor?.let { a ->
+        val lead = if (intro) objects.getOrNull(leader)?.takeIf { it.w.active } else p
+        lead?.actor?.let { a ->
             a.hardcols = view.hardcols
             a.roomNumber = newRoom
-            if (place != null) a.teleport(place[0], place[1], place[2], p.w.beta)
+            if (place != null) a.teleport(place[0], place[1], place[2], lead.w.beta)
         }
         for (o in vm.objects) if (o.index != playerIndex && !objects[o.index].w.active && wanted(o, seen, newStage, newRoom)) activate(objects[o.index])
         p?.let {
@@ -808,6 +815,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     }
 
     override fun trackMode(obj: Int, mode: Int, number: Int) {
+        if (mode == 3) vm.objects.getOrNull(obj)?.trackPos = 0
         objects.getOrNull(obj)?.actor?.initMove(mode, number)
     }
 
@@ -836,7 +844,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         val g = objects[obj]
         val w = g.w
         val inScene = wanted(w, viewList(), stage, room)
-        if (obj == playerIndex && !inScene && w.stage >= 0) {
+        if (obj == leader && !inScene && w.stage >= 0) {
             changeRoom(w.stage, w.room, intArrayOf(w.x, w.y, w.z))
             return
         }
@@ -916,6 +924,10 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     override fun cameraTarget(obj: Int) {
         cameraTarget = obj
+        if (intro) { // the scene follows the target into its room
+            val w = vm.objects.getOrNull(obj) ?: return
+            if (w.stage >= 0 && (w.stage != stage || w.room != room)) changeRoom(w.stage, w.room, null)
+        }
     }
 
     override fun inventory(allowed: Boolean) {

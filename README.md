@@ -12,7 +12,7 @@ or Atari. *Alone in the Dark* and all related assets remain the property of thei
 Work in progress.
 
 - Attic scene (stage 0, room 0): camera pictures, furniture and player body read from the original files, fixed cameras with zone based camera switching, background masks, wall collision
-- Intro cutscene (stage 7): parsed from the original files, played with the original timing
+- Intro: played by the game engine from the original scripts (stage 7: car, frog, driver, his walk through the house up to the attic; ends with the script's GAME_OVER)
 - Music viewer: plays the original AdLib tracks through a software OPL2 emulation
 - Player actor: original animations, tank style controls and root motion (stick or D-pad), footstep samples
 - Life script interpreter: early work in progress (not yet driving the game)
