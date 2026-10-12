@@ -17,7 +17,7 @@ import androidx.compose.ui.graphics.Color
 
 // Menu layout on the 320x200 grid: framed box, lines from y=76 in steps of 16, centered at x=160,
 // highlighted entry gets a background bar and a shadow.
-private val MENU_ITEMS = listOf("Begin a new game", "Resume a saved game", "Options", "Model Viewer", "Music Viewer", "Return to Homescreen")
+private val MENU_ITEMS = listOf("Begin a new game", "Resume a saved game", "Options", "Floor selection", "Model Viewer", "Music Viewer", "Return to Homescreen")
 
 @Composable
 fun MenuScreen(onSelect: (Int) -> Unit) {
@@ -29,13 +29,13 @@ fun MenuScreen(onSelect: (Int) -> Unit) {
             Box(
                 modifier = Modifier
                     .offset(x = gx(0), y = gy(60))
-                    .size(gx(320), gy(112))
+                    .size(gx(320), gy(124))
                     .background(Color.Black.copy(alpha = 0.5f))
                     .border(unit * 1.5f, Color(0xFF8A6D3B))
             )
 
             MENU_ITEMS.forEachIndexed { i, label ->
-                val y = 76 + i * 16
+                val y = 70 + i * 15
                 val isSelected = selected == i
                 val textWidthUnits = bitmapTextWidth(label)
                 val textX = 160 - textWidthUnits / 2

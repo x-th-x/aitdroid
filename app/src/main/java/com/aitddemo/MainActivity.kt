@@ -40,7 +40,7 @@ import androidx.compose.ui.unit.dp
 import com.aitddemo.original.GameFiles
 import kotlinx.coroutines.delay
 
-private enum class Screen { LOGO_STATIC, LOGO_3D, TITLE, MENU, SELECT, LOAD, MODELS, MUSIC, INTRO, ATTIC, OPTIONS }
+private enum class Screen { LOGO_STATIC, LOGO_3D, TITLE, MENU, SELECT, LOAD, MODELS, MUSIC, INTRO, ATTIC, OPTIONS, FLOORS }
 
 private val TEXT_COLOR = Color(0xFFF2E4B8)
 
@@ -97,6 +97,9 @@ private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: 
     }
 
     var loadSlot by remember { mutableStateOf<Int?>(null) } // a saved game to continue from when the attic opens
+    // set by the floor selection of the main menu, cleared by every other way into the game
+    var floorStart by remember { mutableStateOf<FloorStart?>(null) }
+
     // Developer Mode: off by default. Shows the world position and camera in the attic.
     var developerMode by remember { mutableStateOf(devAutoAttic) }
 
@@ -137,12 +140,13 @@ private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: 
             Screen.MENU -> MenuScreen(
                 onSelect = { index ->
                     when (index) {
-                        0 -> screen = Screen.SELECT
+                        0 -> { floorStart = null; screen = Screen.SELECT }
                         1 -> if (SaveStore.hasAny(context)) screen = Screen.LOAD else Toast.makeText(context, "There is no saved game yet", Toast.LENGTH_SHORT).show()
                         2 -> screen = Screen.OPTIONS
-                        3 -> screen = Screen.MODELS
-                        4 -> screen = Screen.MUSIC
-                        5 -> (context as? Activity)?.finish()
+                        3 -> screen = Screen.FLOORS
+                        4 -> screen = Screen.MODELS
+                        5 -> screen = Screen.MUSIC
+                        6 -> (context as? Activity)?.finish()
                     }
                 }
             )
@@ -160,12 +164,13 @@ private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: 
             )
             Screen.LOAD -> LoadScreen(
                 onBack = { screen = Screen.MENU },
-                onPick = { slot -> loadSlot = slot; screen = Screen.ATTIC },
+                onPick = { slot -> loadSlot = slot; floorStart = null; screen = Screen.ATTIC },
             )
             Screen.INTRO -> IntroScreen(onFinished = { loadSlot = null; screen = Screen.ATTIC })
+            Screen.FLOORS -> FloorSelectScreen(onStart = { floorStart = it; loadSlot = null; screen = Screen.ATTIC }, onBack = { screen = Screen.MENU })
             Screen.MODELS -> ModelsScreen(onExit = { screen = Screen.MENU })
             Screen.MUSIC -> MusicViewerScreen(onExit = { screen = Screen.MENU })
-            Screen.ATTIC -> AtticScreen(onExit = { screen = Screen.MENU }, controlMode = controlMode, developerMode = developerMode, devItems = devItems, devPos = devPos, loadSlot = loadSlot)
+            Screen.ATTIC -> AtticScreen(onExit = { screen = Screen.MENU }, controlMode = controlMode, developerMode = developerMode, devItems = devItems, devPos = devPos, loadSlot = loadSlot, floorStart = floorStart)
             Screen.OPTIONS -> OptionsScreen(
                 controlMode = controlMode,
                 onControlModeChange = { controlMode = it },

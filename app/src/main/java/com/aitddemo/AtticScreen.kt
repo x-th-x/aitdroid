@@ -356,10 +356,10 @@ private fun effectActor(e: Effect, now: Int, palette: IntArray, data: com.aitdde
 
 /** Entry point: reads the room from the original game files, shows an error message when that is not possible. */
 @Composable
-fun AtticScreen(onExit: () -> Unit, controlMode: ControlMode = ControlMode.STEERING, developerMode: Boolean = false, devItems: List<Int> = emptyList(), devPos: List<Int>? = null, loadSlot: Int? = null) {
+fun AtticScreen(onExit: () -> Unit, controlMode: ControlMode = ControlMode.STEERING, developerMode: Boolean = false, devItems: List<Int> = emptyList(), devPos: List<Int>? = null, loadSlot: Int? = null, floorStart: FloorStart? = null) {
     val loader = rememberOriginalFiles(AtticOriginalReader::missingFiles, cacheKey = "attic") { files -> AtticOriginalReader.read(files) }
     when (val state = loader.state) {
-        is OriginalState.Ready -> AtticRoom(state.data, onExit, controlMode, developerMode, devItems, devPos, loadSlot)
+        is OriginalState.Ready -> AtticRoom(state.data, onExit, controlMode, developerMode, devItems, devPos, loadSlot, floorStart)
         is OriginalState.Failed -> OriginalFilesErrorScreen(state.message, onChooseFolder = loader.chooseFolder, onExit = onExit)
         OriginalState.Loading -> Box(Modifier.fillMaxSize().background(Color.Black)) {
             BitmapText(text = "Lade Originaldateien...", scale = 2f, color = Color(0xFFF2E4B8), modifier = Modifier.align(Alignment.Center))
@@ -369,7 +369,7 @@ fun AtticScreen(onExit: () -> Unit, controlMode: ControlMode = ControlMode.STEER
 }
 
 @Composable
-private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: ControlMode, developerMode: Boolean, devItems: List<Int>, devPos: List<Int>?, loadSlot: Int?) {
+private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: ControlMode, developerMode: Boolean, devItems: List<Int>, devPos: List<Int>?, loadSlot: Int?, floorStart: FloorStart?) {
     BackHandler { onExit() }
     // the attic plays the first track of LISTMUS.PAK in a loop (the intro music stops); leaving the attic stops it
     DisposableEffect(world) {
@@ -382,6 +382,11 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     val context = androidx.compose.ui.platform.LocalContext.current
     val game = remember(world) { AtticGame(world.game, ui).also { g ->
         devItems.forEach { g.take(it) }
+        floorStart?.let { f ->
+            g.startAt(f.stage, f.room)
+            f.items.forEach { g.take(it) }
+            if (f.skipWaits) for (o in g.objects) o.w.roomChronoStart = g.time - 3660
+        }
         // for testing: devVars 990=104 starts in room 4 of floor 1 (stage * 100 + room), 991=1 lets everything that waits for a minute in its room go off at once
         DevOptions.vars.firstOrNull { it.first == 990 }?.let { v -> g.player?.let { pl -> pl.w.stage = v.second / 100; pl.w.room = v.second % 100; g.moved(g.playerIndex) } }
         if (DevOptions.vars.any { it.first == 991 }) for (o in g.objects) o.w.roomChronoStart = g.time - 3660

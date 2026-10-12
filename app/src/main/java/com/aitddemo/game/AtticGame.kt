@@ -496,6 +496,26 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         }
     }
 
+    /** For testing (floor selection of the main menu): puts the player into a room of the game at a free place that its first camera sees. */
+    fun startAt(newStage: Int, newRoom: Int) {
+        if (newStage == stage && newRoom == room) return
+        val view = try { data.rooms.room(newStage, newRoom) } catch (_: Exception) { return }
+        val c = view.cameras.firstOrNull()?.zones?.firstOrNull()?.takeIf { it.isNotEmpty() }
+        val cx = c?.let { p -> (p.sumOf { it.x.toDouble() } / p.size * 10).toInt() } ?: (view.bounds[0] + view.bounds[1]) / 2
+        val cz = c?.let { p -> (p.sumOf { it.z.toDouble() } / p.size * 10).toInt() } ?: (view.bounds[2] + view.bounds[3]) / 2
+        fun free(x: Int, z: Int) = x in view.bounds[0]..view.bounds[1] && z in view.bounds[2]..view.bounds[3] &&
+            view.hardcols.none { x in it.x1 - 300..it.x2 + 300 && z in it.z1 - 300..it.z2 + 300 } &&
+            view.zones.none { it.type == 0 && x in it.x1 - 400..it.x2 + 400 && z in it.z1 - 400..it.z2 + 400 }
+        var spot = intArrayOf(cx, 0, cz)
+        search@ for (r in 0..4000 step 250) for (k in 0 until if (r == 0) 1 else 16) {
+            val ang = k * Math.PI / 8
+            val x = cx + (r * Math.cos(ang)).toInt()
+            val z = cz + (r * Math.sin(ang)).toInt()
+            if (free(x, z)) { spot = intArrayOf(x, 0, z); break@search }
+        }
+        changeRoom(newStage, newRoom, spot)
+    }
+
     // ------------------------------------------------------------------------------------------------------------------ items
 
     /** The player's answer to the "found" window. */
