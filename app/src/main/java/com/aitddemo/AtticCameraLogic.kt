@@ -67,27 +67,35 @@ fun isInAtticZone(camera: AtticCameraDef, worldX: Float, worldZ: Float): Boolean
     isPointInZone(worldX / 10f, worldZ / 10f, camera.zones)
 
 /**
- * Live per-frame camera resolution - call every frame with the player's current world (x,z) and
- * the previously-active camera index; returns the camera index that should be active NOW.
+ * Live per-frame camera resolution - call every frame with the box (x1, x2, z1, z2 in world units) and the angle of the camera's target and
+ * the previously-active camera index (-1 in a room that was just entered); returns the camera index that should be active NOW.
  *
  * Matches the original's "sticky" behavior exactly: the current camera's own zone is checked
  * FIRST and wins even if another camera's zone would also match, and if no zone matches at all,
  * the camera simply stays unchanged (`changeCameraSub2` returning -1 changes nothing).
  */
-fun resolveAtticCamera(playerX: Float, playerZ: Float, currentCameraIndex: Int, cameras: List<AtticCameraDef>): Int {
-    // matches actorPtr->zv.ZVX1/10 etc. in the original - world position is divided by 10 before
-    // the point-in-zone test, since the zone polygon points are already in that scaled space.
-    val px = playerX / 10f
-    val pz = playerZ / 10f
+fun resolveAtticCamera(x1: Int, x2: Int, z1: Int, z2: Int, beta: Int, currentCameraIndex: Int, cameras: List<AtticCameraDef>): Int {
+    // the zone test of the original (isInPoly) takes the middle of the box of the camera's target, each corner divided by 10 first (the zone polygons are in tenths)
+    val px = (((x1 / 10) + (x2 / 10)) / 2).toFloat()
+    val pz = (((z1 / 10) + (z2 / 10)) / 2).toFloat()
 
     val current = cameras.getOrNull(currentCameraIndex)
     if (current != null && isPointInZone(px, pz, current.zones)) {
         return currentCameraIndex
     }
+    // findBestCamera of the original: of the cameras whose zone holds the target, the one that looks best at it wins (smallest |beta of the target + (camera beta + 0x200) & 0x3FF|)
+    var best = -1
+    var bestAngle = 32000
     for (cam in cameras) {
-        if (isPointInZone(px, pz, cam.zones)) return cam.index
+        if (!isPointInZone(px, pz, cam.zones)) continue
+        var angle = beta + ((cam.angleBeta + 0x200) and 0x3FF)
+        if (angle < 0) angle = -angle
+        if (angle < bestAngle) {
+            bestAngle = angle
+            best = cam.index
+        }
     }
-    return currentCameraIndex // no zone matched at all -> unchanged, exactly as the original does
+    return if (best != -1) best else currentCameraIndex // no zone matched at all -> unchanged, exactly as the original does
 }
 
 // World -> screen projection (the engine's setupCamera()/projection formula).

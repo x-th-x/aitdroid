@@ -492,12 +492,16 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
                 // the camera follows the object the scripts point it at (the player, or for a moment a creature entering)
                 val target = game.objects.getOrNull(game.cameraTarget)?.takeIf { it.w.active }?.actor ?: game.player?.actor
                 val camX = target?.renderX?.toFloat() ?: playerX
+                val tz = target?.zv
+                val tx1 = tz?.get(0) ?: camX.toInt(); val tx2 = tz?.get(1) ?: camX.toInt()
                 val camZ = target?.renderZ?.toFloat() ?: playerZ
+                val tz1 = tz?.get(4) ?: camZ.toInt(); val tz2 = tz?.get(5) ?: camZ.toInt()
+                val tBeta = target?.beta?.and(0x3FF) ?: 0
                 if (shownRoom !== view) { // a new room: the camera of the zone the target stands in
                     shownRoom = view
-                    cameraIndex = resolveAtticCamera(camX, camZ, 0, view.cameras)
+                    cameraIndex = resolveAtticCamera(tx1, tx2, tz1, tz2, tBeta, -1, view.cameras) // a new room: the best camera for the target, whatever camera was used before
                 } else {
-                    cameraIndex = resolveAtticCamera(camX, camZ, cameraIndex, view.cameras)
+                    cameraIndex = resolveAtticCamera(tx1, tx2, tz1, tz2, tBeta, cameraIndex, view.cameras)
                 }
             }
             frameTick++
