@@ -71,6 +71,9 @@ class GameData(
     /** The constants of DEFINES.ITD (CVars): sample numbers, the weight limit, the object that sends things back and so on. */
     val defines: ShortArray = ShortArray(0),
 ) {
+    /** Shows the monkey instead of the creature that climbs out of the attic trapdoor (a change of the original). */
+    var useMonkey = true
+
     private val bodies = HashMap<Int, BodyAsset?>()
     private val anims = HashMap<Int, AnimData?>()
     private val samples = HashMap<Int, VocSample?>()
@@ -87,6 +90,7 @@ class GameData(
         try {
             val d = bodyPak.get(n + 1) ?: return@getOrPut null
             val b = OriginalBody.parse(d)
+            if (useMonkey && n == MonkeyBody.REPLACES_BODY) return@getOrPut MonkeyBody.asset(n, b.zv)
             val (v, t) = b.toMesh(palette)
             BodyAsset(n, b.zv, v, t, b.lines(palette), b.spheres(palette), if (b.isArticulated) b.animatedParts() else null)
         } catch (_: Exception) {
