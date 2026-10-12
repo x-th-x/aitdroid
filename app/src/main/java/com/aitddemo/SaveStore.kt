@@ -12,7 +12,7 @@ import java.io.File
 object SaveStore {
     const val SLOTS = 3
     private const val MAGIC = 0x41495444 // "AITD"
-    private const val VERSION = 2 // 2: the CVars come from DEFINES.ITD
+    private const val VERSION = 3 // 3: one more world object (the monkey); 2: the CVars come from DEFINES.ITD
 
     private fun file(context: Context, slot: Int) = File(context.filesDir, "save$slot.sav")
 

@@ -4,6 +4,7 @@ import com.aitddemo.RoomView
 import com.aitddemo.life.LifeHost
 import com.aitddemo.life.LifeVm
 import com.aitddemo.life.WorldObject
+import com.aitddemo.original.u16
 
 /** What the game needs from the screen: texts, sounds, music. */
 interface GameUi {
@@ -95,7 +96,38 @@ class GameObject(val w: WorldObject) {
  */
 class AtticGame(val data: GameData, private val ui: GameUi, private var stage: Int = 0, private var room: Int = 0) : LifeHost {
     override var time = 0
-    val vm = LifeVm({ data.script(it) }, data.objectData, data.vars, this).also { for (i in data.defines.indices) if (i < it.cvars.size) it.cvars[i] = data.defines[i] }
+    /** The world object that is the monkey: one more than the original has, a copy of the creature of the trapdoor that waits outside the scene until it is spawned. */
+    private val monkeyIndex = data.objectData.u16(0)
+    private val patchedScripts = HashMap<Int, ShortArray?>()
+
+    /** The scripts of the original, except the ones changed for the monkey: the creature no longer closes the trapdoor (the monkey does, when it is out), and the monkey has its own copies. */
+    private fun scriptFor(n: Int): ShortArray? = patchedScripts.getOrPut(n) {
+        if (!data.useMonkey) return@getOrPut data.script(n)
+        when (n) {
+            LIFE_CREATURE_CLIMBED -> data.script(n)?.let { src ->
+                ScriptPatch.patch(src) { name, ow, start, w ->
+                    // [ow=8] LIFE 6 (the trapdoor closes) becomes VAR 511 0, which does nothing
+                    if (name == "LIFE" && ow == OBJ_TRAPDOOR && w[start].toInt() == LIFE_TRAPDOOR_CLOSING) {
+                        w[start - 2] = ScriptPatch.opcode("VAR"); w[start - 1] = 511; w[start] = 0
+                    }
+                }
+            }
+            LIFE_CREATURE_CLIMBED + MONKEY_SCRIPTS, LIFE_CREATURE_FIGHT + MONKEY_SCRIPTS -> data.script(n - MONKEY_SCRIPTS)?.let { src ->
+                ScriptPatch.patch(src) { name, ow, start, w ->
+                    val v = w[start].toInt()
+                    if (ow < 0 && name == "LIFE" && v in LIFE_CREATURE_CLIMB..LIFE_CREATURE_FIGHT) w[start] = (v + MONKEY_SCRIPTS).toShort()
+                    if (ow < 0 && (name == "DELETE" || name == "CAMERA_TARGET") && v == OBJ_HOLE_CREATURE) w[start] = monkeyIndex.toShort()
+                }
+            }
+            else -> data.script(n)
+        }
+    }
+
+    val vm = LifeVm({ scriptFor(it) }, withMonkeyObject(data.objectData), data.vars, this).also { for (i in data.defines.indices) if (i < it.cvars.size) it.cvars[i] = data.defines[i] }
+    init {
+        // the monkey is not in the scene until the creature of the trapdoor has climbed out
+        if (data.useMonkey) vm.objects[monkeyIndex].let { it.stage = -1; it.room = -1; it.life = -1; it.body = -1 }
+    }
     val objects: Array<GameObject> = Array(vm.objects.size) { GameObject(vm.objects[it]) }
 
     /** The room the game is in now (colliders, zones, cameras); it changes when the player enters another room or floor. */
@@ -802,10 +834,32 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     }
 
     override fun lifeChanged(obj: Int, life: Int) {
+        // the creature of the trapdoor has climbed out and starts to fight: now the monkey climbs out too
+        if (obj == OBJ_HOLE_CREATURE && life == LIFE_CREATURE_FIGHT) spawnMonkey()
         // not in the original: when the trapdoor starts to open, smoke comes out of the hole, until the creature has climbed out
         if (obj == OBJ_TRAPDOOR && life == LIFE_TRAPDOOR_OPENING) {
             vm.objects.getOrNull(OBJ_HOLE_CREATURE)?.let { effects.add(Effect(5, it.x, 0, it.z, time, null)) }
         }
+    }
+
+    /** The monkey climbs out of the hole behind the creature, by the same scripts (copies with its own numbers) and the same path; it closes the trapdoor when it is out. */
+    private fun spawnMonkey() {
+        if (!data.useMonkey) return
+        val m = vm.objects[monkeyIndex]
+        if (m.stage >= 0) return
+        val src = WorldObject(OBJ_HOLE_CREATURE, data.objectData)
+        m.body = MonkeyBody.BODY; m.flags = src.flags; m.typeZv = src.typeZv
+        m.x = src.x; m.y = src.y; m.z = src.z; m.alpha = src.alpha; m.beta = src.beta; m.gamma = src.gamma
+        m.stage = stage; m.room = room
+        m.lifeMode = src.lifeMode; m.life = LIFE_CREATURE_CLIMBED + MONKEY_SCRIPTS; m.floorLife = -1
+        m.anim = ANIM_CLIMB; m.animType = src.animType; m.animInfo = src.animInfo; m.frame = 0
+        m.trackMode = 3; m.trackNumber = 0
+        moved(monkeyIndex)
+        anim(monkeyIndex, ANIM_CLIMB, 1, -1)
+        trackMode(monkeyIndex, 3, 0)
+        cameraTarget = monkeyIndex
+        vm.vars[20] = (vm.vars[20] + 1).toShort()
+        ui.playSample(61)
     }
 
     override fun cameraTarget(obj: Int) {
@@ -1232,6 +1286,23 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         const val OBJ_TRAPDOOR = 8
         const val LIFE_TRAPDOOR_OPENING = 5
         const val OBJ_HOLE_CREATURE = 9
+
+        /** Life scripts of the creature of the trapdoor: the climb (16), the end of the climb (17) and the fight (18); the monkey runs copies numbered 1000 higher. */
+        const val LIFE_CREATURE_CLIMB = 16
+        const val LIFE_CREATURE_CLIMBED = 17
+        const val LIFE_CREATURE_FIGHT = 18
+        const val LIFE_TRAPDOOR_CLOSING = 6
+        const val MONKEY_SCRIPTS = 1000
+        const val ANIM_CLIMB = 19
+
+        /** The object table with one more entry (a copy of the creature of the trapdoor) at the end, for the monkey. */
+        fun withMonkeyObject(d: ByteArray): ByteArray {
+            val count = d.u16(0)
+            val out = d.copyOf(d.size + WorldObject.SIZE)
+            System.arraycopy(d, 2 + OBJ_HOLE_CREATURE * WorldObject.SIZE, out, 2 + count * WorldObject.SIZE, WorldObject.SIZE)
+            out[0] = ((count + 1) and 0xFF).toByte(); out[1] = ((count + 1) shr 8).toByte()
+            return out
+        }
         /** Positions in the CVars (DEFINES.ITD): the sound of an impact, the weight limit, the object that sends a thrown item back. */
         const val CVAR_SAMPLE_CHOC = 9
         const val CVAR_REVERSE_OBJECT = 11

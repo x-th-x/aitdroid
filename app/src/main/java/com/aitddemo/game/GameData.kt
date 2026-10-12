@@ -78,7 +78,7 @@ class GameData(
     /** The constants of DEFINES.ITD (CVars): sample numbers, the weight limit, the object that sends things back and so on. */
     val defines: ShortArray = ShortArray(0),
 ) {
-    /** Shows the monkey instead of the creature that climbs out of the attic trapdoor (a change of the original). */
+    /** The monkey climbs out of the attic trapdoor after the creature (an addition to the original). */
     var useMonkey = true
 
     private val bodies = HashMap<Int, BodyAsset?>()
@@ -95,9 +95,9 @@ class GameData(
     /** Body [n] (entry n + 1 of LISTBODY.PAK) or null. */
     fun body(n: Int): BodyAsset? = bodies.getOrPut(n) {
         try {
+            if (n == MonkeyBody.BODY) return@getOrPut bodyPak.get(MonkeyBody.BOX_OF_BODY + 1)?.let { MonkeyBody.asset(n, OriginalBody.parse(it).zv) }
             val d = bodyPak.get(n + 1) ?: return@getOrPut null
             val b = OriginalBody.parse(d)
-            if (useMonkey && n == MonkeyBody.REPLACES_BODY) return@getOrPut MonkeyBody.asset(n, b.zv)
             val (v, t) = b.toMesh(palette)
             BodyAsset(n, b.zv, v, t, b.lines(palette), b.spheres(palette), if (b.isArticulated) b.animatedParts() else null)
         } catch (_: Exception) {

@@ -9,8 +9,11 @@ package com.aitddemo.game
  * same generator as the Model Viewer's monkey; it is a rigid body, so it moves through the room but does not swing its limbs.
  */
 object MonkeyBody {
-    /** The body of the original that the monkey replaces (the creature of the trapdoor). */
-    const val REPLACES_BODY = 23
+    /** The body number the monkey has in the game (the original files have no such body). */
+    const val BODY = 1000
+
+    /** The body of the original whose box the monkey takes over (the creature of the trapdoor). */
+    const val BOX_OF_BODY = 23
 
     /** The monkey is about 1.2 m tall in the game (the original creature's height), its feet on the floor, facing the way the original bodies face. */
     private const val HEIGHT = 1201f
