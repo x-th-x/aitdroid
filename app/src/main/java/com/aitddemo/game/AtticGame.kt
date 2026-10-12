@@ -184,6 +184,24 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         return intArrayOf((roomView.worldX - r.worldX) * 10, (roomView.worldY - r.worldY) * 10, (roomView.worldZ - r.worldZ) * 10)
     }
 
+    private val roomGeometry = HashMap<Long, Pair<List<Zone>, List<Zone>>>()
+
+    /**
+     * The walls (hard colliders) and zones of room [r] of the current floor in the frame of the current room: an object of another room keeps colliding with the walls of its
+     * own room and walks through the doors of its own room (GereDec of the original uses the room of the object), while all places are in the frame of the current room.
+     */
+    private fun geometryOf(r: Int): Pair<List<Zone>, List<Zone>> {
+        if (r == room || r < 0) return roomView.hardcols to roomView.zones
+        return roomGeometry.getOrPut((stage * 1000L + r) * 1000L + room) {
+            val own = try { data.rooms.room(stage, r) } catch (_: Exception) { null } ?: return@getOrPut emptyList<Zone>() to emptyList()
+            val dx = (roomView.worldX - own.worldX) * 10
+            val dy = (roomView.worldY - own.worldY) * 10
+            val dz = (roomView.worldZ - own.worldZ) * 10
+            fun move(z: Zone) = Zone(z.x1 - dx, z.x2 - dx, z.y1 + dy, z.y2 + dy, z.z1 + dz, z.z2 + dz, z.parameter, z.type)
+            own.hardcols.map { move(it) } to own.zones.map { move(it) }
+        }
+    }
+
     /** The place of the object (stored in the frame of its own room) in the frame of the current room. */
     private fun currentFrame(w: WorldObject): IntArray {
         val d = frameDelta(w.room) ?: return intArrayOf(w.x, w.y, w.z)
@@ -201,7 +219,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         createActor(g, w.anim, w.animType, w.animInfo)
         if (w.room != room) { // an object of another room that this room sees: in the frame of this room, without the walls of this room
             frameDelta(w.room)?.let { d -> g.actor?.moveToRoomOrigin(d[0], d[1], d[2]) }
-            g.actor?.hardcols = emptyList()
+            g.actor?.hardcols = geometryOf(w.room).first
         }
         if (w.typeZv == 4 && w.room == room) { // the box of the room's collider with this object's parameter (foundName), and the place at its centre
             val h = roomView.hardcols.firstOrNull { it.type == 9 && it.parameter == w.foundName }
@@ -318,7 +336,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                 }
             }
             if (g !== player && a.trackMode != 0) touchObjects(g, a)
-            if (w.flags and AF_TRIGGER != 0 && a.triggersOn && w.room == room) checkZones(g)
+            if (w.flags and AF_TRIGGER != 0 && a.triggersOn) checkZones(g)
             if (g.actionType != 0) processAction(g)
             if (w.flags and AF_FALLABLE != 0) processFall(g)
             if (g.flightTicks >= 0) processFlight(g)
@@ -393,10 +411,16 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         val x = a.renderX
         val y = a.renderY
         val z = a.renderZ
-        for (zone in roomView.zones) {
+        for (zone in geometryOf(g.w.room).second) {
             if (!zone.contains(x, y, z)) continue
             when (zone.type) {
-                0 -> if (g.w.index == playerIndex) enterNextRoom(g, zone.parameter)
+                0 -> if (g.w.index == playerIndex) {
+                    enterNextRoom(g, zone.parameter)
+                } else if (g.w.room != zone.parameter) { // an enemy that walks through a door of its room is in the next room from then on
+                    g.w.room = zone.parameter
+                    a.roomNumber = zone.parameter
+                    a.hardcols = geometryOf(zone.parameter).first
+                }
                 9 -> g.w.hardDec = zone.parameter
                 10 -> { // stage zone: the object's own floor script takes over
                     val life = g.w.floorLife
@@ -451,7 +475,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                 val a = g.actor
                 if (a != null) {
                     if (oldView !== view) a.moveToRoomOrigin(dx, dy, dz)
-                    a.hardcols = if (g.w.room == newRoom) view.hardcols else emptyList()
+                    a.hardcols = geometryOf(g.w.room).first
                 }
             } else {
                 deactivate(g)
