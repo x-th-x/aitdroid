@@ -137,6 +137,10 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     /** For testing: notable decisions of the game logic are reported here. */
     var trace: ((String) -> Unit)? = null
 
+    /** WATER: the height below which the vertices of bodies are not drawn (-600 with water, 10000 without; the value the original puts into its point transformation). */
+    var waterLimit = 10000
+        private set
+
     /** SHAKING 1: the timer interrupt of the original moves the start of the display by two scanlines on every second tick (60 per second), the picture jitters. */
     var shaking = false
         private set
@@ -999,6 +1003,10 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             }
             4 -> if (a != null) effects.add(Effect(4, a.renderX, a.renderY, a.renderZ, time, null, g.w.alpha, a.beta and 0x3FF, g.w.gamma))
         }
+    }
+
+    override fun water(n: Int) {
+        waterLimit = if (n != 0) -600 else 10000
     }
 
     override fun shaking(n: Int) {

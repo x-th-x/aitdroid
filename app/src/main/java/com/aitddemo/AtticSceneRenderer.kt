@@ -31,6 +31,9 @@ class AtticActor(
     /** The box of the object (x1, x2, y1, y2, z1, z2 in room units) the original sorts by; null = sort by the depth of the origin. */
     var sortBox: IntArray? = null
 
+    /** WATER 1: the vertices lower than this (y of the room, y grows downwards) are not drawn, as the point transformation of the original marks them invalid; 10000 = no water. */
+    var waterLimit: Float = 10000f
+
     /** The wall box the object touches: its spheres whose centre is inside are not drawn (the original's primitive loop does this with the box of GET_HARD_CLIP). */
     var clipBox: IntArray? = null
 
@@ -183,6 +186,7 @@ class AtticSceneRenderer {
         for (i in 0 until n) {
             proj.camera(a.worldVertices[i * 3], a.worldVertices[i * 3 + 1], a.worldVertices[i * 3 + 2], p0)
             cx[i] = p0[0]; cy[i] = p0[1]; cz[i] = p0[2]
+            if (a.worldVertices[i * 3 + 1] > a.waterLimit) cz[i] = -1f // under water: invalid, the polygons, lines and spheres that use it are dropped
         }
         var l = Float.MAX_VALUE; var t = Float.MAX_VALUE; var r = -Float.MAX_VALUE; var b = -Float.MAX_VALUE
         val tris = ArrayList<Tri>(a.triangles.size / 4)
