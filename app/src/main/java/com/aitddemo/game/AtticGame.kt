@@ -96,39 +96,48 @@ class GameObject(val w: WorldObject) {
  */
 class AtticGame(val data: GameData, private val ui: GameUi, private var stage: Int = 0, private var room: Int = 0) : LifeHost {
     override var time = 0
-    /** An enemy that follows the player to another floor: it appears at the place where the player came in [FOLLOW_DELAY_TICKS] later and walks the player's way. */
-    private class Follow(val obj: Int, val stage: Int, val room: Int, val arrival: Int) { var started = false }
+    /** An enemy that follows the player to another floor: it appears at the place where the player came in [delay] ticks later and walks the player's way. */
+    private class Follow(val who: Follower, val stage: Int, val room: Int, val arrival: Int, val delay: Int) { var started = false }
 
-    private var follow: Follow? = null
+    /** An enemy that can follow: its object, the life script of its fight, and the animation it walks with in the fight. */
+    class Follower(val obj: Int, val fightLife: Int, val walkAnim: Int)
 
-    /** The player's places (time, x, y, z, beta) since he came into the new room, for the follower to walk. */
+    private val follows = ArrayList<Follow>()
+
+    /** The player's places (time, x, y, z, beta) since he came into the new room, for the followers to walk. */
     private val trail = ArrayList<IntArray>()
 
-    /** Called every tick: records the player's way and moves the follower along it. */
+    /** Called every tick: records the player's way and moves the followers along it. */
     private fun updateFollow() {
-        val f = follow ?: return
-        if (stage != f.stage || room != f.room) { follow = null; return } // the player has left that room: the enemy stays where it was
+        if (follows.isEmpty()) return
+        val first = follows[0]
+        if (stage != first.stage || room != first.room) { follows.clear(); return } // the player has left that room: the enemies stay where they are
         val pa = player?.actor ?: return
-        if (time - f.arrival <= FOLLOW_REPLAY_TICKS) trail.add(intArrayOf(time, pa.renderX, pa.renderY, pa.renderZ, pa.beta and 0x3FF))
-        if (time < f.arrival + FOLLOW_DELAY_TICKS || trail.isEmpty()) return
-        val g = objects[f.obj]
-        if (!f.started) {
-            val first = trail[0]
-            g.w.stage = stage; g.w.room = room
-            g.w.x = first[1]; g.w.y = first[2]; g.w.z = first[3]; g.w.beta = first[4]
-            moved(f.obj) // the enemy joins the scene at the place where the player came in
-            trackMode(f.obj, 0, -1) // the player's way is its path for now
-            g.w.anim = ANIM_ENEMY_WALK; anim(f.obj, ANIM_ENEMY_WALK, 1, -1) // it walks (ANIM_REPEAT 15) while it follows
-            f.started = true
-        }
-        val a = g.actor ?: return
-        val want = time - FOLLOW_DELAY_TICKS
-        var at = trail[0]
-        for (e in trail) { if (e[0] <= want) at = e else break }
-        a.teleport(at[1], at[2], at[3], at[4])
-        if (time >= f.arrival + FOLLOW_DELAY_TICKS + FOLLOW_REPLAY_TICKS) {
-            trackMode(f.obj, 2, 1) // from here on it follows the player as in the fight (MOVE 2 1)
-            follow = null
+        if (time - first.arrival <= FOLLOW_REPLAY_TICKS) trail.add(intArrayOf(time, pa.renderX, pa.renderY, pa.renderZ, pa.beta and 0x3FF))
+        if (trail.isEmpty()) return
+        val iterator = follows.iterator()
+        while (iterator.hasNext()) {
+            val f = iterator.next()
+            if (time < f.arrival + f.delay) continue
+            val g = objects[f.who.obj]
+            if (!f.started) {
+                val entry = trail[0]
+                g.w.stage = stage; g.w.room = room
+                g.w.x = entry[1]; g.w.y = entry[2]; g.w.z = entry[3]; g.w.beta = entry[4]
+                moved(f.who.obj) // the enemy joins the scene at the place where the player came in
+                trackMode(f.who.obj, 0, -1) // the player's way is its path for now
+                g.w.anim = f.who.walkAnim; anim(f.who.obj, f.who.walkAnim, 1, -1) // it walks (ANIM_REPEAT) while it follows
+                f.started = true
+            }
+            val a = g.actor ?: continue
+            val want = time - f.delay
+            var at = trail[0]
+            for (e in trail) { if (e[0] <= want) at = e else break }
+            a.teleport(at[1], at[2], at[3], at[4])
+            if (time >= f.arrival + f.delay + FOLLOW_REPLAY_TICKS) {
+                trackMode(f.who.obj, 2, 1) // from here on it follows the player as in the fight (MOVE 2 1)
+                iterator.remove()
+            }
         }
     }
 
@@ -481,16 +490,16 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             ui.leftRoom(newStage, newRoom)
             return
         }
-        // not in the original: the enemy that climbed out of the trapdoor (Emily) follows the player when he leaves by the stairs to another floor
-        val chaser = objects[OBJ_HOLE_CREATURE]
-        val following = data.replacesEnemy && newStage != stage && chaser.w.active && chaser.w.life == LIFE_CREATURE_FIGHT && chaser.w.body == EmilyBody.BODY
+        // not in the original: the enemies that hunt the player follow him when he leaves by the stairs to another floor
+        val chasers = if (data.useMonkey && newStage != stage) FOLLOWERS.filter { f -> objects[f.obj].let { it.w.active && it.w.life == f.fightLife } } else emptyList()
         for (g in objects) if (g.w.active && g.w.index != playerIndex) deactivate(g)
         stage = newStage
         room = newRoom
         roomView = view
         roomVersion++
-        if (following) {
-            follow = Follow(OBJ_HOLE_CREATURE, newStage, newRoom, time)
+        if (chasers.isNotEmpty()) {
+            follows.clear()
+            chasers.forEachIndexed { k, f -> follows.add(Follow(f, newStage, newRoom, time, FOLLOW_DELAY_TICKS + k * FOLLOW_GAP_TICKS)) }
             trail.clear()
         }
         val p = player
@@ -1358,7 +1367,6 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         const val LIFE_TRAPDOOR_CLOSING = 6
         const val MONKEY_SCRIPTS = 1000
         const val ANIM_CLIMB = 19
-        const val ANIM_ENEMY_WALK = 15
 
         /** The body the creature of the trapdoor has in the original (the monkey takes its place). */
         const val CREATURE_BODY = 23
@@ -1370,6 +1378,12 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         /** The enemy that follows the player down the stairs arrives 3 seconds after him and walks his way for 9 seconds before it hunts him by itself. */
         const val FOLLOW_DELAY_TICKS = 180
         const val FOLLOW_REPLAY_TICKS = 540
+
+        /** A second follower arrives half a second behind the first, so they do not stand in each other. */
+        const val FOLLOW_GAP_TICKS = 30
+
+        /** The enemies that follow the player down the stairs: the one of the trapdoor (fight script 18, walks with animation 15) and the one of the window (21, 23). */
+        val FOLLOWERS = listOf(Follower(OBJ_HOLE_CREATURE, LIFE_CREATURE_FIGHT, 15), Follower(21, 21, 23))
 
         /** The object table with the entries for the added monkeys (copies of the creature of the trapdoor) at the end. */
         fun withMonkeyObjects(d: ByteArray): ByteArray {
