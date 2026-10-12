@@ -202,6 +202,38 @@ private fun smokeActor(e: Effect, now: Int, palette: IntArray): AtticActor {
     return AtticActor(verts, IntArray(0), e.x.toFloat(), e.y.toFloat(), e.z.toFloat(), e.x / 10 - 5, e.x / 10 + 5, e.z / 10 - 5, e.z / 10 + 5, IntArray(0), spheres.toIntArray())
 }
 
+/**
+ * The smoke out of the trapdoor hole (an addition to the original, built from the cigar smoke: the same grey, half transparent puffs). 24 puffs start one after the
+ * other during the first 540 ticks at a random place within 250 units of the hole; each rises for 240 ticks at its own speed, drifts a little, and swells to 300 units
+ * and shrinks again as it goes.
+ */
+private fun holeSmokeActor(e: Effect, now: Int, palette: IntArray): AtticActor {
+    val t = (now - e.born).coerceAtLeast(0)
+    val rnd = java.util.Random(e.born * 31L + e.kind)
+    val key = (palette.getOrElse(176) { 0xFFFFFFFF.toInt() } and 0xFFFFFF) or (0xFA shl 24)
+    val count = 24
+    val life = 240
+    val verts = FloatArray(count * 3)
+    val spheres = ArrayList<Int>(count * 3)
+    for (i in 0 until count) {
+        val delay = rnd.nextInt(540)
+        val sx = rnd.nextInt(500) - 250
+        val sz = rnd.nextInt(500) - 250
+        val rise = 2.5f + rnd.nextFloat() * 2f
+        val driftX = (rnd.nextFloat() - 0.5f) * 1.6f
+        val driftZ = (rnd.nextFloat() - 0.5f) * 1.6f
+        val age = t - delay
+        if (age < 0 || age > life) continue
+        val f = age.toFloat() / life
+        verts[i * 3] = e.x + sx + driftX * age
+        verts[i * 3 + 1] = e.y - rise * age
+        verts[i * 3 + 2] = e.z + sz + driftZ * age
+        val radius = (40 + 260 * Math.sin(Math.PI * f)).toInt()
+        spheres.add(i); spheres.add(radius); spheres.add(key)
+    }
+    return AtticActor(verts, IntArray(0), e.x.toFloat(), e.y.toFloat(), e.z.toFloat(), e.x / 10 - 5, e.x / 10 + 5, e.z / 10 - 5, e.z / 10 + 5, IntArray(0), spheres.toIntArray())
+}
+
 /** The flash of a gun (mode 3): the body BODY_FLAMME at the muzzle, turned like the shooter; the original shows it for one frame. */
 private fun flashActor(e: Effect, data: com.aitddemo.game.GameData): AtticActor {
     val asset = data.body(e.body)
@@ -298,6 +330,7 @@ private fun dotsActor(e: Effect, now: Int, palette: IntArray): AtticActor {
 private fun effectActor(e: Effect, now: Int, palette: IntArray, data: com.aitddemo.game.GameData): AtticActor {
     if (e.kind == 3) return flashActor(e, data)
     if (e.kind == 4) return smokeActor(e, now, palette)
+    if (e.kind == 5) return holeSmokeActor(e, now, palette)
     if (e.kind == 0) return evaporationActor(e, now, palette)
     if (e.kind == 1 || e.kind == 2) return dotsActor(e, now, palette)
     val age = (now - e.born).coerceAtLeast(0)
@@ -367,6 +400,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
         if (DevOptions.vars.any { it.first == 19 }) g.objects[9].w.chronoStart = g.time
         DevOptions.vars.firstOrNull { it.first == 995 }?.let { v -> g.objects[4].let { w -> w.actor?.teleport(v.second, 0, 4568, w.w.beta) } } // the wardrobe pushed against the window at that x (for testing)
         if (DevOptions.vars.any { it.first == 999 }) g.special(1, 0) // shows the evaporation effect around the player (for testing)
+        if (DevOptions.vars.any { it.first == 994 }) g.lifeChanged(AtticGame.OBJ_TRAPDOOR, AtticGame.LIFE_TRAPDOOR_OPENING) // the smoke out of the trapdoor hole (for testing)
         if (DevOptions.vars.any { it.first == 996 }) g.player?.actor?.let { g.effects.add(Effect(4, it.renderX, it.renderY, it.renderZ, g.time, null, 0, 0, 0)) } // the smoke of a cigar around the player (for testing)
         if (DevOptions.vars.any { it.first == 997 }) g.player?.actor?.let { g.effects.add(Effect(3, it.renderX, it.renderY - 1000, it.renderZ, g.time + 300, null, 0, 0, 0, g.vm.cvars[1].toInt())) } // the flash of a gun in front of the player for 5 seconds (for testing)
         if (DevOptions.vars.any { it.first == 998 }) g.player?.actor?.let { g.effects.add(Effect(1, it.renderX, it.renderY - 1000, it.renderZ, g.time, null)) } // the dots of a hit in front of the player (for testing)

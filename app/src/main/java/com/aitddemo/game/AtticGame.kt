@@ -281,7 +281,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             if (g.flightTicks >= 0) processFlight(g)
         }
 
-        effects.removeAll { time - it.born > (when (it.kind) { 0 -> EVAPORATION_TICKS; 3 -> 3; 4 -> SMOKE_TICKS; else -> EFFECT_TICKS }) }
+        effects.removeAll { time - it.born > (when (it.kind) { 0 -> EVAPORATION_TICKS; 3 -> 3; 4 -> SMOKE_TICKS; 5 -> HOLE_SMOKE_TICKS; else -> EFFECT_TICKS }) }
 
         // the life scripts of all active objects
         for (g in objects) {
@@ -794,7 +794,12 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         if (vm.objects.getOrNull(item) != null && !inventory.contains(item)) takeItem(item)
     }
 
-    override fun lifeChanged(obj: Int, life: Int) {}
+    override fun lifeChanged(obj: Int, life: Int) {
+        // not in the original: when the trapdoor starts to open, smoke comes out of the hole, until the creature has climbed out
+        if (obj == OBJ_TRAPDOOR && life == LIFE_TRAPDOOR_OPENING) {
+            vm.objects.getOrNull(OBJ_HOLE_CREATURE)?.let { effects.add(Effect(5, it.x, 0, it.z, time, null)) }
+        }
+    }
 
     override fun cameraTarget(obj: Int) {
         cameraTarget = obj
@@ -1212,6 +1217,14 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
         /** The smoke of a cigar (mode 4) lasts 660 ticks of the 60 per second timer. */
         const val SMOKE_TICKS = 660
+
+        /** The smoke out of the trapdoor hole (an addition to the original): puffs rise for 9 seconds, each lives 4 seconds. */
+        const val HOLE_SMOKE_TICKS = 540 + 240
+
+        /** The trapdoor object of the attic, the life script that opens it, and the creature that climbs out of the hole. */
+        const val OBJ_TRAPDOOR = 8
+        const val LIFE_TRAPDOOR_OPENING = 5
+        const val OBJ_HOLE_CREATURE = 9
         /** Positions in the CVars (DEFINES.ITD): the sound of an impact, the weight limit, the object that sends a thrown item back. */
         const val CVAR_SAMPLE_CHOC = 9
         const val CVAR_REVERSE_OBJECT = 11
