@@ -28,6 +28,9 @@ class AtticActor(
     val lines: IntArray = IntArray(0),
     val spheres: IntArray = IntArray(0),
 ) {
+    /** The box of the object (x1, x2, y1, y2, z1, z2 in room units) the original sorts by; null = sort by the depth of the origin. */
+    var sortBox: IntArray? = null
+
     /** Flat things lying on the floor (rug, trap door lid) are drawn before everything that stands on them. */
     val isFlat: Boolean = run {
         var lo = Float.MAX_VALUE
@@ -53,6 +56,11 @@ class AtticProjector(private val cam: AtticCameraDef) {
 
     private fun rc(a: Int) = cos((a and 0x3FF) * 2.0 * Math.PI / 1024.0).toFloat()
     private fun rs(a: Int) = kotlin.math.sin((a and 0x3FF) * 2.0 * Math.PI / 1024.0).toFloat()
+
+    /** The place of the camera in room units (translateX, Y, Z of the original). */
+    val camX: Int get() = tx.toInt()
+    val camY: Int get() = ty.toInt()
+    val camZ: Int get() = tz.toInt()
 
     /** Writes the camera-space position (x, y, depth z including the projection distance) of a world point into [out]. */
     fun camera(wx: Float, wy: Float, wz: Float, out: FloatArray) {
@@ -120,11 +128,14 @@ class AtticSceneRenderer {
     ) {
         canvas.drawBitmap(background, 0f, 0f, null)
         val proj = AtticProjector(camera)
-        val order = actors.map { a ->
+        // like the original: the things with a box are put in order by the boxes (DrawOrder), the others (without a box) by the depth of their origin, first
+        val boxed = actors.filter { it.sortBox != null }
+        val unboxed = actors.filter { it.sortBox == null }.map { a ->
             proj.camera(a.originX, a.originY, a.originZ, p0)
             a to (if (a.isFlat) Float.MAX_VALUE else p0[2])
-        }.sortedByDescending { it.second }
-        for ((a, _) in order) {
+        }.sortedByDescending { it.second }.map { it.first }
+        val order = unboxed + DrawOrder.sort(boxed, { it.sortBox!! }, proj.camX, proj.camY, proj.camZ)
+        for (a in order) {
             val box = drawActor(proj, a) ?: continue
             for (m in masks) {
                 if (!covers(m, a)) continue

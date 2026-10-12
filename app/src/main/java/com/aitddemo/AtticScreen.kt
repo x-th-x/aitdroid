@@ -164,12 +164,17 @@ private fun GameObject.toActor(minX: Int, maxX: Int, minZ: Int, maxZ: Int): Atti
     }
     val zv = act.zv
     // figures (articulated bodies) use their body box for the background masks, furniture the box of its vertices
-    return if (asset.parts != null) {
+    val actor = if (asset.parts != null) {
         AtticActor(out, asset.triangles, x.toFloat(), y.toFloat(), z.toFloat(), zv[0] / 10, zv[1] / 10, zv[4] / 10, zv[5] / 10, asset.lines, asset.spheres)
     } else {
         AtticActor(out, asset.triangles, x.toFloat(), y.toFloat(), z.toFloat(), (lowX / 10).toInt(), (highX / 10).toInt(), (lowZ / 10).toInt(), (highZ / 10).toInt(), asset.lines, asset.spheres)
     }
+    actor.sortBox = zv.copyOf(6)
+    return actor
 }
+
+/** The box an effect has in the draw order: the box of the creature for the evaporation, else a small box around its place. */
+private fun Effect.sortBox(): IntArray = box?.copyOf(6) ?: intArrayOf(x - 50, x + 50, y - 50, y + 50, z - 50, z + 50)
 
 /** A short lived effect as particles: points with a radius and a colour that change with the age of the effect (drawn as the body's spheres). */
 /**
@@ -360,6 +365,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
         devPos?.let { p -> g.player?.actor?.teleport(p[0], 0, p[1], p[2]) }
         for ((i, v) in DevOptions.vars) if (i in g.vm.vars.indices) g.vm.vars[i] = v.toShort()
         if (DevOptions.vars.any { it.first == 19 }) g.objects[9].w.chronoStart = g.time
+        DevOptions.vars.firstOrNull { it.first == 995 }?.let { v -> g.objects[4].let { w -> w.actor?.teleport(v.second, 0, 4568, w.w.beta) } } // the wardrobe pushed against the window at that x (for testing)
         if (DevOptions.vars.any { it.first == 999 }) g.special(1, 0) // shows the evaporation effect around the player (for testing)
         if (DevOptions.vars.any { it.first == 996 }) g.player?.actor?.let { g.effects.add(Effect(4, it.renderX, it.renderY, it.renderZ, g.time, null, 0, 0, 0)) } // the smoke of a cigar around the player (for testing)
         if (DevOptions.vars.any { it.first == 997 }) g.player?.actor?.let { g.effects.add(Effect(3, it.renderX, it.renderY - 1000, it.renderZ, g.time + 300, null, 0, 0, 0, g.vm.cvars[1].toInt())) } // the flash of a gun in front of the player for 5 seconds (for testing)
@@ -495,7 +501,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     // one frame of the room: photo, objects and player through the camera matrix, masks over them (AtticSceneRenderer)
     val roomImage = run {
         frameTick // the poses change every frame
-        val actors = game.objects.mapNotNull { it.toActor(view.bounds[0], view.bounds[1], view.bounds[2], view.bounds[3]) } + game.effects.map { effectActor(it, game.time, world.game.palette, world.game) }
+        val actors = game.objects.mapNotNull { it.toActor(view.bounds[0], view.bounds[1], view.bounds[2], view.bounds[3]) } + game.effects.map { e -> effectActor(e, game.time, world.game.palette, world.game).also { it.sortBox = e.sortBox() } }
         val dark = game.lightOff
         renderer.render(camera, if (showBackground && !dark) backgrounds[camera.index.coerceIn(0, backgrounds.size - 1)] else blackBackground, actors, if (dark) emptyList() else view.masks.getOrNull(camera.index) ?: emptyList())
         renderer.bitmap.asImageBitmap()
