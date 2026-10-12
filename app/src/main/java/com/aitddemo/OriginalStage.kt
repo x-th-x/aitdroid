@@ -21,7 +21,7 @@ class OriginalStage private constructor(
     class Room(val index: Int, val worldX: Int, val worldY: Int, val worldZ: Int, val hardcols: IntArray, val cameraIds: IntArray, val zones: IntArray = IntArray(0))
 
     /** A camera as seen from one room: projection data, cover zones of that room and the background masks of that room. */
-    class RoomCamera(val camera: AtticCameraDef, val masks: List<AtticData.Mask>)
+    class RoomCamera(val camera: AtticCameraDef, val masks: List<AtticData.Mask>, val maskViews: Map<Int, List<AtticData.Mask>>)
 
     /** The camera [cameraId] as seen from [roomIndex]; the camera's [AtticCameraDef.index] is [cameraId]. */
     fun camera(roomIndex: Int, cameraId: Int): RoomCamera {
@@ -31,11 +31,15 @@ class OriginalStage private constructor(
         var zones: List<List<AtticCameraZonePoint>> = emptyList()
         var masks: List<AtticData.Mask> = emptyList()
         val seen = HashSet<Int>()
+        // every room the camera sees has its own masks (in the coordinates of that room): an object of that room is covered by them, not by those of the camera's own room
+        val maskViews = HashMap<Int, List<AtticData.Mask>>()
         for (k in 0 until views) {
             val e = o + 0x14 + k * VIEW_SIZE
-            seen.add(camData.u16(e))
-            if (camData.u16(e) != roomIndex) continue
-            masks = readMasks(camData, o + camData.u16(e + 2))
+            val viewRoom = camData.u16(e)
+            seen.add(viewRoom)
+            maskViews[viewRoom] = readMasks(camData, o + camData.u16(e + 2))
+            if (viewRoom != roomIndex) continue
+            masks = maskViews.getValue(viewRoom)
             zones = readZones(camData, o + camData.u16(e + 4))
         }
         val def = AtticCameraDef(
@@ -47,7 +51,7 @@ class OriginalStage private constructor(
             roomX = room.worldX.toFloat(), roomY = room.worldY.toFloat(), roomZ = room.worldZ.toFloat(),
             viewedRooms = seen,
         )
-        return RoomCamera(def, masks)
+        return RoomCamera(def, masks, maskViews)
     }
 
     /** The 320x200 picture of camera [cameraId] as ARGB through [palette]. */

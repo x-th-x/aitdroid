@@ -34,6 +34,13 @@ class AtticActor(
     /** WATER 1: the vertices lower than this (y of the room, y grows downwards) are not drawn, as the point transformation of the original marks them invalid; 10000 = no water. */
     var waterLimit: Float = 10000f
 
+    /** The room whose masks cover this object (the room it belongs to), -1 = the room of the picture. */
+    var maskRoom = -1
+
+    /** Shift (tenths) from the place of the object in the coordinates of the picture's room to its own room's, for the masks' zones. */
+    var maskShiftX = 0
+    var maskShiftZ = 0
+
     /** The wall box the object touches: its spheres whose centre is inside are not drawn (the original's primitive loop does this with the box of GET_HARD_CLIP). */
     var clipBox: IntArray? = null
 
@@ -130,7 +137,8 @@ class AtticSceneRenderer {
         camera: AtticCameraDef,
         background: Bitmap,
         actors: List<AtticActor>,
-        masks: List<AtticData.Mask> = AtticData.MASKS.getOrNull(camera.index) ?: emptyList(),
+        maskViews: Map<Int, List<AtticData.Mask>> = emptyMap(),
+        pictureRoom: Int = -1,
     ) {
         canvas.drawBitmap(background, 0f, 0f, null)
         val proj = AtticProjector(camera)
@@ -143,6 +151,8 @@ class AtticSceneRenderer {
         val order = unboxed + DrawOrder.sort(boxed, { it.sortBox!! }, proj.camX, proj.camY, proj.camZ)
         for (a in order) {
             val box = drawActor(proj, a) ?: continue
+            // the masks of the room the object is in (each room that the camera sees has its own)
+            val masks = maskViews[if (a.maskRoom >= 0) a.maskRoom else pictureRoom] ?: emptyList()
             for (m in masks) {
                 if (!covers(m, a)) continue
                 canvas.save()
@@ -158,7 +168,7 @@ class AtticSceneRenderer {
     private fun covers(m: AtticData.Mask, a: AtticActor): Boolean {
         var i = 0
         while (i + 3 < m.rects.size) {
-            if (a.zvX1 >= m.rects[i] && a.zvZ1 >= m.rects[i + 1] && a.zvX2 <= m.rects[i + 2] && a.zvZ2 <= m.rects[i + 3]) return true
+            if (a.zvX1 + a.maskShiftX >= m.rects[i] && a.zvZ1 + a.maskShiftZ >= m.rects[i + 1] && a.zvX2 + a.maskShiftX <= m.rects[i + 2] && a.zvZ2 + a.maskShiftZ <= m.rects[i + 3]) return true
             i += 4
         }
         return false

@@ -17,6 +17,8 @@ class RoomView(
     val zones: List<Zone>,
     val cameras: List<AtticCameraDef>,
     val masks: List<List<AtticData.Mask>>,
+    /** For each camera: the masks of every room the camera sees (room number -> masks, in the coordinates of that room). */
+    val maskViews: List<Map<Int, List<AtticData.Mask>>>,
     /** 320x200 ARGB picture of each camera. */
     val photos: List<IntArray>,
 ) {
@@ -43,6 +45,7 @@ class RoomLoader(private val files: GameFiles, private val palette: IntArray) {
             zones(r.hardcols), zones(r.zones),
             cameras.mapIndexed { index, c -> c.camera.copy(index = index) },
             cameras.map { it.masks },
+            cameras.map { it.maskViews },
             r.cameraIds.map { st.picture(it, palette) },
         )
     }

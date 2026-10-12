@@ -555,9 +555,16 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     // one frame of the room: photo, objects and player through the camera matrix, masks over them (AtticSceneRenderer)
     val roomImage = run {
         frameTick // the poses change every frame
-        val actors = game.objects.filter { it.w.room == view.room || camera.viewedRooms.isEmpty() || it.w.room in camera.viewedRooms }.mapNotNull { o -> o.toActor()?.also { it.waterLimit = game.waterLimit.toFloat() } } + game.effects.map { e -> effectActor(e, game.time, world.game.palette, world.game).also { it.sortBox = e.sortBox() } }
+        val actors = game.objects.filter { it.w.room == view.room || camera.viewedRooms.isEmpty() || it.w.room in camera.viewedRooms }.mapNotNull { o ->
+            o.toActor()?.also {
+                it.waterLimit = game.waterLimit.toFloat()
+                it.maskRoom = o.w.room
+                // an object of another room is covered by the masks of that room, which are in the coordinates of that room
+                if (o.w.room != view.room) game.roomShift(o.w.room)?.let { d -> it.maskShiftX = d[0] / 10; it.maskShiftZ = -d[2] / 10 }
+            }
+        } + game.effects.map { e -> effectActor(e, game.time, world.game.palette, world.game).also { it.sortBox = e.sortBox() } }
         val dark = game.lightOff
-        renderer.render(camera, if (showBackground && !dark) backgrounds[camera.index.coerceIn(0, backgrounds.size - 1)] else blackBackground, actors, if (dark) emptyList() else view.masks.getOrNull(camera.index) ?: emptyList())
+        renderer.render(camera, if (showBackground && !dark) backgrounds[camera.index.coerceIn(0, backgrounds.size - 1)] else blackBackground, actors, if (dark) emptyMap() else view.maskViews.getOrNull(camera.index) ?: emptyMap(), view.room)
         renderer.bitmap.asImageBitmap()
     }
 

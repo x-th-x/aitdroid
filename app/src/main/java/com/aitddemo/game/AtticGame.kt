@@ -218,6 +218,9 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         }
     }
 
+    /** How the places of room [ownRoom] of the current floor are moved into the frame of the current room (x -= a, y += b, z += c), or null for the same room. */
+    fun roomShift(ownRoom: Int): IntArray? = frameDelta(ownRoom)
+
     /** The place of the object (stored in the frame of its own room) in the frame of the current room. */
     private fun currentFrame(w: WorldObject): IntArray {
         val d = frameDelta(w.room) ?: return intArrayOf(w.x, w.y, w.z)
