@@ -358,10 +358,10 @@ private fun effectActor(e: Effect, now: Int, palette: IntArray, data: com.aitdde
 
 /** Entry point: reads the room from the original game files, shows an error message when that is not possible. */
 @Composable
-fun AtticScreen(onExit: () -> Unit, controlMode: ControlMode = ControlMode.STEERING, developerMode: Boolean = false, devItems: List<Int> = emptyList(), devPos: List<Int>? = null, loadSlot: Int? = null, floorStart: FloorStart? = null, intro: Boolean = false) {
-    val loader = rememberOriginalFiles(AtticOriginalReader::missingFiles, cacheKey = "attic") { files -> AtticOriginalReader.read(files) }
+fun AtticScreen(onExit: () -> Unit, controlMode: ControlMode = ControlMode.STEERING, developerMode: Boolean = false, devItems: List<Int> = emptyList(), devPos: List<Int>? = null, loadSlot: Int? = null, floorStart: FloorStart? = null, intro: Boolean = false, emily: Boolean = false) {
+    val loader = rememberOriginalFiles(if (emily) AtticOriginalReader::missingFilesEmily else AtticOriginalReader::missingFiles, cacheKey = if (emily) "attic-emily" else "attic") { files -> AtticOriginalReader.read(files, emily) }
     when (val state = loader.state) {
-        is OriginalState.Ready -> AtticRoom(state.data, onExit, controlMode, developerMode, devItems, devPos, loadSlot, floorStart, intro)
+        is OriginalState.Ready -> AtticRoom(state.data, onExit, controlMode, developerMode, devItems, devPos, loadSlot, floorStart, intro, emily)
         is OriginalState.Failed -> OriginalFilesErrorScreen(state.message, onChooseFolder = loader.chooseFolder, onExit = onExit)
         OriginalState.Loading -> Box(Modifier.fillMaxSize().background(Color.Black)) {
             BitmapText(text = "Lade Originaldateien...", scale = 2f, color = Color(0xFFF2E4B8), modifier = Modifier.align(Alignment.Center))
@@ -371,7 +371,7 @@ fun AtticScreen(onExit: () -> Unit, controlMode: ControlMode = ControlMode.STEER
 }
 
 @Composable
-private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: ControlMode, developerMode: Boolean, devItems: List<Int>, devPos: List<Int>?, loadSlot: Int?, floorStart: FloorStart?, intro: Boolean) {
+private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: ControlMode, developerMode: Boolean, devItems: List<Int>, devPos: List<Int>?, loadSlot: Int?, floorStart: FloorStart?, intro: Boolean, emily: Boolean) {
     BackHandler { onExit() }
     // the attic plays the first track of LISTMUS.PAK in a loop (the intro music stops); leaving the attic stops it
     DisposableEffect(world) {
@@ -711,7 +711,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
                 when (action) {
                     GameMenuAction.RESUME -> menuOpen = false
                     GameMenuAction.QUIT -> onExit()
-                    GameMenuAction.SAVE -> menuMessage = if (SaveStore.save(context, slot, game)) "Game saved." else "Saving failed."
+                    GameMenuAction.SAVE -> menuMessage = if (SaveStore.save(context, slot, game, emily)) "Game saved." else "Saving failed."
                     GameMenuAction.LOAD -> {
                         if (SaveStore.load(context, slot, game)) {
                             foundItem = -1

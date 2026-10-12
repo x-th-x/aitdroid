@@ -97,6 +97,9 @@ private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: 
     }
 
     var loadSlot by remember { mutableStateOf<Int?>(null) } // a saved game to continue from when the attic opens
+    // who plays: Carnby (the default) or Emily; chosen on the character screen, by the floor selection or by the saved game
+    var emily by remember { mutableStateOf(false) }
+
     // set by the floor selection of the main menu, cleared by every other way into the game
     var floorStart by remember { mutableStateOf<FloorStart?>(null) }
 
@@ -152,25 +155,22 @@ private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: 
             )
             Screen.SELECT -> SelectScreen(
                 onBack = { screen = Screen.MENU },
-                // Carnby starts the intro and the attic; Emily's game is not available yet.
+                // both start the intro and then the attic; Emily plays with her own bodies and animations (LISTBOD2.PAK, LISTANI2.PAK)
                 onAttemptStart = { name ->
-                    if (name == "Edward Carnby") {
-                        loadSlot = null
-                        screen = Screen.INTRO
-                    } else {
-                        Toast.makeText(context, "Would start as $name (demo only)", Toast.LENGTH_SHORT).show()
-                    }
+                    loadSlot = null
+                    emily = name != "Edward Carnby"
+                    screen = Screen.INTRO
                 }
             )
             Screen.LOAD -> LoadScreen(
                 onBack = { screen = Screen.MENU },
-                onPick = { slot -> loadSlot = slot; floorStart = null; screen = Screen.ATTIC },
+                onPick = { slot -> loadSlot = slot; emily = SaveStore.isEmily(context, slot); floorStart = null; screen = Screen.ATTIC },
             )
-            Screen.INTRO -> AtticScreen(onExit = { loadSlot = null; floorStart = null; screen = Screen.ATTIC }, controlMode = controlMode, intro = true)
-            Screen.FLOORS -> FloorSelectScreen(onStart = { floorStart = it; loadSlot = null; screen = Screen.ATTIC }, onBack = { screen = Screen.MENU })
+            Screen.INTRO -> AtticScreen(onExit = { loadSlot = null; floorStart = null; screen = Screen.ATTIC }, controlMode = controlMode, intro = true, emily = emily)
+            Screen.FLOORS -> FloorSelectScreen(onStart = { floorStart = it; emily = it.emily; loadSlot = null; screen = Screen.ATTIC }, onBack = { screen = Screen.MENU })
             Screen.MODELS -> ModelsScreen(onExit = { screen = Screen.MENU })
             Screen.MUSIC -> MusicViewerScreen(onExit = { screen = Screen.MENU })
-            Screen.ATTIC -> AtticScreen(onExit = { screen = Screen.MENU }, controlMode = controlMode, developerMode = developerMode, devItems = devItems, devPos = devPos, loadSlot = loadSlot, floorStart = floorStart)
+            Screen.ATTIC -> AtticScreen(onExit = { screen = Screen.MENU }, controlMode = controlMode, developerMode = developerMode, devItems = devItems, devPos = devPos, loadSlot = loadSlot, floorStart = floorStart, emily = emily)
             Screen.OPTIONS -> OptionsScreen(
                 controlMode = controlMode,
                 onControlModeChange = { controlMode = it },

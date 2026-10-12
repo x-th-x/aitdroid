@@ -34,6 +34,9 @@ object AtticOriginalReader {
     const val OBJECT_FILE = "OBJETS.ITD"
     const val BODY_FILE = "LISTBODY.PAK"
     const val ANIM_FILE = "LISTANIM.PAK"
+    /** Emily's game uses her own lists of bodies and animations: same numbers as Carnby's, only the entries of the hero differ. */
+    const val EMILY_BODY_FILE = "LISTBOD2.PAK"
+    const val EMILY_ANIM_FILE = "LISTANI2.PAK"
     val REQUIRED = listOf(STAGE_FILE, CAMERA_FILE, RESOURCE_FILE, OBJECT_FILE, BODY_FILE, ANIM_FILE, MusicOriginalReader.FILE, SAMPLE_FILE, LIFE_FILE, VARS_FILE, TEXT_FILE, TRACK_FILE)
 
     private const val STAGE = 0
@@ -53,11 +56,13 @@ object AtticOriginalReader {
 
     fun missingFiles(files: GameFiles): List<String> = REQUIRED.filter { !files.exists(it) }
 
-    fun read(files: GameFiles): AtticOriginal {
-        val missing = missingFiles(files)
+    fun missingFilesEmily(files: GameFiles): List<String> = (REQUIRED - BODY_FILE - ANIM_FILE + EMILY_BODY_FILE + EMILY_ANIM_FILE).filter { !files.exists(it) }
+
+    fun read(files: GameFiles, emily: Boolean = false): AtticOriginal {
+        val missing = if (emily) missingFilesEmily(files) else missingFiles(files)
         if (missing.isNotEmpty()) throw OriginalFilesException("Fehlende Dateien: " + missing.joinToString(", "))
         try {
-            return readAll(files)
+            return readAll(files, emily)
         } catch (e: OriginalFilesException) {
             throw e
         } catch (e: Exception) {
@@ -65,7 +70,7 @@ object AtticOriginalReader {
         }
     }
 
-    private fun readAll(files: GameFiles): AtticOriginal {
+    private fun readAll(files: GameFiles, emily: Boolean): AtticOriginal {
         val palette = readPalette(Pak(files.read(RESOURCE_FILE)!!).get(PALETTE_ENTRY) ?: throw OriginalFilesException("$RESOURCE_FILE: Palette fehlt"))
 
         // ---- the game logic: objects, scripts, variables, bodies, animations, sounds, texts
@@ -75,7 +80,7 @@ object AtticOriginalReader {
         val vars = ShortArray(varBytes.size / 2) { varBytes.s16(it * 2).toShort() }
         val musicPak = Pak(files.read(MusicOriginalReader.FILE)!!)
         val game = GameData(
-            files.read(OBJECT_FILE)!!, Pak(files.read(LIFE_FILE)!!), vars, Pak(files.read(BODY_FILE)!!), Pak(files.read(ANIM_FILE)!!),
+            files.read(OBJECT_FILE)!!, Pak(files.read(LIFE_FILE)!!), vars, Pak(files.read(if (emily) EMILY_BODY_FILE else BODY_FILE)!!), Pak(files.read(if (emily) EMILY_ANIM_FILE else ANIM_FILE)!!),
             Pak(files.read(SAMPLE_FILE)!!), palette, RoomLoader(files, palette),
             GameTexts.parse(textPak.get(1) ?: throw OriginalFilesException("$TEXT_FILE: Texte fehlen")),
             textPak, resourcePak, Pak(files.read(TRACK_FILE)!!),
