@@ -56,7 +56,7 @@ private class AtticUi(private val world: AtticOriginal, private val sounds: Intr
     /** A full screen picture of the game being shown (from PICTURE) and until when (engine ticks of the screen clock). */
     var picture by mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null)
     var pictureNanos = 0L
-    private var music = AtticOriginalReader.ATTIC_MUSIC
+    private var music = if (GameMusic.playing) GameMusic.current else -1 // what the intro leaves playing; the start script of the game (FADE_MUSIC 0) brings in the attic music
 
     override fun message(text: String) {
         val now = System.nanoTime()
@@ -86,35 +86,58 @@ private class AtticUi(private val world: AtticOriginal, private val sounds: Intr
         pitchPercent = percent
     }
 
-    /** The music that follows the one that plays now, -1 = none. */
+    /**
+     * The music of the original program (playMusic, the music commands of the life scripts, and the check that runs every frame): a track is played once, with the loops
+     * it has inside; when it has ended nothing plays (the number -1), unless NEXT_MUSIC named a next one, which then starts at once. FADE_MUSIC cuts what plays, and
+     * the next music starts 3 seconds later (180 ticks); the music number is -2 while it waits. A music that is already the current one is not started again.
+     */
     private var queuedMusic = -1
+    private var fadeStartNanos = 0L
 
-    override fun nextMusic(number: Int) {
-        if (!GameMusic.playing) {
-            music(number, true)
-        } else {
-            // the music that plays now runs to its end instead of repeating, then the next one starts
-            queuedMusic = number
-            GameMusic.setLooping(false, music, world.musicTrack(music) ?: return)
-        }
-    }
+    override fun currentMusic(): Int = music
 
-    /** Called every tick: starts the queued music when the one before it has ended. */
-    fun pollMusic() {
-        if (queuedMusic >= 0 && !GameMusic.playing) {
-            val n = queuedMusic
-            queuedMusic = -1
-            music = -1
-            music(n, true)
-        }
-    }
-
+    /** MUSIC n (playMusic). */
     override fun music(number: Int, loop: Boolean) {
         if (number == music) return
-        val data = world.musicTrack(number) ?: return
         music = number
-        GameMusic.setLooping(loop, number, data)
+        if (number < 0) return
+        val data = world.musicTrack(number) ?: return
+        GameMusic.setLooping(false, number, data)
         GameMusic.start(number, data)
+    }
+
+    /** NEXT_MUSIC n: starts at once when nothing plays, else after the music that plays now. */
+    override fun nextMusic(number: Int) {
+        if (music == -1) music(number, false) else queuedMusic = number
+    }
+
+    /** FADE_MUSIC n: starts at once when nothing plays, else the music is cut and n starts 3 seconds later. */
+    override fun fadeMusic(number: Int) {
+        if (music == -1) {
+            music(number, false)
+        } else {
+            GameMusic.stop()
+            music = -2
+            queuedMusic = number
+            fadeStartNanos = System.nanoTime()
+        }
+    }
+
+    /** Called every tick: the check of the original program that moves on from a music that has ended (or that waits for the end of a fade). */
+    fun pollMusic() {
+        if (music == -2) {
+            if (System.nanoTime() - fadeStartNanos >= 3_000_000_000L) {
+                val n = queuedMusic
+                queuedMusic = -1
+                music = -1
+                if (n >= 0) music(n, false)
+            }
+        } else if (music >= 0 && !GameMusic.playing) {
+            val n = queuedMusic
+            music = -1
+            queuedMusic = -1
+            if (n >= 0) music(n, false)
+        }
     }
 
     override fun gameOver() {
@@ -350,12 +373,10 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     BackHandler { onExit() }
     // the attic plays the first track of LISTMUS.PAK in a loop (the intro music stops); leaving the attic stops it
     DisposableEffect(world) {
-        GameMusic.setLooping(true, AtticOriginalReader.ATTIC_MUSIC, world.music) // the attic loops its music
-        GameMusic.start(AtticOriginalReader.ATTIC_MUSIC, world.music) // stops the intro music and plays the first track of LISTMUS.PAK
         onDispose { GameMusic.stop() }
     }
 
-    val sounds = remember(world) { IntroSounds { world.game.sample(it) } }
+    val sounds = remember(world) { IntroSounds({ world.game.sample(it) }, { world.game.samplePriority(it) }) }
     DisposableEffect(sounds) { onDispose { sounds.release() } }
     val ui = remember(world) { AtticUi(world, sounds) }
     val context = androidx.compose.ui.platform.LocalContext.current

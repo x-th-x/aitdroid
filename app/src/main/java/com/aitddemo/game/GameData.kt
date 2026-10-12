@@ -70,7 +70,12 @@ class GameData(
     private val trackPak: Pak? = null,
     /** The constants of DEFINES.ITD (CVars): sample numbers, the weight limit, the object that sends things back and so on. */
     val defines: ShortArray = ShortArray(0),
+    /** PRIORITY.ITD: one byte for each sample, how important it is (a sample does not interrupt one with a higher priority), or null when the file is missing. */
+    private val priorities: ByteArray? = null,
 ) {
+    /** The priority of sample [n] (0 when the file is missing). */
+    fun samplePriority(n: Int): Int = priorities?.getOrNull(n)?.toInt()?.and(0xFF) ?: 0
+
     private val bodies = HashMap<Int, BodyAsset?>()
     private val anims = HashMap<Int, AnimData?>()
     private val samples = HashMap<Int, VocSample?>()

@@ -31,7 +31,13 @@ interface GameUi {
     fun randomFrequency(percent: Int) {}
 
     /** NEXT_MUSIC: [number] plays when the music that is playing has ended (at once when nothing plays). */
-    fun nextMusic(number: Int) { music(number, true) }
+    fun nextMusic(number: Int) { music(number, false) }
+
+    /** FADE_MUSIC: what plays is cut, and the music [number] starts 3 seconds later (at once when nothing plays). */
+    fun fadeMusic(number: Int) { music(number, false) }
+
+    /** The number of the music that plays now (-1 none, -2 waiting after a fade), or null when the host does not play any (the scripts read it). */
+    fun currentMusic(): Int? = null
 }
 
 /** A short lived visual effect (SPECIAL): 0 evaporation, 1 blood or dust at a blow, 4 smoke. */
@@ -224,6 +230,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     fun tick(timer: Int, keys: Int, action: Boolean, runHint: Boolean) {
         if (pendingFound >= 0 || pendingRead != null || exited || gameOver) return
         time = timer
+        ui.currentMusic()?.let { vm.currentMusic = it } // the music that really plays (-1 when it has ended)
         joy = keys
         run = runHint
         vm.joyd = keys
@@ -819,7 +826,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     }
 
     override fun music(n: Int) {
-        ui.music(n, true)
+        ui.music(n, false)
     }
 
     override fun nextMusic(n: Int) {
@@ -843,7 +850,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     }
 
     override fun fadeMusic(n: Int) {
-        ui.music(n, true)
+        ui.fadeMusic(n)
     }
 
     override fun gameOver() {
