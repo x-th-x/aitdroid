@@ -108,7 +108,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
      * monkey does, when it is out), and every added monkey runs copies of the climb and fight scripts with its own object number (script number 1000 + 100 * k + original).
      */
     private fun scriptFor(n: Int): ShortArray? = patchedScripts.getOrPut(n) {
-        if (!data.useMonkey) return@getOrPut data.script(n)
+        if (!data.replacesEnemy) return@getOrPut data.script(n)
         fun noClose(name: String, ow: Int, start: Int, w: ShortArray) {
             // [ow=8] LIFE 6 (the trapdoor closes) becomes [ow=8] LIFE -1: the trapdoor has no life script at that time, so nothing changes
             if (name == "LIFE" && ow == OBJ_TRAPDOOR && w[start].toInt() == LIFE_TRAPDOOR_CLOSING) w[start] = -1
@@ -116,9 +116,9 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         when {
             n == LIFE_CREATURE_CLIMB -> data.script(n)?.let { src ->
                 // BODY takes an expression: a marker word, then the number
-                ScriptPatch.patch(src) { name, _, start, w -> if (name == "BODY" && w[start + 1].toInt() == CREATURE_BODY) w[start + 1] = MonkeyBody.BODY.toShort() }
+                ScriptPatch.patch(src) { name, _, start, w -> if (name == "BODY" && w[start + 1].toInt() == CREATURE_BODY) w[start + 1] = EmilyBody.BODY.toShort() }
             }
-            n == LIFE_CREATURE_CLIMBED -> data.script(n)?.let { src -> ScriptPatch.patch(src) { name, ow, start, w -> noClose(name, ow, start, w) } }
+            n == LIFE_CREATURE_CLIMBED && MONKEYS > 1 -> data.script(n)?.let { src -> ScriptPatch.patch(src) { name, ow, start, w -> noClose(name, ow, start, w) } }
             n >= MONKEY_SCRIPTS -> {
                 val k = (n - MONKEY_SCRIPTS) / 100
                 val original = (n - MONKEY_SCRIPTS) % 100
@@ -247,9 +247,9 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         val rig = ActorRig(groups, Array(groups) { GroupState() }, asset.zv)
         val old = g.actor
         val a = Actor(
-            rig, { n -> data.anim(n) ?: error("animation $n") },
+            rig, { n -> data.anim(EmilyBody.animFor(w.body, n)) ?: error("animation $n") },
             old?.worldX ?: w.x, old?.worldY ?: w.y, old?.worldZ ?: w.z, old?.beta ?: w.beta,
-            if (data.anim(anim) != null) anim else -1, time, roomView.hardcols, w.typeZv, animType, animInfo,
+            if (data.anim(EmilyBody.animFor(w.body, anim)) != null) anim else -1, time, roomView.hardcols, w.typeZv, animType, animInfo,
         )
         a.followTarget = { n -> objects.getOrNull(n)?.takeIf { it.w.active }?.actor?.let { intArrayOf(it.renderX, it.renderZ) } }
         a.trackSource = { n -> data.track(n) }
@@ -849,7 +849,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     override fun lifeChanged(obj: Int, life: Int) {
         // the creature of the trapdoor (a monkey) starts to climb out: the other monkeys follow, one every two seconds
-        if (data.useMonkey && obj == OBJ_HOLE_CREATURE && life == LIFE_CREATURE_CLIMBED && pendingMonkeys.isEmpty()) {
+        if (data.replacesEnemy && obj == OBJ_HOLE_CREATURE && life == LIFE_CREATURE_CLIMBED && pendingMonkeys.isEmpty()) {
             for (k in 0 until MONKEYS - 1) pendingMonkeys.add(k to time + (k + 1) * MONKEY_INTERVAL_TICKS)
         }
         // not in the original: when the trapdoor starts to open, smoke comes out of the hole, until the last monkey is out
@@ -1319,7 +1319,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         const val CREATURE_BODY = 23
 
         /** How many monkeys come out of the hole (the creature of the trapdoor is the first) and how long they wait for each other (ticks). */
-        const val MONKEYS = 5
+        const val MONKEYS = 1
         const val MONKEY_INTERVAL_TICKS = 120
 
         /** The object table with the entries for the added monkeys (copies of the creature of the trapdoor) at the end. */

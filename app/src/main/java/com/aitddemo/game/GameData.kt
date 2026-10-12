@@ -77,9 +77,14 @@ class GameData(
     private val trackPak: Pak? = null,
     /** The constants of DEFINES.ITD (CVars): sample numbers, the weight limit, the object that sends things back and so on. */
     val defines: ShortArray = ShortArray(0),
+    /** LISTBOD2.PAK (the bodies of the game when Emily is played), or null when the file is missing. */
+    val emilyBodyPak: Pak? = null,
 ) {
     /** The monkey climbs out of the attic trapdoor after the creature (an addition to the original). */
     var useMonkey = true
+
+    /** Emily Hartwood takes the place of the enemy that climbs out of the attic trapdoor (an addition to the original; needs LISTBOD2.PAK). */
+    val replacesEnemy: Boolean get() = useMonkey && emilyBodyPak != null
 
     private val bodies = HashMap<Int, BodyAsset?>()
     private val anims = HashMap<Int, AnimData?>()
@@ -95,6 +100,14 @@ class GameData(
     /** Body [n] (entry n + 1 of LISTBODY.PAK) or null. */
     fun body(n: Int): BodyAsset? = bodies.getOrPut(n) {
         try {
+            if (n == EmilyBody.BODY) {
+                val d = emilyBodyPak?.get(EmilyBody.SOURCE_BODY + 1) ?: return@getOrPut null
+                val b = OriginalBody.parse(d)
+                val (v, t) = b.toMesh(palette)
+                // her box for collisions is the one of the enemy she replaces (the original paths and collisions were made for it); she is drawn at her own size
+                val zv = bodyPak.get(MonkeyBody.BOX_OF_BODY + 1)?.let { OriginalBody.parse(it).zv } ?: b.zv
+                return@getOrPut BodyAsset(n, zv, v, t, b.lines(palette), b.spheres(palette), if (b.isArticulated) b.animatedParts() else null)
+            }
             if (n == MonkeyBody.BODY) return@getOrPut bodyPak.get(MonkeyBody.BOX_OF_BODY + 1)?.let { MonkeyBody.asset(n, OriginalBody.parse(it).zv) }
             val d = bodyPak.get(n + 1) ?: return@getOrPut null
             val b = OriginalBody.parse(d)
