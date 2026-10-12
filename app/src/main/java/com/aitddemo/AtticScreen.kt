@@ -142,7 +142,7 @@ private class AtticUi(private val world: AtticOriginal, private val sounds: Intr
 }
 
 /** An object of the game as something to draw: its posed vertices turned by the object's angles and moved to its place. */
-private fun GameObject.toActor(minX: Int, maxX: Int, minZ: Int, maxZ: Int): AtticActor? {
+private fun GameObject.toActor(): AtticActor? {
     val act = actor ?: return null
     val local = posedVertices() ?: return null
     val asset = asset ?: return null
@@ -150,9 +150,8 @@ private fun GameObject.toActor(minX: Int, maxX: Int, minZ: Int, maxZ: Int): Atti
     val x = act.renderX
     val y = act.renderY
     val z = act.renderZ
-    // creatures that appear later by script wait outside the room (beyond the walls); the original draws every object that has a body, wherever it is, so nothing
-    // else hides one (a creature on its way in walks outside the room first and is seen all the time, one rising from the trapdoor is seen from the moment it shows)
-    if (w.trackMode != 3 && (x < minX || x > maxX || z < minZ || z > maxZ)) return null
+    // like the original: every object that has a body is drawn, wherever it is. Creatures that wait beyond the walls are covered by the camera picture's
+    // background masks (drawn over every object whose box lies in a mask zone), the creature rising from the trapdoor is seen from the moment it shows.
     val rot = initRot(w.alpha, act.beta and 0x3FF, w.gamma)
     val n = local.size / 3
     val out = FloatArray(n * 3)
@@ -535,7 +534,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     // one frame of the room: photo, objects and player through the camera matrix, masks over them (AtticSceneRenderer)
     val roomImage = run {
         frameTick // the poses change every frame
-        val actors = game.objects.mapNotNull { it.toActor(view.bounds[0], view.bounds[1], view.bounds[2], view.bounds[3]) } + game.effects.map { e -> effectActor(e, game.time, world.game.palette, world.game).also { it.sortBox = e.sortBox() } }
+        val actors = game.objects.mapNotNull { it.toActor() } + game.effects.map { e -> effectActor(e, game.time, world.game.palette, world.game).also { it.sortBox = e.sortBox() } }
         val dark = game.lightOff
         renderer.render(camera, if (showBackground && !dark) backgrounds[camera.index.coerceIn(0, backgrounds.size - 1)] else blackBackground, actors, if (dark) emptyList() else view.masks.getOrNull(camera.index) ?: emptyList())
         renderer.bitmap.asImageBitmap()
