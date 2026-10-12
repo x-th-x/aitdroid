@@ -137,6 +137,10 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     /** For testing: notable decisions of the game logic are reported here. */
     var trace: ((String) -> Unit)? = null
 
+    /** SHAKING 1: the timer interrupt of the original moves the start of the display by two scanlines on every second tick (60 per second), the picture jitters. */
+    var shaking = false
+        private set
+
     /** Dark room (LIGHT 0): the room picture is not shown, only the objects. */
     var lightOff = false
         private set
@@ -995,6 +999,10 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             }
             4 -> if (a != null) effects.add(Effect(4, a.renderX, a.renderY, a.renderZ, time, null, g.w.alpha, a.beta and 0x3FF, g.w.gamma))
         }
+    }
+
+    override fun shaking(n: Int) {
+        shaking = n == 1
     }
 
     override fun light(on: Int) {

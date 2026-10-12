@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -562,7 +563,9 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         PlateAspectBox {
-            Image(bitmap = roomImage, contentDescription = null, contentScale = ContentScale.Fit, filterQuality = FilterQuality.None, modifier = Modifier.fillMaxSize())
+            // SHAKING: every second tick of the 60 per second the display starts two of the 200 lines later
+            val shift = if (game.shaking && game.time and 1 == 1) -2f / 200f else 0f
+            Image(bitmap = roomImage, contentDescription = null, contentScale = ContentScale.Fit, filterQuality = FilterQuality.None, modifier = Modifier.fillMaxSize().graphicsLayer { translationY = size.height * shift })
         }
 
         // Floating joystick: appears where the thumb touches; drag distance is clamped and normalized to -1..1.
