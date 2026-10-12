@@ -150,9 +150,9 @@ private fun GameObject.toActor(minX: Int, maxX: Int, minZ: Int, maxZ: Int): Atti
     val x = act.renderX
     val y = act.renderY
     val z = act.renderZ
-    // creatures that appear later by script are parked outside the room (below the floor, beyond the walls)
-    // (a creature on its way in walks outside the room first and is seen all the time)
-    if (w.trackMode != 3 && (x < minX || x > maxX || z < minZ || z > maxZ) || y > 500) return null
+    // creatures that appear later by script wait outside the room (beyond the walls); the original draws every object that has a body, wherever it is, so nothing
+    // else hides one (a creature on its way in walks outside the room first and is seen all the time, one rising from the trapdoor is seen from the moment it shows)
+    if (w.trackMode != 3 && (x < minX || x > maxX || z < minZ || z > maxZ)) return null
     val rot = initRot(w.alpha, act.beta and 0x3FF, w.gamma)
     val n = local.size / 3
     val out = FloatArray(n * 3)
