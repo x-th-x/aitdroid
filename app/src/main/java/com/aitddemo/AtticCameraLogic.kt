@@ -22,6 +22,8 @@ data class AtticCameraDef(
     val roomX: Float = 0f,
     val roomY: Float = 0f,
     val roomZ: Float = 0f,
+    /** The rooms this camera sees (its table of viewed rooms): objects of those rooms are drawn with it (checkActorInRoom); empty = not known. */
+    val viewedRooms: Set<Int> = emptySet(),
 )
 
 /** The room's first camera is active at the start. */

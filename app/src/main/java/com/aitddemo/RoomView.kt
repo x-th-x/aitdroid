@@ -20,6 +20,9 @@ class RoomView(
     /** 320x200 ARGB picture of each camera. */
     val photos: List<IntArray>,
 ) {
+    /** The rooms that the doors (zones of type 0) of this room lead to. */
+    val linkedRooms: List<Int> = zones.filter { it.type == 0 }.map { it.parameter }.distinct()
+
     /** The corners of the room's colliders: x1, x2, z1, z2 (a place beyond them is outside the room; used to hide parked objects). */
     val bounds: IntArray = if (hardcols.isEmpty()) intArrayOf(-100000, 100000, -100000, 100000) else intArrayOf(hardcols.minOf { it.x1 }, hardcols.maxOf { it.x2 }, hardcols.minOf { it.z1 }, hardcols.maxOf { it.z2 })
 }

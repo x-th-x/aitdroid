@@ -30,8 +30,10 @@ class OriginalStage private constructor(
         val views = camData.u16(o + 0x12)
         var zones: List<List<AtticCameraZonePoint>> = emptyList()
         var masks: List<AtticData.Mask> = emptyList()
+        val seen = HashSet<Int>()
         for (k in 0 until views) {
             val e = o + 0x14 + k * VIEW_SIZE
+            seen.add(camData.u16(e))
             if (camData.u16(e) != roomIndex) continue
             masks = readMasks(camData, o + camData.u16(e + 2))
             zones = readZones(camData, o + camData.u16(e + 4))
@@ -43,6 +45,7 @@ class OriginalStage private constructor(
             focal1 = camData.u16(o + 12).toFloat(), focal2 = camData.u16(o + 14).toFloat(), focal3 = camData.u16(o + 16).toFloat(),
             zones = zones,
             roomX = room.worldX.toFloat(), roomY = room.worldY.toFloat(), roomZ = room.worldZ.toFloat(),
+            viewedRooms = seen,
         )
         return RoomCamera(def, masks)
     }

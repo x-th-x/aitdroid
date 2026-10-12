@@ -156,7 +156,38 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     init {
         vm.trace = null
-        for (o in vm.objects) if (o.stage == stage && o.room == room) activate(objects[o.index])
+        val seen = viewList()
+        for (o in vm.objects) if (wanted(o, seen, stage, room)) activate(objects[o.index])
+    }
+
+    /** The rooms of the floor that count as seen from the current room: itself and the rooms its doors lead to (InitViewedRoomList of the original). */
+    private fun viewList(): Set<Int> = HashSet<Int>().also { it.add(room); it.addAll(roomView.linkedRooms) }
+
+    /**
+     * Is the object part of the scene (GenereActiveList of the original)? Objects of the floor with a life script live by their life mode: 0 always, 1 while the player is in
+     * their room, 2 while their room is seen from the player's room; objects without a life script live while their room is seen. Objects of other rooms keep their own
+     * room number; their places are moved into the frame of the current room (see [frameDelta]) and the camera draws them only if it sees their room.
+     */
+    private fun wanted(w: WorldObject, seen: Set<Int>, st: Int, rm: Int): Boolean {
+        if (w.index == playerIndex) return w.stage == st && w.room == rm
+        if (w.stage != st) return false
+        if (w.life != -1) return when (w.lifeMode) { 0 -> true; 1 -> w.room == rm; 2 -> w.room in seen; else -> false }
+        return w.room in seen
+    }
+
+    private val roomWorlds = HashMap<Long, RoomView?>()
+
+    /** How the places of room [ownRoom] of the current floor are moved into the frame of the current room (what [Actor.moveToRoomOrigin] takes), or null for the same room. */
+    private fun frameDelta(ownRoom: Int): IntArray? {
+        if (ownRoom == room || ownRoom < 0) return null
+        val r = roomWorlds.getOrPut(stage * 1000L + ownRoom) { try { data.rooms.room(stage, ownRoom) } catch (_: Exception) { null } } ?: return null
+        return intArrayOf((roomView.worldX - r.worldX) * 10, (roomView.worldY - r.worldY) * 10, (roomView.worldZ - r.worldZ) * 10)
+    }
+
+    /** The place of the object (stored in the frame of its own room) in the frame of the current room. */
+    private fun currentFrame(w: WorldObject): IntArray {
+        val d = frameDelta(w.room) ?: return intArrayOf(w.x, w.y, w.z)
+        return intArrayOf(w.x - d[0], w.y + d[1], w.z + d[2])
     }
 
     // ------------------------------------------------------------------------------------------------------------------ scene membership
@@ -168,7 +199,11 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         w.roomChronoStart = time
         w.col = -1; w.colBy = -1; w.hit = -1; w.hitBy = -1; w.hardCol = -1; w.hardDec = -1
         createActor(g, w.anim, w.animType, w.animInfo)
-        if (w.typeZv == 4) { // the box of the room's collider with this object's parameter (foundName), and the place at its centre
+        if (w.room != room) { // an object of another room that this room sees: in the frame of this room, without the walls of this room
+            frameDelta(w.room)?.let { d -> g.actor?.moveToRoomOrigin(d[0], d[1], d[2]) }
+            g.actor?.hardcols = emptyList()
+        }
+        if (w.typeZv == 4 && w.room == room) { // the box of the room's collider with this object's parameter (foundName), and the place at its centre
             val h = roomView.hardcols.firstOrNull { it.type == 9 && it.parameter == w.foundName }
             g.fixedZv = h?.let { intArrayOf(it.x1, it.x2, it.y1, it.y2, it.z1, it.z2) }
             if (h != null) {
@@ -269,6 +304,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             w.x = a.renderX
             w.y = a.renderY
             w.z = a.renderZ
+            frameDelta(w.room)?.let { d -> w.x = a.renderX + d[0]; w.y = a.renderY - d[1]; w.z = a.renderZ - d[2] } // stored in the frame of its own room
             w.beta = a.beta and 0x3FF
             if (g === player) {
                 for (i in a.collidedAll) {
@@ -282,7 +318,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                 }
             }
             if (g !== player && a.trackMode != 0) touchObjects(g, a)
-            if (w.flags and AF_TRIGGER != 0 && a.triggersOn) checkZones(g)
+            if (w.flags and AF_TRIGGER != 0 && a.triggersOn && w.room == room) checkZones(g)
             if (g.actionType != 0) processAction(g)
             if (w.flags and AF_FALLABLE != 0) processFall(g)
             if (g.flightTicks >= 0) processFlight(g)
@@ -398,11 +434,29 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             ui.leftRoom(newStage, newRoom)
             return
         }
-        for (g in objects) if (g.w.active && g.w.index != playerIndex) deactivate(g)
+        // the objects that stay: the scene keeps those the original keeps (see [wanted]) and moves them into the frame of the new room, the others leave
+        val oldView = roomView
+        val oldStage = stage
         stage = newStage
         room = newRoom
         roomView = view
         roomVersion++
+        val seen = viewList()
+        val dx = (view.worldX - oldView.worldX) * 10
+        val dy = (view.worldY - oldView.worldY) * 10
+        val dz = (view.worldZ - oldView.worldZ) * 10
+        for (g in objects) {
+            if (!g.w.active || g.w.index == playerIndex) continue
+            if (oldStage == newStage && wanted(g.w, seen, newStage, newRoom)) {
+                val a = g.actor
+                if (a != null) {
+                    if (oldView !== view) a.moveToRoomOrigin(dx, dy, dz)
+                    a.hardcols = if (g.w.room == newRoom) view.hardcols else emptyList()
+                }
+            } else {
+                deactivate(g)
+            }
+        }
         val p = player
         p?.w?.stage = newStage
         p?.w?.room = newRoom
@@ -411,7 +465,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             a.roomNumber = newRoom
             if (place != null) a.teleport(place[0], place[1], place[2], p.w.beta)
         }
-        for (o in vm.objects) if (o.index != playerIndex && o.stage == newStage && o.room == newRoom && !objects[o.index].w.active) activate(objects[o.index])
+        for (o in vm.objects) if (o.index != playerIndex && !objects[o.index].w.active && wanted(o, seen, newStage, newRoom)) activate(objects[o.index])
         p?.let {
             it.w.roomChronoStart = time
             it.w.hardDec = -1
@@ -725,7 +779,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     override fun moved(obj: Int) {
         val g = objects[obj]
         val w = g.w
-        val inScene = w.stage == stage && w.room == room
+        val inScene = wanted(w, viewList(), stage, room)
         if (obj == playerIndex && !inScene && w.stage >= 0) {
             changeRoom(w.stage, w.room, intArrayOf(w.x, w.y, w.z))
             return
@@ -735,7 +789,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         } else if (!inScene && w.active) {
             deactivate(g)
         } else if (w.active) {
-            g.actor?.teleport(w.x, w.y, w.z, w.beta)
+            val p = currentFrame(w)
+            g.actor?.teleport(p[0], p[1], p[2], w.beta)
         }
     }
 
@@ -1196,7 +1251,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             val x = s.actor
             val fl = s.flags
             if (a != null && x != null && fl != null) {
-                a.teleport(w.x, w.y, w.z, x[0])
+                val at = currentFrame(w)
+                a.teleport(at[0], at[1], at[2], x[0])
                 a.restoreMove(x[1], x[2], x[3], x[4])
                 a.wallCollision = fl[0]; a.triggersOn = fl[1]
                 a.memoX = x[5]; a.memoY = x[6]; a.memoZ = x[7]
