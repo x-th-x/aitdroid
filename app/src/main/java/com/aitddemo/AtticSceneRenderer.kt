@@ -31,6 +31,9 @@ class AtticActor(
     /** The box of the object (x1, x2, y1, y2, z1, z2 in room units) the original sorts by; null = sort by the depth of the origin. */
     var sortBox: IntArray? = null
 
+    /** The wall box the object touches: its spheres whose centre is inside are not drawn (the original's primitive loop does this with the box of GET_HARD_CLIP). */
+    var clipBox: IntArray? = null
+
     /** Flat things lying on the floor (rug, trap door lid) are drawn before everything that stands on them. */
     val isFlat: Boolean = run {
         var lo = Float.MAX_VALUE
@@ -239,6 +242,10 @@ class AtticSceneRenderer {
             val ic = a.spheres[si]; val radius = a.spheres[si + 1]; val col = a.spheres[si + 2]
             si += 3
             if (cz[ic] <= 0f) continue
+            a.clipBox?.let { c ->
+                val wx = a.worldVertices[ic * 3]; val wy = a.worldVertices[ic * 3 + 1]; val wz = a.worldVertices[ic * 3 + 2]
+                if (wx > c[0] && wx < c[1] && wy > c[2] && wy < c[3] && wz > c[4] && wz < c[5]) continue
+            }
             proj.screen(cx[ic], cy[ic], cz[ic], p0)
             val sx = p0[0] * S; val sy = p0[1] * S
             // radius > 0: sphere (units, scaled by perspective); -2 point (a dot of one plate pixel), -6 big point, -7 zixel (20 units)

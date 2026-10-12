@@ -192,6 +192,7 @@ private fun GameObject.toActor(): AtticActor? {
         AtticActor(out, asset.triangles, x.toFloat(), y.toFloat(), z.toFloat(), (lowX / 10).toInt(), (highX / 10).toInt(), (lowZ / 10).toInt(), (highZ / 10).toInt(), asset.lines, asset.spheres)
     }
     actor.sortBox = zv.copyOf(6)
+    actor.clipBox = clipBox
     return actor
 }
 

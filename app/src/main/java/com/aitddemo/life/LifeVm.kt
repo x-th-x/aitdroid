@@ -76,6 +76,8 @@ interface LifeHost {
     fun body(obj: Int) {}
     fun anim(obj: Int, anim: Int, type: Int, info: Int) {}
     fun doMove(obj: Int) {}
+    /** GET_HARD_CLIP: the object remembers the wall box it touches (its spheres inside that box are not drawn). */
+    fun getHardClip(obj: Int) {}
     fun animMove(obj: Int, anims: IntArray) {}
     fun trackMode(obj: Int, mode: Int, number: Int) {}
     fun manualRot(obj: Int) {}
@@ -471,7 +473,8 @@ class LifeVm(
                     "CALL_INVENTORY" -> host.callInventory()
                     "UP_COOR_Y" -> host.upCoorY(target)
                     "END_SEQUENCE" -> host.endSequence()
-                    "SPEED", "CAMERA", "STOP_BETA", "GET_HARD_CLIP" -> {
+                    "GET_HARD_CLIP" -> host.getHardClip(target)
+                    "SPEED", "CAMERA", "STOP_BETA" -> {
                         skip(name)
                         note(name, target)
                     }

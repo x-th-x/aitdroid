@@ -75,6 +75,9 @@ class GameObject(val w: WorldObject) {
 
     /** Box of an object whose box is a collider of the room (OBJETS type 4, "hard ZV"); such objects are invisible helpers of the furniture scripts. */
     var fixedZv: IntArray? = null
+
+    /** The wall box (x1, x2, y1, y2, z1, z2) that the object touched when its script last asked for it (GET_HARD_CLIP), null = none. */
+    var clipBox: IntArray? = null
     var actor: Actor? = null
     var asset: BodyAsset? = null
 
@@ -642,6 +645,14 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     override fun anim(obj: Int, anim: Int, type: Int, info: Int) {
         val a = objects.getOrNull(obj)?.actor ?: return
         a.playAnim(anim, type, info)
+    }
+
+    override fun getHardClip(obj: Int) {
+        val g = objects.getOrNull(obj) ?: return
+        val z = g.actor?.zv ?: return
+        // the first collider of the object's room whose box overlaps the object's box (the original walks the room's list of colliders in order)
+        val hit = geometryOf(g.w.room).first.firstOrNull { z[0] < it.x2 && it.x1 < z[1] && z[2] < it.y2 && it.y1 < z[3] && z[4] < it.z2 && it.z1 < z[5] }
+        g.clipBox = hit?.let { intArrayOf(it.x1, it.x2, it.y1, it.y2, it.z1, it.z2) }
     }
 
     override fun doMove(obj: Int) {
