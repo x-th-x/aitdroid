@@ -1,5 +1,6 @@
 package com.aitddemo
 
+import com.aitddemo.original.VocSample
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.floor
@@ -38,12 +39,21 @@ class FxBat(val x1: Float, val y1: Float, val x2: Float, val y2: Float)
 class FxRat(val x0: Float, val y0: Float, val x1: Float, val y1: Float, val s0: Float, val s1: Float)
 
 /** What happens in the house now and then (sounds and the rocking horse); the places of the times are fixed by the clock, so the sound and the picture agree. */
-enum class Ambient { THUNDER, CREAK, RAT, HORSE }
+enum class Ambient { THUNDER, CREAK, RAT, HORSE, DRIP, WIND }
+
+/** Moths that circle a light ([lampOnly]: only while the oil lamp is there). */
+class FxMoth(val cx: Float, val cy: Float, val r: Float, val count: Int, val lampOnly: Boolean = false)
+
+/** A drop of water that falls from [y0] to [y1] at [x] now and then and makes a ring on the floor. */
+class FxDrip(val x: Float, val y0: Float, val y1: Float)
+
+/** A spider that lets itself down on a thread from [y0] to [y1] at [x], hangs there for a while and climbs up again. */
+class FxSpider(val x: Float, val y0: Float, val y1: Float)
 
 class AmbientEvent(val t: Float, val kind: Ambient, val strength: Float)
 
 /** The lights of one camera. */
-class FxSet(val lights: List<FxLight>, val dust: List<FxDust>, val rain: List<FxRain> = emptyList(), val bats: List<FxBat> = emptyList(), val rats: List<FxRat> = emptyList())
+class FxSet(val lights: List<FxLight>, val dust: List<FxDust>, val rain: List<FxRain> = emptyList(), val bats: List<FxBat> = emptyList(), val rats: List<FxRat> = emptyList(), val moths: List<FxMoth> = emptyList(), val drips: List<FxDrip> = emptyList(), val spiders: List<FxSpider> = emptyList())
 
 object BackgroundFxCore {
     /** The attic: stage 0, room 0, cameras 0 to 4 (places found by looking at the pictures). */
@@ -55,17 +65,18 @@ object BackgroundFxCore {
                 // the oil lamp on the table (while it is still there): a warm light on the cloth and the floor around it
                 FxLight(FxShape.Circle(27f, 160f, 30f), 255, 150, 60, 0.5f, FxWave.CANDLE, 3, lampOnly = true),
             ),
-            listOf(FxDust(110f, 52f, 200f, 120f, 8, 0.5f)),
+            listOf(FxDust(110f, 52f, 200f, 120f, 12, 0.5f)),
             listOf(FxRain(145f, 30f, 168f, 50f, 4, 1f)),
             listOf(FxBat(145f, 30f, 168f, 50f)),
             listOf(FxRat(290f, 78f, 215f, 74f, 0.9f, 0.8f)),
+            listOf(FxMoth(58f, 39f, 8f, 3), FxMoth(27f, 150f, 14f, 3, lampOnly = true)),
         )
         1 -> FxSet(
             listOf(
                 FxLight(FxShape.Rect(97f, 83f, 112f, 97f), 70, 95, 140, 0.9f, FxWave.MOON),
                 FxLight(FxShape.Quad(floatArrayOf(128f, 152f, 100f, 55f), floatArrayOf(136f, 136f, 200f, 200f)), 40, 52, 80, 0.9f, FxWave.CLOUD),
             ),
-            listOf(FxDust(78f, 118f, 150f, 190f, 14, 0.8f)),
+            listOf(FxDust(78f, 118f, 150f, 190f, 20, 0.8f)),
             listOf(FxRain(97f, 83f, 112f, 97f, 3, 1f)),
             listOf(FxBat(97f, 83f, 112f, 97f)),
             listOf(FxRat(30f, 116f, 130f, 113f, 0.8f, 0.9f)),
@@ -75,10 +86,13 @@ object BackgroundFxCore {
                 FxLight(FxShape.Rect(143f, 5f, 156f, 32f), 70, 95, 140, 0.9f, FxWave.MOON),
                 FxLight(FxShape.Circle(51f, 57f, 11f), 255, 165, 70, 0.75f, FxWave.CANDLE, 2),
             ),
-            listOf(FxDust(130f, 40f, 215f, 130f, 8, 0.5f)),
+            listOf(FxDust(130f, 40f, 215f, 130f, 12, 0.5f)),
             listOf(FxRain(143f, 5f, 156f, 32f, 3, 1f)),
             listOf(FxBat(143f, 5f, 156f, 32f)),
             listOf(FxRat(270f, 112f, 185f, 86f, 1.4f, 1.1f)),
+            listOf(FxMoth(51f, 57f, 8f, 3)),
+            listOf(FxDrip(165f, 70f, 122f)),
+            listOf(FxSpider(186f, 0f, 44f)),
         )
         3 -> FxSet(emptyList(), emptyList(), emptyList(), emptyList(), listOf(FxRat(260f, 112f, 150f, 96f, 1.6f, 1.3f)))
         4 -> FxSet(emptyList(), emptyList(), emptyList(), emptyList(), listOf(FxRat(318f, 122f, 200f, 100f, 2.0f, 1.5f)))
@@ -88,7 +102,7 @@ object BackgroundFxCore {
     /** The strength of a wave at [t] seconds (0..1.3). The flashes of lightning come at a fixed, irregular rhythm of about 20 seconds. */
     fun intensity(wave: FxWave, t: Float, seed: Int): Float = when (wave) {
         FxWave.MOON -> 0.30f + 0.12f * sin(t * 2f * PI.toFloat() / 7f) + 0.10f * sin(t * 2f * PI.toFloat() / 2.3f) + storm(t) * 1.0f
-        FxWave.CANDLE -> (0.55f + 0.25f * noise(t * 9f, seed) + 0.15f * noise(t * 23f, seed + 7)).coerceIn(0f, 1f)
+        FxWave.CANDLE -> (0.55f + 0.25f * noise(t * 9f, seed) + 0.15f * noise(t * 23f, seed + 7) + gust(t) * (noise(t * 31f, seed + 3) - 0.75f) * 1.1f).coerceIn(0.05f, 1f)
         FxWave.STORM -> storm(t)
         FxWave.CLOUD -> (0.22f + 0.2f * sin(t * 2f * PI.toFloat() / 31f) + 0.14f * sin(t * 2f * PI.toFloat() / 11.3f)).coerceAtLeast(0.03f) + storm(t)
     }
@@ -101,6 +115,54 @@ object BackgroundFxCore {
     private const val RAT_SLOT = 45f
     private const val HORSE_SLOT = 61f
     private const val RAT_SECONDS = 3.2f
+    private const val DRIP_SLOT = 9.7f
+    private const val WIND_SLOT = 53f
+    const val WIND_SECONDS = 6f
+    private const val SPIDER_SLOT = 43f
+    private const val SPIDER_SECONDS = 13f
+
+    private fun windAt(slot: Int) = slot * WIND_SLOT + 8f + 25f * hash01(slot * 11 + 4)
+
+    /** The strength of the gust of wind that blows round the roof now (0..1; the candles flicker, the sound is [windSample]). */
+    fun gust(t: Float): Float {
+        val slot = floor(t / WIND_SLOT).toInt()
+        val d = t - windAt(slot)
+        if (d < 0f || d > WIND_SECONDS) return 0f
+        val s = sin(d / WIND_SECONDS * PI.toFloat())
+        return s * s
+    }
+
+    /** The sound of a drop of water that falls into a puddle (a short bright tone that falls in pitch). */
+    val dripSample: VocSample by lazy {
+        val rate = 8000
+        val pcm = ByteArray(rate / 4)
+        var ph = 0.0
+        for (i in pcm.indices) {
+            val s = i / rate.toDouble()
+            ph += 2.0 * PI * (2100.0 - 3000.0 * s) / rate
+            pcm[i] = (128 + 80.0 * sin(ph) * Math.exp(-s * 26.0)).toInt().coerceIn(0, 255).toByte()
+        }
+        VocSample(rate, pcm)
+    }
+
+    /** The sound of the wind in the roof: filtered noise that swells and dies away with a faint howl. */
+    val windSample: VocSample by lazy {
+        val rate = 8000
+        val n = (rate * WIND_SECONDS).toInt()
+        val pcm = ByteArray(n)
+        val rnd = java.util.Random(5)
+        var lp = 0f
+        var lp2 = 0f
+        for (i in 0 until n) {
+            val s = i / rate.toFloat()
+            val env = sin(s / WIND_SECONDS * PI.toFloat()).let { it * it }
+            lp += 0.05f * (rnd.nextFloat() * 2f - 1f - lp)
+            lp2 += 0.3f * (lp - lp2)
+            val howl = 0.08f * sin(2f * PI.toFloat() * (380f + 70f * sin(s * 1.1f)) * s)
+            pcm[i] = (128 + 127f * env * (lp2 * 5.5f + howl * (0.5f + 0.5f * sin(s * 2.3f)))).toInt().coerceIn(0, 255).toByte()
+        }
+        VocSample(rate, pcm)
+    }
 
     private fun flashAt(slot: Int) = slot * STORM_SLOT + 4f + 12f * hash01(slot * 31 + 5)
     private fun ratAt(slot: Int) = slot * RAT_SLOT + 12f + 20f * hash01(slot * 19 + 1)
@@ -117,6 +179,8 @@ object BackgroundFxCore {
         scan(STORM_SLOT, { flashAt(it) + 1.2f + 2.8f * hash01(it * 17 + 3) }, Ambient.THUNDER) { 0.5f + 0.5f * hash01(it * 5 + 9) }
         scan(CREAK_SLOT, { it * CREAK_SLOT + 5f + 25f * hash01(it * 13 + 9) }, Ambient.CREAK) { 0.6f + 0.4f * hash01(it * 3 + 1) }
         scan(RAT_SLOT, { ratAt(it) }, Ambient.RAT) { 1f }
+        scan(DRIP_SLOT, { it * DRIP_SLOT + 0.55f }, Ambient.DRIP) { 1f }
+        scan(WIND_SLOT, { windAt(it) }, Ambient.WIND) { 1f }
         scan(HORSE_SLOT, { it * HORSE_SLOT + 20f + 30f * hash01(it * 23 + 2) }, Ambient.HORSE) { 1f }
         return out.sortedBy { it.t }
     }
@@ -160,6 +224,9 @@ object BackgroundFxCore {
         for (r in fx.rain) restore(base, out, width, height, scale, floatArrayOf(r.x1, r.y1, r.x2 + 1f, r.y2 + 1f))
         for (bt in fx.bats) restore(base, out, width, height, scale, floatArrayOf(bt.x1 - 6f, bt.y1 - 6f, bt.x2 + 6f, bt.y2 + 6f))
         for (rt in fx.rats) restore(base, out, width, height, scale, floatArrayOf(minOf(rt.x0, rt.x1) - 14f, minOf(rt.y0, rt.y1) - 10f, maxOf(rt.x0, rt.x1) + 14f, maxOf(rt.y0, rt.y1) + 10f))
+        for (m in fx.moths) restore(base, out, width, height, scale, floatArrayOf(m.cx - m.r - 2f, m.cy - m.r - 2f, m.cx + m.r + 2f, m.cy + m.r + 2f))
+        for (dr in fx.drips) restore(base, out, width, height, scale, floatArrayOf(dr.x - 7f, dr.y0 - 1f, dr.x + 7f, dr.y1 + 4f))
+        for (sp in fx.spiders) restore(base, out, width, height, scale, floatArrayOf(sp.x - 5f, sp.y0, sp.x + 5f, sp.y1 + 5f))
         for (l in fx.lights) {
             if (l.lampOnly && !lampOn) continue
             val k = intensity(l.wave, t, l.seed) * l.strength
@@ -175,6 +242,10 @@ object BackgroundFxCore {
         for (r in fx.rain) rain(out, width, height, scale, r, t)
         for (bt in fx.bats) bat(out, width, height, scale, bt, t)
         for (rt in fx.rats) rat(out, width, height, scale, rt, t)
+        for (m in fx.moths) if (!m.lampOnly || lampOn) moths(out, width, height, scale, m, t)
+        for (dr in fx.drips) drip(out, width, height, scale, dr, t)
+        for (sp in fx.spiders) spider(out, width, height, scale, sp, t)
+        val lit = storm(t) > 0.25f
         for ((n, d) in fx.dust.withIndex()) {
             for (i in 0 until d.count) {
                 val h1 = hash01(i * 17 + n * 1000 + 3); val h2 = hash01(i * 29 + n * 1000 + 11); val h3 = hash01(i * 43 + n * 1000 + 19)
@@ -187,7 +258,9 @@ object BackgroundFxCore {
                 val edge = minOf(fall, hgt - fall).coerceAtMost(8f) / 8f // fades in and out at the top and the bottom
                 val v = (60f * d.strength * tw * edge * (intensity(FxWave.MOON, t, 0) + 0.2f)).toInt()
                 val cx = (px * scale).toInt(); val cy = (py * scale).toInt()
-                for (yy in cy..cy + 1) for (xx in cx..cx + 1) if (xx in 0 until width && yy in 0 until height) add(out, yy * width + xx, v, v, (v * 1.1f).toInt())
+                // in the flash of lightning the specks are brighter and bigger
+                val sz = if (lit) 2 else 1
+                for (yy in cy..cy + sz) for (xx in cx..cx + sz) if (xx in 0 until width && yy in 0 until height) add(out, yy * width + xx, v, v, (v * 1.1f).toInt())
             }
         }
     }
@@ -263,6 +336,62 @@ object BackgroundFxCore {
         val step = sin(t * 26f)
         shade(out, width, height, scale, x + dir * len * 0.25f + step, y + 1.5f * s, 0.5f * s, 0.4f * s, r0, g0, b0, a)
         shade(out, width, height, scale, x - dir * len * 0.2f - step, y + 1.5f * s, 0.5f * s, 0.4f * s, r0, g0, b0, a)
+    }
+
+    /** Moths that flutter round a light in loops of their own, pale where the light catches them. */
+    private fun moths(out: IntArray, width: Int, height: Int, scale: Int, m: FxMoth, t: Float) {
+        for (i in 0 until m.count) {
+            val h1 = hash01(i * 7 + 301); val h2 = hash01(i * 11 + 303)
+            val ang = t * (1.4f + 1.6f * h1) + i * 2.1f
+            val rr = m.r * (0.45f + 0.5f * (0.5f + 0.5f * sin(t * (0.5f + h2) + i)))
+            val x = m.cx + kotlin.math.cos(ang) * rr
+            val y = m.cy + sin(ang * 1.3f) * rr * 0.7f
+            val wing = 0.45f + 0.35f * abs(sin(t * 38f + i)) // the wings beat
+            shade(out, width, height, scale, x, y, wing + 0.3f, 0.45f, 215, 200, 170, 0.85f)
+        }
+    }
+
+    /** A drop that falls from the roof now and then and a ring that spreads where it lands; the sound comes with the same clock ([events]). */
+    private fun drip(out: IntArray, width: Int, height: Int, scale: Int, d: FxDrip, t: Float) {
+        val slot = floor(t / DRIP_SLOT).toInt()
+        val u = t - slot * DRIP_SLOT // the drop lands at 0.55 s of the slot
+        val fallStart = 0.05f
+        if (u in fallStart..0.55f) {
+            val p = (u - fallStart) / (0.55f - fallStart)
+            val y = d.y0 + (d.y1 - d.y0) * p * p // it speeds up
+            shade(out, width, height, scale, d.x, y, 0.5f, 1.1f, 150, 175, 200, 0.8f)
+        } else if (u > 0.55f && u < 1.6f) {
+            val p = (u - 0.55f) / 1.05f
+            val rad = 1f + 5f * p
+            val a = 0.5f * (1f - p)
+            // a ring: two ellipses, the inner one in the colour of what is below
+            shade(out, width, height, scale, d.x, d.y1 + 1f, rad, rad * 0.35f, 150, 170, 190, a)
+            if (rad > 2.2f) shade(out, width, height, scale, d.x, d.y1 + 1f, rad - 1.3f, (rad - 1.3f) * 0.35f, 70, 62, 55, a * 1.2f)
+        }
+    }
+
+    /** A spider on a thread: down (4 s), it hangs and swings (4 s), up again (5 s). */
+    private fun spider(out: IntArray, width: Int, height: Int, scale: Int, s: FxSpider, t: Float) {
+        val slot = floor(t / SPIDER_SLOT).toInt()
+        val u = t - slot * SPIDER_SLOT - (6f + 20f * hash01(slot * 29 + 7))
+        if (u < 0f || u > SPIDER_SECONDS) return
+        val down = if (u < 4f) u / 4f else if (u < 8f) 1f else 1f - (u - 8f) / 5f
+        val ease = down * down * (3f - 2f * down)
+        val y = s.y0 + (s.y1 - s.y0) * ease
+        val x = s.x + if (u in 4f..8f) 1.2f * sin((u - 4f) * 2.4f) else 0f
+        // the thread
+        var yy = s.y0
+        while (yy < y) {
+            shade(out, width, height, scale, s.x + (x - s.x) * (yy - s.y0) / (y - s.y0 + 0.01f), yy, 0.3f, 0.6f, 200, 195, 185, 0.4f)
+            yy += 0.7f
+        }
+        // the body and the legs that move
+        shade(out, width, height, scale, x, y + 1.2f, 1.1f, 1.0f, 18, 14, 12, 0.95f)
+        val leg = sin(t * 9f)
+        for (k in -1..1 step 2) {
+            shade(out, width, height, scale, x + k * 2.1f, y + 0.6f + 0.4f * leg, 1.0f, 0.3f, 18, 14, 12, 0.85f)
+            shade(out, width, height, scale, x + k * 2.1f, y + 1.9f - 0.4f * leg, 1.0f, 0.3f, 18, 14, 12, 0.85f)
+        }
     }
 
     /** Blends the colour (r, g, b) with weight [a] over an ellipse (centre in picture pixels, radii [rx] and [ry]). */

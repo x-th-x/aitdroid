@@ -445,7 +445,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     val renderer = remember { AtticSceneRenderer() }
     val fxEpoch = remember { System.nanoTime() }
     // the sounds of the house (thunder after the flash, creaks, the patter of the rat) have a voice of their own, so they do not cut off the game's sounds
-    val ambient = remember(world) { IntroSounds({ world.game.sample(it) }) }
+    val ambient = remember(world) { IntroSounds({ if (it == -1) BackgroundFxCore.dripSample else if (it == -2) BackgroundFxCore.windSample else world.game.sample(it) }) }
     DisposableEffect(ambient) { onDispose { ambient.release() } }
     val fxScope = rememberCoroutineScope()
     val blackBackground = remember { android.graphics.Bitmap.createBitmap(AtticSceneRenderer.W, AtticSceneRenderer.H, android.graphics.Bitmap.Config.ARGB_8888).also { it.eraseColor(android.graphics.Color.BLACK) } }
@@ -460,6 +460,8 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     val angleUnitToRad = 2f * PI.toFloat() / 1024f
 
     var fxLastT = 0f
+    var walked = 0f
+    var walkCreakAt = 3000f
     LaunchedEffect(game) {
         var gameClock = 0
         var lastTimer = 0
@@ -507,6 +509,8 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
                     for (e in BackgroundFxCore.events(fxLastT, nowT)) when (e.kind) {
                         Ambient.THUNDER -> StartAssets.playThunder(0.35f + 0.5f * e.strength)
                         Ambient.CREAK -> ambient.play(4, 0.55f, volume = 0.18f + 0.2f * e.strength)
+                        Ambient.DRIP -> ambient.play(-1, 1f, volume = 0.35f)
+                        Ambient.WIND -> ambient.play(-2, 1f, volume = 0.5f)
                         Ambient.RAT -> fxScope.launch {
                             // the patter of the feet, and the squeaks (samples 47 and 72 of LISTSAMP.PAK: no script of the game plays them, they are quiet and high)
                             repeat(9) {
@@ -524,6 +528,15 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
                 fxLastT = nowT
                 if (game.pendingFound >= 0) foundItem = game.pendingFound
                 game.player?.actor?.let {
+                    // the boards of the floor creak under the steps now and then (not in the original game)
+                    if (game.roomView.stage == 0 && !intro) {
+                        walked += kotlin.math.abs(it.renderX - playerX) + kotlin.math.abs(it.renderZ - playerZ)
+                        if (walked > walkCreakAt) {
+                            ambient.play(4, 0.45f + 0.25f * (walkCreakAt % 7f) / 7f, volume = 0.2f)
+                            walked = 0f
+                            walkCreakAt = 2200f + 3800f * ((walkCreakAt * 7.3f) % 1f)
+                        }
+                    }
                     playerX = it.renderX.toFloat()
                     playerZ = it.renderZ.toFloat()
                 }
