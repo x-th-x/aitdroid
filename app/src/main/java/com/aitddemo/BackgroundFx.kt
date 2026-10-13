@@ -8,7 +8,7 @@ import android.graphics.Bitmap
  */
 class BackgroundFx(stage: Int, room: Int, private val photos: List<Bitmap>, pictureIds: List<Int> = emptyList()) {
     private val sets: List<FxSet?> = photos.indices.map {
-        if (stage == 0 && room == 0) BackgroundFxCore.attic(it) else if (stage == 1) pictureIds.getOrNull(it)?.let { id -> BackgroundFxCore.floor1(id) } else null
+        if (stage == 0 && room == 0) BackgroundFxCore.attic(it) else if (stage == 0 && room == BalconyRoom.NUMBER) BackgroundFxCore.balcony() else if (stage == 1) pictureIds.getOrNull(it)?.let { id -> BackgroundFxCore.floor1(id) } else null
     }
 
     /** Has the picture of [camera] a window (rain and the flash of lightning shine in)? */

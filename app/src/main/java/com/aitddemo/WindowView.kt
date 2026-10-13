@@ -34,7 +34,7 @@ object WindowView {
         return c.quantize(palette)
     }
 
-    private class Canvas {
+    internal class Canvas {
         val r = FloatArray(W * H)
         val g = FloatArray(W * H)
         val b = FloatArray(W * H)
@@ -118,17 +118,17 @@ object WindowView {
 
     private val BAYER = intArrayOf(0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5)
 
-    private fun hash(n: Int): Float {
+    internal fun hash(n: Int): Float {
         var x = n * 374761393 + 668265263
         x = (x xor (x ushr 13)) * 1274126177
         x = x xor (x ushr 16)
         return (x and 0xFFFF) / 65535f
     }
 
-    private fun hash2(x: Int, y: Int, seed: Int = 0) = hash(x * 73856093 + y * 19349663 + seed * 83492791)
+    internal fun hash2(x: Int, y: Int, seed: Int = 0) = hash(x * 73856093 + y * 19349663 + seed * 83492791)
 
     /** Smooth value noise 0..1. */
-    private fun noise(x: Float, y: Float, seed: Int = 0): Float {
+    internal fun noise(x: Float, y: Float, seed: Int = 0): Float {
         val xi = floor(x).toInt(); val yi = floor(y).toInt()
         val fx = x - xi; val fy = y - yi
         val sx = fx * fx * (3f - 2f * fx); val sy = fy * fy * (3f - 2f * fy)
@@ -137,7 +137,7 @@ object WindowView {
         return (a + (b - a) * sx) + ((c + (d - c) * sx) - (a + (b - a) * sx)) * sy
     }
 
-    private fun fbm(x: Float, y: Float, seed: Int = 0): Float = 0.55f * noise(x, y, seed) + 0.3f * noise(x * 2.1f, y * 2.1f, seed + 1) + 0.15f * noise(x * 4.3f, y * 4.3f, seed + 2)
+    internal fun fbm(x: Float, y: Float, seed: Int = 0): Float = 0.55f * noise(x, y, seed) + 0.3f * noise(x * 2.1f, y * 2.1f, seed + 1) + 0.15f * noise(x * 4.3f, y * 4.3f, seed + 2)
 
     // ------------------------------------------------------------------------------------------------------------------ sky and moon
 

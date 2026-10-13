@@ -415,10 +415,11 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
         if (DevOptions.vars.any { it.first == 998 }) g.player?.actor?.let { g.effects.add(Effect(1, it.renderX, it.renderY - 1000, it.renderZ, g.time, null)) } // the dots of a hit in front of the player (for testing)
         if (loadSlot != null) SaveStore.load(context, loadSlot, g)
     } }
-    // the room behind the attic stairs is read in the background, so the change of floor does not stop the game
+    // the room behind the attic stairs and the balcony outside the window are read (and painted) in the background, so the change of floor does not stop the game
     LaunchedEffect(world) {
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             try { world.game.rooms.room(1, 6) } catch (_: Exception) { }
+            try { world.game.rooms.room(0, BalconyRoom.NUMBER) } catch (_: Exception) { }
         }
     }
     val startNanos = remember { System.nanoTime() }
@@ -514,15 +515,16 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
                 val nowT = (System.nanoTime() - fxEpoch) / 1_000_000_000f
                 val fxStage = game.roomView.stage
                 if ((fxStage == 0 || fxStage == 1) && !intro) {
-                    val attic = fxStage == 0
+                    val attic = fxStage == 0 && game.roomView.room == 0
+                    val outdoors = fxStage == 0 && game.roomView.room == BalconyRoom.NUMBER
                     val bathroom = fxStage == 1 && game.roomView.pictureIds.any { it == 11 || it == 12 }
                     for (e in BackgroundFxCore.events(fxLastT, nowT)) when (e.kind) {
                         // on the floor below the storm is heard through the walls
-                        Ambient.THUNDER -> StartAssets.playThunder((0.35f + 0.5f * e.strength) * (if (attic) 1f else 0.55f))
+                        Ambient.THUNDER -> StartAssets.playThunder((0.35f + 0.5f * e.strength) * (if (attic || outdoors) 1f else 0.55f))
                         Ambient.CREAK -> if (attic) ambient.play(4, 0.55f, volume = 0.18f + 0.2f * e.strength)
                         Ambient.DRIP -> if (attic || bathroom) ambient.play(-1, 1f, volume = 0.35f)
                         Ambient.VANISH -> if (fxStage == 1 && game.roomView.pictureIds.contains(7)) ambient.play(if (e.strength > 0.5f) -3 else -4, 1f, volume = 0.6f)
-                        Ambient.WIND -> ambient.play(-2, 1f, volume = if (attic) 0.5f else 0.22f)
+                        Ambient.WIND -> ambient.play(-2, 1f, volume = if (attic || outdoors) 0.5f else 0.22f)
                         Ambient.RAT -> if (attic) fxScope.launch {
                             // the patter of the feet, and the squeaks (samples 47 and 72 of LISTSAMP.PAK: no script of the game plays them, they are quiet and high)
                             repeat(9) {
@@ -818,7 +820,11 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
             }
         }
         if (ui.windowViewShown) {
-            WindowViewOverlay(world.game.palette, game.objects.getOrNull(7)?.w?.body == 6, { BackgroundFxCore.flash((System.nanoTime() - fxEpoch) / 1_000_000_000f) }) { ui.windowViewShown = false }
+            WindowViewOverlay(
+                world.game.palette, game.objects.getOrNull(7)?.w?.body == 6,
+                { BackgroundFxCore.flash((System.nanoTime() - fxEpoch) / 1_000_000_000f) },
+                onStepOut = { ui.windowViewShown = false; game.stepOutToBalcony() },
+            ) { ui.windowViewShown = false }
         }
         if (ui.endShown) {
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.85f)).clickable { onExit() }, contentAlignment = Alignment.Center) {

@@ -5,7 +5,11 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -31,15 +35,14 @@ import kotlinx.coroutines.withContext
 
 /**
  * What Carnby sees when he examines the window of the attic with "Open/Search" (not in the original game, see [WindowView]): the painted view with the storm moving in it,
- * and a remark at the bottom. A tap or the back key closes it. [flash] gives the strength of the flash of lightning now (the storm of the house, so the thunder fits).
+ * and a remark at the bottom with two choices: step out onto the balcony, or close the view (the back key closes it too). [flash] gives the strength of the flash of lightning now (the storm of the house, so the thunder fits).
  */
 @Composable
-fun WindowViewOverlay(palette: IntArray, broken: Boolean, flash: () -> Float, onClose: () -> Unit) {
+fun WindowViewOverlay(palette: IntArray, broken: Boolean, flash: () -> Float, onStepOut: () -> Unit, onClose: () -> Unit) {
     BackHandler { onClose() }
     val scale = 2
     var frame by remember { mutableStateOf<Bitmap?>(null) }
     var tick by remember { mutableIntStateOf(0) }
-    val openedAt = remember { System.nanoTime() }
     LaunchedEffect(broken) {
         val base = withContext(Dispatchers.Default) {
             val pic = WindowView.paint(palette, broken)
@@ -59,14 +62,7 @@ fun WindowViewOverlay(palette: IntArray, broken: Boolean, flash: () -> Float, on
             tick++
         }
     }
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .clickable(indication = null, interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }) {
-                if (System.nanoTime() - openedAt > 600_000_000L) onClose() // not the tap that ends the search animation
-            },
-    ) {
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
         Canvas(Modifier.fillMaxSize()) {
             tick // redraw whenever there is a new frame
             val bmp = frame ?: return@Canvas
@@ -80,12 +76,20 @@ fun WindowViewOverlay(palette: IntArray, broken: Boolean, flash: () -> Float, on
                 filterQuality = FilterQuality.None,
             )
         }
-        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color.Black.copy(alpha = 0.55f)).padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color.Black.copy(alpha = 0.55f)).padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             BitmapText(
                 text = if (broken) "The glass is gone. The rain blows in." else "The path to the house, the gate, the road. A car waits in the rain.",
                 scale = 2f,
                 color = Color(0xFFF2E4B8),
             )
+            Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
+                Box(Modifier.border(1.dp, Color(0xFF8A6D3B)).clickable { onStepOut() }.padding(horizontal = 14.dp, vertical = 6.dp)) {
+                    BitmapText(text = "Step out onto the balcony", scale = 2f, color = Color(0xFFF2E4B8))
+                }
+                Box(Modifier.border(1.dp, Color(0xFF8A6D3B)).clickable { onClose() }.padding(horizontal = 14.dp, vertical = 6.dp)) {
+                    BitmapText(text = "Close", scale = 2f, color = Color(0xFF9C8B6E))
+                }
+            }
         }
     }
 }

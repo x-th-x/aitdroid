@@ -39,6 +39,7 @@ class RoomLoader(private val files: GameFiles, private val palette: IntArray) {
     /** The room [room] of floor [stage]; throws [OriginalFilesException] when the files do not have it. */
     @Synchronized
     fun room(stage: Int, room: Int): RoomView = rooms.getOrPut(stage * 1000L + room) {
+        if (stage == 0 && room == BalconyRoom.NUMBER) return@getOrPut BalconyRoom.view(palette) // the balcony outside the window of the attic is not in the files, it is painted by code
         val st = stages.getOrPut(stage) { OriginalStage.open(files, stage) }
         val r = st.rooms.firstOrNull { it.index == room } ?: throw OriginalFilesException("Etage $stage: Raum $room fehlt")
         val cameras = r.cameraIds.map { st.camera(room, it) }

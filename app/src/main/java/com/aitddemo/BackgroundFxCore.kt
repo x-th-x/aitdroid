@@ -53,13 +53,16 @@ class FxSteam(val x1: Float, val x2: Float, val y: Float, val rise: Float, val c
 /** A thing of the picture (the rectangle) that dissolves after some flashes of lightning and forms again somewhere else ((bedX, bedY) = bottom centre there, [bedScale] its size): its place is painted over with the wall beside it. */
 class FxVanish(val x1: Float, val y1: Float, val x2: Float, val y2: Float, val bedX: Float, val bedY: Float, val bedScale: Float)
 
+/** Rain that falls over the whole picture (a view into the open): [count] slanted streaks, near ones fast and bright, far ones slow and faint. */
+class FxStormRain(val count: Int)
+
 /** A spider that lets itself down on a thread from [y0] to [y1] at [x], hangs there for a while and climbs up again. */
 class FxSpider(val x: Float, val y0: Float, val y1: Float)
 
 class AmbientEvent(val t: Float, val kind: Ambient, val strength: Float)
 
 /** The lights of one camera. */
-class FxSet(val lights: List<FxLight>, val dust: List<FxDust>, val rain: List<FxRain> = emptyList(), val bats: List<FxBat> = emptyList(), val rats: List<FxRat> = emptyList(), val moths: List<FxMoth> = emptyList(), val drips: List<FxDrip> = emptyList(), val spiders: List<FxSpider> = emptyList(), val steam: List<FxSteam> = emptyList(), val vanish: List<FxVanish> = emptyList())
+class FxSet(val lights: List<FxLight>, val dust: List<FxDust>, val rain: List<FxRain> = emptyList(), val bats: List<FxBat> = emptyList(), val rats: List<FxRat> = emptyList(), val moths: List<FxMoth> = emptyList(), val drips: List<FxDrip> = emptyList(), val spiders: List<FxSpider> = emptyList(), val steam: List<FxSteam> = emptyList(), val vanish: List<FxVanish> = emptyList(), val storm: FxStormRain? = null)
 
 object BackgroundFxCore {
     /** The attic: stage 0, room 0, cameras 0 to 4 (places found by looking at the pictures). */
@@ -110,6 +113,13 @@ object BackgroundFxCore {
     private fun window(x1: Float, y1: Float, x2: Float, y2: Float) = FxLight(FxShape.Rect(x1, y1, x2, y2), WINDOW_LIGHT[0], WINDOW_LIGHT[1], WINDOW_LIGHT[2], 0.9f, FxWave.MOON)
     private fun curtain(x1: Float, y1: Float, x2: Float, y2: Float, r: Int, g: Int, b: Int, seed: Int) = FxLight(FxShape.Rect(x1, y1, x2, y2), r, g, b, 0.3f, FxWave.DRAFT, seed)
     private fun gasLamp(x: Float, y: Float, seed: Int) = FxLight(FxShape.Circle(x, y, 11f), 255, 200, 110, 0.6f, FxWave.CANDLE, seed)
+
+    /** The balcony (room 1 of the attic floor): the flash of lightning lights everything, rain falls over the whole picture. */
+    fun balcony(): FxSet = FxSet(
+        listOf(FxLight(FxShape.Rect(0f, 0f, 320f, 200f), 34, 46, 70, 0.8f, FxWave.STORM)),
+        emptyList(),
+        storm = FxStormRain(110),
+    )
 
     /** Floor 1 (ETAGE01): the effects of the pictures of CAMERA01.PAK by their number (places found by looking at the pictures). */
     fun floor1(picture: Int): FxSet? = when (picture) {
@@ -287,6 +297,7 @@ object BackgroundFxCore {
         for (rt in fx.rats) restore(base, out, width, height, scale, floatArrayOf(minOf(rt.x0, rt.x1) - 14f, minOf(rt.y0, rt.y1) - 10f, maxOf(rt.x0, rt.x1) + 14f, maxOf(rt.y0, rt.y1) + 10f))
         for (m in fx.moths) restore(base, out, width, height, scale, floatArrayOf(m.cx - m.r - 2f, m.cy - m.r - 2f, m.cx + m.r + 2f, m.cy + m.r + 2f))
         for (dr in fx.drips) restore(base, out, width, height, scale, floatArrayOf(dr.x - 7f, dr.y0 - 1f, dr.x + 7f, dr.y1 + 4f))
+        if (fx.storm != null) restore(base, out, width, height, scale, floatArrayOf(0f, 0f, 320f, 200f))
         for (vn in fx.vanish) {
             restore(base, out, width, height, scale, floatArrayOf(vn.x1 - 32f, vn.y1 - 52f, vn.x2 + 32f, vn.y2 + 24f))
             restore(base, out, width, height, scale, floatArrayOf(vn.bedX - 36f, vn.bedY - 64f, vn.bedX + 36f, vn.bedY + 20f))
@@ -317,6 +328,7 @@ object BackgroundFxCore {
         for (r in fx.rain) rain(out, width, height, scale, r, t)
         for (bt in fx.bats) bat(out, width, height, scale, bt, t)
         for (rt in fx.rats) rat(out, width, height, scale, rt, t)
+        fx.storm?.let { stormRain(out, width, height, scale, it.count, t) }
         for (m in fx.moths) if (!m.lampOnly || lampOn) moths(out, width, height, scale, m, t)
         for (dr in fx.drips) drip(out, width, height, scale, dr, t)
         for (sp in fx.spiders) spider(out, width, height, scale, sp, t)
@@ -569,6 +581,34 @@ object BackgroundFxCore {
             val a = pulse * (0.5f + 0.5f * sin(p * 30f + i * 1.9f))
             val px = (x * scale).toInt(); val py = (y * scale).toInt()
             for (yy in py..py + 1) for (xx in px..px + 1) if (xx in 0 until width && yy in 0 until height) add(out, yy * width + xx, (190 * a).toInt(), (235 * a).toInt(), (255 * a).toInt())
+        }
+    }
+
+    private fun stormRain(out: IntArray, width: Int, height: Int, scale: Int, count: Int, t: Float) {
+        val sc = scale
+        for (i in 0 until count) {
+            val near = hash01(i * 3 + 1)
+            val speed = 120f + 160f * near
+            val period = (200f + 30f) / speed
+            val ph = ((t + hash01(i * 7 + 2) * period * 5f) % period) / period
+            val y = ph * 230f - 15f
+            val x = (hash01(i * 11 + 3) * 400f - 40f) - y * 0.22f
+            val len = 3f + 6f * near
+            val a = 0.2f + 0.3f * near + 0.2f * storm(t)
+            var s = 0f
+            while (s < len) {
+                val px = ((x - s * 0.22f) * sc).toInt(); val py = ((y - s) * sc).toInt()
+                val f = (1f - s / len) * a
+                for (dy in 0 until sc) for (dx in 0 until sc) {
+                    val xx = px + dx; val yy = py + dy
+                    if (xx in 0 until width && yy in 0 until height) {
+                        val p = out[yy * width + xx]
+                        val nr = (((p shr 16) and 0xFF) * (1f - f) + 170f * f).toInt(); val ng = (((p shr 8) and 0xFF) * (1f - f) + 190f * f).toInt(); val nb = ((p and 0xFF) * (1f - f) + 215f * f).toInt()
+                        out[yy * width + xx] = (p and 0xFF000000.toInt()) or (nr shl 16) or (ng shl 8) or nb
+                    }
+                }
+                s += 1f / sc
+            }
         }
     }
 

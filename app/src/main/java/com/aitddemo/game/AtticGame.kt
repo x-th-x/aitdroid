@@ -1,5 +1,6 @@
 package com.aitddemo.game
 
+import com.aitddemo.BalconyRoom
 import com.aitddemo.RoomView
 import com.aitddemo.life.LifeHost
 import com.aitddemo.life.LifeVm
@@ -408,6 +409,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         }
 
         checkWindowSearch()
+        checkBalconyExit()
 
         // the floor loader of the original stops all samples when a script has taken the scene to another floor (after the scripts of the frame ran, so a sample that the
         // scripts started in that frame is cut at once; the sample that waits behind it, SAMPLE_THEN, survives and starts)
@@ -418,6 +420,27 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     }
 
     private var stopSamplesAtEnd = false
+
+    /** The player climbs out of the window of the attic onto the balcony (a room that is not in the original game). */
+    fun stepOutToBalcony() {
+        if (stage != 0 || room != 0 || intro) return
+        changeRoom(0, BalconyRoom.NUMBER, null)
+        player?.actor?.teleport(0, 0, BalconyRoom.OUT_Z, 512)
+    }
+
+    /** The player comes back through the window into the attic. */
+    private fun stepBackIn() {
+        changeRoom(0, 0, null)
+        player?.actor?.teleport(0, 0, BalconyRoom.IN_Z, 0)
+        windowViewAfter = time + 300
+    }
+
+    /** On the balcony: the player who walks into the opening of the window goes back into the attic. */
+    private fun checkBalconyExit() {
+        if (stage != 0 || room != BalconyRoom.NUMBER) return
+        val a = player?.actor ?: return
+        if (Math.abs(a.renderX) <= BalconyRoom.EXIT_X && a.renderZ < BalconyRoom.EXIT_Z) stepBackIn()
+    }
 
     private var lastPlayerAnim = -1
     private var windowViewAfter = 0
