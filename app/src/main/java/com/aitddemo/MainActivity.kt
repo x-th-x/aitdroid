@@ -59,6 +59,7 @@ class MainActivity : ComponentActivity() {
         val devPos = intent?.getStringExtra("devPos")?.split(",")?.mapNotNull { it.trim().toIntOrNull() }?.takeIf { it.size == 3 }
         // `--es devVars 19=1,20=0` sets script variables when the attic starts (for testing; 19=1 starts the second creature)
         DevOptions.vars = intent?.getStringExtra("devVars")?.split(",")?.mapNotNull { e -> e.split("=").takeIf { it.size == 2 }?.let { p -> p[0].trim().toIntOrNull()?.let { i -> p[1].trim().toIntOrNull()?.let { v -> i to v } } } } ?: emptyList()
+        DevOptions.floor = intent?.getStringExtra("devFloor")?.split(",")?.mapNotNull { it.trim().toIntOrNull() }?.takeIf { it.size == 2 }
         setContent { StartGate(devAutoAttic, devAutoIntro, devAutoMusic, devControlMode, devItems, devPos) }
     }
 }
@@ -101,7 +102,7 @@ private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: 
     var emily by remember { mutableStateOf(false) }
 
     // set by the floor selection of the main menu, cleared by every other way into the game
-    var floorStart by remember { mutableStateOf<FloorStart?>(null) }
+    var floorStart by remember { mutableStateOf<FloorStart?>(DevOptions.floor?.takeIf { devAutoAttic }?.let { FloorStart(it[0], it[1], emptyList(), true) }) }
 
     // Developer Mode: off by default. Shows the world position and camera in the attic.
     var developerMode by remember { mutableStateOf(devAutoAttic) }
@@ -310,4 +311,7 @@ private fun LoadScreen(onBack: () -> Unit, onPick: (Int) -> Unit) {
 /** Settings for testing that come in as intent extras. */
 object DevOptions {
     var vars: List<Pair<Int, Int>> = emptyList()
+
+    /** `--es devFloor 1,4` (with devAutoAttic): start on that floor and in that room, as the floor selection does (for testing). */
+    var floor: List<Int>? = null
 }
