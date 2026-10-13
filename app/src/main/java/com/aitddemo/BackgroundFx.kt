@@ -11,7 +11,7 @@ class BackgroundFx(stage: Int, room: Int, private val photos: List<Bitmap>) {
     private val base = arrayOfNulls<IntArray>(photos.size)
     private val out = arrayOfNulls<IntArray>(photos.size)
     private val work = arrayOfNulls<Bitmap>(photos.size)
-    private val lastMs = LongArray(photos.size) { Long.MIN_VALUE }
+    private val lastMs = LongArray(photos.size) { -1_000_000_000_000L }
 
     /** The picture of [camera] at [nowMs] (milliseconds of a steady clock). */
     fun frame(camera: Int, nowMs: Long): Bitmap {
