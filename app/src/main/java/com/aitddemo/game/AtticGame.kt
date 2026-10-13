@@ -21,6 +21,9 @@ interface GameUi {
     /** The ending of the game. */
     fun endSequence() {}
 
+    /** The player examined the window of the attic with "Open/Search": the view out of it (not in the original game). */
+    fun windowView() {}
+
     /** SAMPLE_THEN / SAMPLE_THEN_REPEAT: [first] sounds, and when it has ended [then] (repeated when [repeat]). */
     fun playSampleThen(first: Int, then: Int, repeat: Boolean) { playSample(first) }
 
@@ -404,6 +407,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             if (pendingFound >= 0 || pendingRead != null || exited || gameOver) break
         }
 
+        checkWindowSearch()
+
         // the floor loader of the original stops all samples when a script has taken the scene to another floor (after the scripts of the frame ran, so a sample that the
         // scripts started in that frame is cut at once; the sample that waits behind it, SAMPLE_THEN, survives and starts)
         if (stopSamplesAtEnd) {
@@ -413,6 +418,24 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     }
 
     private var stopSamplesAtEnd = false
+
+    private var lastPlayerAnim = -1
+    private var windowViewAfter = 0
+
+    /**
+     * "Open/Search" at the window of the attic (not in the original game): when the search animation of the player (animation 2, started by the action key in the Open/Search mode
+     * of the inventory) has ended while he stands in front of the window, he looks out of it.
+     */
+    private fun checkWindowSearch() {
+        val a = player?.actor
+        val now = a?.currentAnim ?: -1
+        val ended = lastPlayerAnim == SEARCH_ANIM && now != SEARCH_ANIM
+        lastPlayerAnim = now
+        if (a == null || !ended || stage != 0 || roomView.room != 0) return
+        val facing = Math.abs((a.beta and 0x3FF) - 512) // the window is in the wall at the far end (+z); 512 = looking that way
+        if (time < windowViewAfter) return // a finger that stays on the action key repeats the search: not again at once
+        if (Math.abs(a.renderX) <= 1100 && a.renderZ >= 3700 && facing <= 230) { windowViewAfter = time + 300; ui.windowView() }
+    }
 
     /**
      * A creature on its way touches other objects, the player too (checkCollision of the original reports every box it overlaps, it does not need to be blocked): the
@@ -1410,6 +1433,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         const val CVAR_SAMPLE_CHOC = 9
         const val CVAR_REVERSE_OBJECT = 11
         const val CVAR_BODY_FLAMME = 1
+        const val SEARCH_ANIM = 2
         const val ACTION_CLICK = 0x2000
         const val ACTION_TAKE = 0x800
         const val MAX_WEIGHT_CVAR = 2

@@ -61,6 +61,9 @@ private class AtticUi(private val world: AtticOriginal, private val sounds: Intr
     /** A full screen picture of the game being shown (from PICTURE) and until when (engine ticks of the screen clock). */
     var picture by mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null)
     var pictureNanos = 0L
+
+    /** The view out of the window of the attic is shown (not in the original game). */
+    var windowViewShown by mutableStateOf(false)
     private var music = if (GameMusic.playing) GameMusic.current else -1 // what the intro leaves playing; the start script of the game (FADE_MUSIC 0) brings in the attic music
 
     override fun message(text: String) {
@@ -155,6 +158,10 @@ private class AtticUi(private val world: AtticOriginal, private val sounds: Intr
 
     override fun endSequence() {
         endShown = true
+    }
+
+    override fun windowView() {
+        windowViewShown = true
     }
 
     override fun picture(index: Int, ticks: Int, sample: Int) {
@@ -468,7 +475,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
         while (true) {
             val nanos = withFrameNanos { it }
             val timer = ((nanos - startNanos) / 16_666_667L).toInt() // engine ticks, 60 per second
-            val paused = foundItem >= 0 || inventoryOpen || menuOpen || ui.gameOverShown || ui.exitShown || ui.endShown || ui.picture != null || game.pendingRead != null
+            val paused = foundItem >= 0 || inventoryOpen || menuOpen || ui.gameOverShown || ui.exitShown || ui.endShown || ui.picture != null || ui.windowViewShown || game.pendingRead != null
             if (!paused) gameClock += (timer - lastTimer).coerceAtLeast(0)
             lastTimer = timer
             ui.expire(System.nanoTime())
@@ -809,6 +816,9 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
             Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
                 Image(bitmap = pic, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
             }
+        }
+        if (ui.windowViewShown) {
+            WindowViewOverlay(world.game.palette, game.objects.getOrNull(7)?.w?.body == 6, { BackgroundFxCore.flash((System.nanoTime() - fxEpoch) / 1_000_000_000f) }) { ui.windowViewShown = false }
         }
         if (ui.endShown) {
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.85f)).clickable { onExit() }, contentAlignment = Alignment.Center) {
