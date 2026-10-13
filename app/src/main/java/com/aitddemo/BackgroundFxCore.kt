@@ -50,13 +50,16 @@ class FxDrip(val x: Float, val y0: Float, val y1: Float)
 /** Steam that rises from a rectangle [x1]..[x2] at height [y] by [rise] pixels: [count] soft pale puffs that grow and fade. */
 class FxSteam(val x1: Float, val x2: Float, val y: Float, val rise: Float, val count: Int)
 
+/** A thing of the picture that is gone after some flashes of lightning and back after others: its rectangle is painted over with the wall beside it. */
+class FxVanish(val x1: Float, val y1: Float, val x2: Float, val y2: Float)
+
 /** A spider that lets itself down on a thread from [y0] to [y1] at [x], hangs there for a while and climbs up again. */
 class FxSpider(val x: Float, val y0: Float, val y1: Float)
 
 class AmbientEvent(val t: Float, val kind: Ambient, val strength: Float)
 
 /** The lights of one camera. */
-class FxSet(val lights: List<FxLight>, val dust: List<FxDust>, val rain: List<FxRain> = emptyList(), val bats: List<FxBat> = emptyList(), val rats: List<FxRat> = emptyList(), val moths: List<FxMoth> = emptyList(), val drips: List<FxDrip> = emptyList(), val spiders: List<FxSpider> = emptyList(), val steam: List<FxSteam> = emptyList())
+class FxSet(val lights: List<FxLight>, val dust: List<FxDust>, val rain: List<FxRain> = emptyList(), val bats: List<FxBat> = emptyList(), val rats: List<FxRat> = emptyList(), val moths: List<FxMoth> = emptyList(), val drips: List<FxDrip> = emptyList(), val spiders: List<FxSpider> = emptyList(), val steam: List<FxSteam> = emptyList(), val vanish: List<FxVanish> = emptyList())
 
 object BackgroundFxCore {
     /** The attic: stage 0, room 0, cameras 0 to 4 (places found by looking at the pictures). */
@@ -129,6 +132,7 @@ object BackgroundFxCore {
             ),
             listOf(FxDust(10f, 130f, 110f, 200f, 10, 0.6f)),
             listOf(FxRain(33f, 64f, 70f, 126f, 4, 1f)),
+            vanish = listOf(FxVanish(169f, 102f, 187f, 119f)), // the teddy bear on the chest of drawers
         )
         // the red room with the wardrobe and the window on the left
         10 -> FxSet(
@@ -276,8 +280,10 @@ object BackgroundFxCore {
         for (rt in fx.rats) restore(base, out, width, height, scale, floatArrayOf(minOf(rt.x0, rt.x1) - 14f, minOf(rt.y0, rt.y1) - 10f, maxOf(rt.x0, rt.x1) + 14f, maxOf(rt.y0, rt.y1) + 10f))
         for (m in fx.moths) restore(base, out, width, height, scale, floatArrayOf(m.cx - m.r - 2f, m.cy - m.r - 2f, m.cx + m.r + 2f, m.cy + m.r + 2f))
         for (dr in fx.drips) restore(base, out, width, height, scale, floatArrayOf(dr.x - 7f, dr.y0 - 1f, dr.x + 7f, dr.y1 + 4f))
+        for (vn in fx.vanish) restore(base, out, width, height, scale, floatArrayOf(vn.x1, vn.y1, vn.x2, vn.y2))
         for (st in fx.steam) restore(base, out, width, height, scale, floatArrayOf(st.x1 - 8f, st.y - st.rise - 10f, st.x2 + 8f, st.y + 4f))
         for (sp in fx.spiders) restore(base, out, width, height, scale, floatArrayOf(sp.x - 5f, sp.y0, sp.x + 5f, sp.y1 + 5f))
+        if (isGone(t)) for (vn in fx.vanish) paintOver(base, out, width, scale, vn)
         for (l in fx.lights) {
             if (l.lampOnly && !lampOn) continue
             val k = intensity(l.wave, t, l.seed) * l.strength
@@ -420,6 +426,22 @@ object BackgroundFxCore {
             shade(out, width, height, scale, d.x, d.y1 + 1f, rad, rad * 0.35f, 150, 170, 190, a)
             if (rad > 2.2f) shade(out, width, height, scale, d.x, d.y1 + 1f, rad - 1.3f, (rad - 1.3f) * 0.35f, 70, 62, 55, a * 1.2f)
         }
+    }
+
+    /** Is the thing that vanishes in the lightning gone at [t]? It changes at the peak of a flash (the light hides the change); about every second flash it is the other way round. */
+    fun isGone(t: Float): Boolean {
+        val slot = floor(t / STORM_SLOT).toInt()
+        fun gone(n: Int) = hash01(n * 7 + 2) > 0.5f
+        return if (t >= flashAt(slot) + 0.25f) gone(slot) else gone(slot - 1)
+    }
+
+    /** Paints the rectangle with the picture beside it on the left (a flat wall): each row repeats the three pixels left of the rectangle. */
+    private fun paintOver(base: IntArray, out: IntArray, width: Int, scale: Int, v: FxVanish) {
+        val height = base.size / width
+        val x0 = (v.x1 * scale).toInt().coerceIn(3 * scale, width - 1); val x1 = (v.x2 * scale).toInt().coerceIn(0, width - 1)
+        val y0 = (v.y1 * scale).toInt().coerceIn(0, height - 1); val y1 = (v.y2 * scale).toInt().coerceIn(0, height - 1)
+        val span = 3 * scale
+        for (y in y0..y1) for (x in x0..x1) out[y * width + x] = base[y * width + x0 - span + (x - x0) % span]
     }
 
     /** Steam over a bath: puffs rise slowly, grow and fade out, and sway a little. */
