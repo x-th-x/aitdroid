@@ -612,6 +612,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
             o.toActor()?.also {
                 it.waterLimit = game.waterLimit.toFloat()
                 it.maskRoom = o.w.room
+                it.shadow = o === game.player && !intro && !emily // a soft shadow under Carnby (not in the original game)
                 // an object of another room is covered by the masks of that room, which are in the coordinates of that room
                 if (o.w.room != view.room) game.roomShift(o.w.room)?.let { d -> it.maskShiftX = d[0] / 10; it.maskShiftZ = -d[2] / 10 }
             }
