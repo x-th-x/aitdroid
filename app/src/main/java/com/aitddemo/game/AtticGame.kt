@@ -489,7 +489,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         if (Math.abs(a.renderX) <= BalconyRoom.DOOR_X && a.renderZ >= BalconyRoom.DOOR_Z) stepOutToBalcony(a.renderX)
     }
 
-    /** On the balcony: after a few seconds the creature of the window climbs up the outside of the house over the railing (a rise from below with its climbing animation, a flash of lightning shows it). */
+    /** On the balcony: after a few seconds the creature of the window leaps up from the garden over the railing and lands on the boards (its attack animation in the air, a flash of lightning shows it). */
     private fun checkBalconyCreature() {
         if (stage != 0 || room != BalconyRoom.NUMBER) return
         if (climbStart < 0) {
@@ -499,12 +499,17 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         }
         val g = objects.getOrNull(WINDOW_CREATURE) ?: return
         val a = g.actor ?: return
-        val p = ((time - climbStart) / CLIMB_TICKS.toFloat()).coerceIn(0f, 1f)
-        a.teleport(CLIMB_X, (CLIMB_DEPTH * (1f - p)).toInt(), CLIMB_Z, 0)
-        if (!stormSent && p >= 0.45f) { stormSent = true; ui.balconyStorm() }
-        if (!growlSent && p >= 0.8f) { growlSent = true; ui.playSample(CREATURE_SAMPLE) }
+        val p = ((time - climbStart) / JUMP_TICKS.toFloat()).coerceIn(0f, 1f)
+        // the leap: a parabola from below the edge of the balcony, over the railing (its top is 1 m high), down onto the boards
+        val x = JUMP_X0 + (JUMP_X1 - JUMP_X0) * p
+        val z = JUMP_Z0 + (JUMP_Z1 - JUMP_Z0) * p
+        val y = JUMP_Y0 * (1f - p) - JUMP_HEIGHT * 4f * p * (1f - p)
+        a.teleport(x.toInt(), y.toInt(), z.toInt(), 0)
+        if (!stormSent && p >= 0.35f) { stormSent = true; ui.balconyStorm() }
+        if (!growlSent && p >= 0.5f) { growlSent = true; ui.playSample(CREATURE_SAMPLE) }
         if (p >= 1f) {
-            // up: from now on the script of the creature (the chase and the bites) runs
+            // down: it lands with a thump, from now on the script of the creature (the chase and the bites) runs
+            ui.playSample(RAIL_SAMPLE)
             g.w.life = CHASE_LIFE
             g.w.lifeMode = 1
             g.w.trackMode = -1
@@ -518,17 +523,16 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         val w = g.w
         w.stage = 0
         w.room = BalconyRoom.NUMBER
-        w.x = CLIMB_X; w.y = CLIMB_DEPTH; w.z = CLIMB_Z; w.beta = 0
+        w.x = JUMP_X0; w.y = JUMP_Y0; w.z = JUMP_Z0; w.beta = 0
         w.life = -1
-        w.anim = CLIMB_ANIM; w.animType = 1; w.animInfo = -1
+        w.anim = JUMP_ANIM; w.animType = 1; w.animInfo = -1
         if (g.w.active) deactivate(g)
         activate(g)
-        g.actor?.let { it.teleport(CLIMB_X, CLIMB_DEPTH, CLIMB_Z, 0); it.hardcols = roomView.hardcols; it.collisionsOn = false }
+        g.actor?.let { it.teleport(JUMP_X0, JUMP_Y0, JUMP_Z0, 0); it.hardcols = roomView.hardcols; it.collisionsOn = false }
         vm.vars[BALCONY_VAR] = 1
         climbStart = time
         stormSent = false
         growlSent = false
-        ui.playSample(RAIL_SAMPLE)
     }
 
     /**
@@ -1536,12 +1540,15 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         const val RAIL_SAMPLE = 4 // the clank of the railing when the creature takes hold of it
         const val CREATURE_SAMPLE = 61 // its roar
         const val CHASE_LIFE = 20 // the script of the creature that chases the player
-        const val CLIMB_ANIM = 19 // the animation with which the creature of the trapdoor climbs up
+        const val JUMP_ANIM = 22 // the attack animation of the creature (the lunge), used in the air
         const val CLIMB_WAIT_TICKS = 240
-        const val CLIMB_TICKS = 260
-        const val CLIMB_DEPTH = 2800
-        const val CLIMB_X = -900
-        const val CLIMB_Z = 7800
+        const val JUMP_TICKS = 70
+        const val JUMP_X0 = -900 // where the leap starts (in the garden, below the balcony and beyond its railing) and where it lands
+        const val JUMP_Y0 = 1200
+        const val JUMP_Z0 = 9000
+        const val JUMP_X1 = -700
+        const val JUMP_Z1 = 6900
+        const val JUMP_HEIGHT = 2200
         const val SEARCH_ANIM = 2
         const val HAND_MODE_VAR = 90 // set by the found-life script of the hand item to the action chosen in the inventory
         const val SEARCH_MODE = 64 // Open/Search
