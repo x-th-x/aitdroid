@@ -49,6 +49,9 @@ object StartAssets {
 
     fun playPageTurn() = play(original?.pageTurn)
 
+    // the tracks that sound: held here, otherwise the garbage collector (it runs while the game moves) frees a track that is not referenced any more and cuts its sound
+    private val playing = HashSet<AudioTrack>()
+
     private fun play(s: VocSample?, volume: Float = 1f) {
         if (s == null) return
         try {
@@ -61,10 +64,14 @@ object StartAssets {
             track.write(s.pcm, 0, s.pcm.size)
             track.setNotificationMarkerPosition(s.pcm.size)
             track.setPlaybackPositionUpdateListener(object : AudioTrack.OnPlaybackPositionUpdateListener {
-                override fun onMarkerReached(t: AudioTrack) = t.release()
+                override fun onMarkerReached(t: AudioTrack) {
+                    synchronized(playing) { playing.remove(t) }
+                    t.release()
+                }
                 override fun onPeriodicNotification(t: AudioTrack) {}
             })
             if (volume != 1f) track.setVolume(volume)
+            synchronized(playing) { playing.add(track) }
             track.play()
         } catch (_: Exception) {
             // carry on without the sound
