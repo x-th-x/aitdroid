@@ -445,7 +445,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     val renderer = remember { AtticSceneRenderer() }
     val fxEpoch = remember { System.nanoTime() }
     // the sounds of the house (thunder after the flash, creaks, the patter of the rat) have a voice of their own, so they do not cut off the game's sounds
-    val ambient = remember(world) { IntroSounds({ if (it == -1) BackgroundFxCore.dripSample else if (it == -2) BackgroundFxCore.windSample else world.game.sample(it) }) }
+    val ambient = remember(world) { IntroSounds({ if (it == -1) BackgroundFxCore.dripSample else if (it == -2) BackgroundFxCore.windSample else if (it == -3) BackgroundFxCore.vanishSample else if (it == -4) BackgroundFxCore.appearSample else world.game.sample(it) }) }
     DisposableEffect(ambient) { onDispose { ambient.release() } }
     val fxScope = rememberCoroutineScope()
     val blackBackground = remember { android.graphics.Bitmap.createBitmap(AtticSceneRenderer.W, AtticSceneRenderer.H, android.graphics.Bitmap.Config.ARGB_8888).also { it.eraseColor(android.graphics.Color.BLACK) } }
@@ -514,6 +514,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
                         Ambient.THUNDER -> StartAssets.playThunder((0.35f + 0.5f * e.strength) * (if (attic) 1f else 0.55f))
                         Ambient.CREAK -> if (attic) ambient.play(4, 0.55f, volume = 0.18f + 0.2f * e.strength)
                         Ambient.DRIP -> if (attic || bathroom) ambient.play(-1, 1f, volume = 0.35f)
+                        Ambient.VANISH -> if (fxStage == 1 && game.roomView.pictureIds.contains(7)) ambient.play(if (e.strength > 0.5f) -3 else -4, 1f, volume = 0.6f)
                         Ambient.WIND -> ambient.play(-2, 1f, volume = if (attic) 0.5f else 0.22f)
                         Ambient.RAT -> if (attic) fxScope.launch {
                             // the patter of the feet, and the squeaks (samples 47 and 72 of LISTSAMP.PAK: no script of the game plays them, they are quiet and high)

@@ -39,7 +39,7 @@ class FxBat(val x1: Float, val y1: Float, val x2: Float, val y2: Float)
 class FxRat(val x0: Float, val y0: Float, val x1: Float, val y1: Float, val s0: Float, val s1: Float)
 
 /** What happens in the house now and then (sounds and the rocking horse); the places of the times are fixed by the clock, so the sound and the picture agree. */
-enum class Ambient { THUNDER, CREAK, RAT, HORSE, DRIP, WIND }
+enum class Ambient { THUNDER, CREAK, RAT, HORSE, DRIP, WIND, VANISH }
 
 /** Moths that circle a light ([lampOnly]: only while the oil lamp is there). */
 class FxMoth(val cx: Float, val cy: Float, val r: Float, val count: Int, val lampOnly: Boolean = false)
@@ -235,6 +235,10 @@ object BackgroundFxCore {
         scan(RAT_SLOT, { ratAt(it) }, Ambient.RAT) { 1f }
         scan(DRIP_SLOT, { it * DRIP_SLOT + 0.55f }, Ambient.DRIP) { 1f }
         scan(WIND_SLOT, { windAt(it) }, Ambient.WIND) { 1f }
+        for (slot in floor(from / STORM_SLOT).toInt() - 1..floor(to / STORM_SLOT).toInt()) {
+            val a = flashAt(slot) + VANISH_START
+            if (a > from && a <= to && vanishGone(slot) != vanishGone(slot - 1)) out.add(AmbientEvent(a, Ambient.VANISH, if (vanishGone(slot)) 1f else 0f))
+        }
         scan(HORSE_SLOT, { it * HORSE_SLOT + 20f + 30f * hash01(it * 23 + 2) }, Ambient.HORSE) { 1f }
         return out.sortedBy { it.t }
     }
@@ -280,10 +284,16 @@ object BackgroundFxCore {
         for (rt in fx.rats) restore(base, out, width, height, scale, floatArrayOf(minOf(rt.x0, rt.x1) - 14f, minOf(rt.y0, rt.y1) - 10f, maxOf(rt.x0, rt.x1) + 14f, maxOf(rt.y0, rt.y1) + 10f))
         for (m in fx.moths) restore(base, out, width, height, scale, floatArrayOf(m.cx - m.r - 2f, m.cy - m.r - 2f, m.cx + m.r + 2f, m.cy + m.r + 2f))
         for (dr in fx.drips) restore(base, out, width, height, scale, floatArrayOf(dr.x - 7f, dr.y0 - 1f, dr.x + 7f, dr.y1 + 4f))
-        for (vn in fx.vanish) restore(base, out, width, height, scale, floatArrayOf(vn.x1, vn.y1, vn.x2, vn.y2))
+        for (vn in fx.vanish) restore(base, out, width, height, scale, floatArrayOf(vn.x1 - 28f, vn.y1 - 48f, vn.x2 + 28f, vn.y2 + 4f))
         for (st in fx.steam) restore(base, out, width, height, scale, floatArrayOf(st.x1 - 8f, st.y - st.rise - 10f, st.x2 + 8f, st.y + 4f))
         for (sp in fx.spiders) restore(base, out, width, height, scale, floatArrayOf(sp.x - 5f, sp.y0, sp.x + 5f, sp.y1 + 5f))
-        if (isGone(t)) for (vn in fx.vanish) paintOver(base, out, width, scale, vn)
+        if (fx.vanish.isNotEmpty()) {
+            val vs = vanishState(t)
+            for (vn in fx.vanish) {
+                if (vs.visible < 1f) paintOver(base, out, width, scale, vn, vs.visible)
+                if (vs.progress >= 0f) vanishEffects(out, width, height, scale, vn, vs.progress, vs.appearing)
+            }
+        }
         for (l in fx.lights) {
             if (l.lampOnly && !lampOn) continue
             val k = intensity(l.wave, t, l.seed) * l.strength
@@ -428,20 +438,97 @@ object BackgroundFxCore {
         }
     }
 
-    /** Is the thing that vanishes in the lightning gone at [t]? It changes at the peak of a flash (the light hides the change); about every second flash it is the other way round. */
-    fun isGone(t: Float): Boolean {
+    private const val VANISH_START = 0.1f
+    private const val VANISH_SECONDS = 1.6f
+
+    private fun vanishGone(slot: Int) = hash01(slot * 7 + 2) > 0.5f
+
+    /**
+     * How much of the thing that vanishes in the lightning is there at [t] (1 = all, 0 = gone), and how far the change has gone ([progress] 0..1, -1 when none runs; [appearing] says
+     * which way). It changes after a flash of lightning (about every second flash it is the other way round) and takes [VANISH_SECONDS].
+     */
+    class VanishState(val visible: Float, val progress: Float, val appearing: Boolean)
+
+    fun vanishState(t: Float): VanishState {
         val slot = floor(t / STORM_SLOT).toInt()
-        fun gone(n: Int) = hash01(n * 7 + 2) > 0.5f
-        return if (t >= flashAt(slot) + 0.25f) gone(slot) else gone(slot - 1)
+        val prev = vanishGone(slot - 1)
+        val cur = vanishGone(slot)
+        val t0 = flashAt(slot) + VANISH_START
+        if (prev == cur) return VanishState(if (cur) 0f else 1f, -1f, false)
+        if (t < t0) return VanishState(if (prev) 0f else 1f, -1f, false)
+        if (t >= t0 + VANISH_SECONDS) return VanishState(if (cur) 0f else 1f, -1f, false)
+        val p = (t - t0) / VANISH_SECONDS
+        return VanishState(if (cur) 1f - p else p, p, !cur)
     }
 
-    /** Paints the rectangle with the picture beside it on the left (a flat wall): each row repeats the three pixels left of the rectangle. */
-    private fun paintOver(base: IntArray, out: IntArray, width: Int, scale: Int, v: FxVanish) {
+    /** The sounds of the change: a shimmer that falls in pitch when the thing goes and rises when it comes back. */
+    val vanishSample: VocSample by lazy { shimmer(false) }
+    val appearSample: VocSample by lazy { shimmer(true) }
+
+    private fun shimmer(rising: Boolean): VocSample {
+        val rate = 8000
+        val n = (rate * VANISH_SECONDS).toInt()
+        val pcm = ByteArray(n)
+        val rnd = java.util.Random(if (rising) 11 else 12)
+        var ph = 0.0
+        var ph2 = 0.0
+        for (i in 0 until n) {
+            val s = i / rate.toFloat()
+            val p = s / VANISH_SECONDS
+            val q = if (rising) p else 1f - p
+            val env = (sin(p * PI.toFloat())).let { it * it } * (if (rising) 0.5f + 0.5f * p else 1.2f - 0.5f * p)
+            ph += 2.0 * PI * (350.0 + 1700.0 * q * q) / rate
+            ph2 += 2.0 * PI * (520.0 + 2550.0 * q * q) / rate // a fifth above: a glassy chord
+            val trem = 0.65f + 0.35f * sin(s * 2f * PI.toFloat() * 14f)
+            val v = (0.55f * sin(ph) + 0.3f * sin(ph2)).toFloat() * trem + 0.12f * (rnd.nextFloat() * 2f - 1f) * (1f - p)
+            pcm[i] = (128 + 120f * env * v).toInt().coerceIn(0, 255).toByte()
+        }
+        return VocSample(rate, pcm)
+    }
+
+    /** Paints the rectangle with the picture beside it on the left (a flat wall) for the pixels that are no longer there: each row repeats the three pixels left of the rectangle. */
+    private fun paintOver(base: IntArray, out: IntArray, width: Int, scale: Int, v: FxVanish, visible: Float) {
         val height = base.size / width
         val x0 = (v.x1 * scale).toInt().coerceIn(3 * scale, width - 1); val x1 = (v.x2 * scale).toInt().coerceIn(0, width - 1)
         val y0 = (v.y1 * scale).toInt().coerceIn(0, height - 1); val y1 = (v.y2 * scale).toInt().coerceIn(0, height - 1)
         val span = 3 * scale
-        for (y in y0..y1) for (x in x0..x1) out[y * width + x] = base[y * width + x0 - span + (x - x0) % span]
+        for (y in y0..y1) for (x in x0..x1) {
+            // it dissolves pixel by pixel (blocks of a picture pixel), from the top, in a random order
+            val key = hash01((x / scale) * 131 + (y / scale) * 7919) * 0.8f + 0.2f * ((y - y0).toFloat() / (y1 - y0 + 1))
+            if (key >= visible) out[y * width + x] = base[y * width + x0 - span + (x - x0) % span]
+        }
+    }
+
+    /** The glow, the ring and the sparkles round the thing while it goes or comes back (p = 0..1 of the change). */
+    private fun vanishEffects(out: IntArray, width: Int, height: Int, scale: Int, v: FxVanish, p: Float, appearing: Boolean) {
+        val cx = (v.x1 + v.x2) / 2f
+        val cy = (v.y1 + v.y2) / 2f
+        val pulse = sin(p * PI.toFloat())
+        // a cold glow that swells and dies
+        val rg = 20f
+        val x0 = ((cx - rg) * scale).toInt().coerceIn(0, width - 1); val x1 = ((cx + rg) * scale).toInt().coerceIn(0, width - 1)
+        val y0 = ((cy - rg) * scale).toInt().coerceIn(0, height - 1); val y1 = ((cy + rg) * scale).toInt().coerceIn(0, height - 1)
+        val ring = if (appearing) (1f - p) * 26f else p * 26f // the ring flies out when it goes, in when it comes back
+        for (y in y0..y1) for (x in x0..x1) {
+            val dx = (x + 0.5f) / scale - cx
+            val dy = (y + 0.5f) / scale - cy
+            val d = sqrt(dx * dx + dy * dy)
+            var k = 0f
+            if (d < rg) k += (1f - d / rg).let { it * it } * pulse * 0.75f
+            val rd = abs(d - ring)
+            if (rd < 1.6f) k += (1f - rd / 1.6f) * (1f - p) * 0.9f
+            if (k > 0f) add(out, y * width + x, (110 * k).toInt(), (190 * k).toInt(), (255 * k).toInt())
+        }
+        // sparkles that rise from it (when it goes) or sink into it (when it comes back)
+        for (i in 0 until 16) {
+            val h1 = hash01(i * 3 + 601); val h2 = hash01(i * 5 + 603); val h3 = hash01(i * 7 + 607)
+            val q = if (appearing) 1f - p else p
+            val x = cx + (h1 - 0.5f) * 14f + 4f * sin(q * 6f + i)
+            val y = cy + (h2 - 0.5f) * 12f - q * (14f + 26f * h3)
+            val a = pulse * (0.5f + 0.5f * sin(p * 30f + i * 1.9f))
+            val px = (x * scale).toInt(); val py = (y * scale).toInt()
+            for (yy in py..py + 1) for (xx in px..px + 1) if (xx in 0 until width && yy in 0 until height) add(out, yy * width + xx, (190 * a).toInt(), (235 * a).toInt(), (255 * a).toInt())
+        }
     }
 
     /** Steam over a bath: puffs rise slowly, grow and fade out, and sway a little. */
