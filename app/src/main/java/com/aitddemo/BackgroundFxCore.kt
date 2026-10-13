@@ -4,6 +4,7 @@ import com.aitddemo.original.VocSample
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.floor
+import kotlin.math.max
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -53,6 +54,9 @@ class FxSteam(val x1: Float, val x2: Float, val y: Float, val rise: Float, val c
 /** A thing of the picture (the rectangle) that dissolves after some flashes of lightning and forms again somewhere else ((bedX, bedY) = bottom centre there, [bedScale] its size): its place is painted over with the wall beside it. */
 class FxVanish(val x1: Float, val y1: Float, val x2: Float, val y2: Float, val bedX: Float, val bedY: Float, val bedScale: Float)
 
+/** The opening of the door of the balcony in the picture of a camera (a quad in 320 x 200 pixels): while the door is open the night shows in it. */
+class FxDoorway(val xs: FloatArray, val ys: FloatArray)
+
 /** Rain that falls over the whole picture (a view into the open): [count] slanted streaks, near ones fast and bright, far ones slow and faint. */
 class FxStormRain(val count: Int)
 
@@ -62,7 +66,10 @@ class FxSpider(val x: Float, val y0: Float, val y1: Float)
 class AmbientEvent(val t: Float, val kind: Ambient, val strength: Float)
 
 /** The lights of one camera. */
-class FxSet(val lights: List<FxLight>, val dust: List<FxDust>, val rain: List<FxRain> = emptyList(), val bats: List<FxBat> = emptyList(), val rats: List<FxRat> = emptyList(), val moths: List<FxMoth> = emptyList(), val drips: List<FxDrip> = emptyList(), val spiders: List<FxSpider> = emptyList(), val steam: List<FxSteam> = emptyList(), val vanish: List<FxVanish> = emptyList(), val storm: FxStormRain? = null)
+class FxSet(val lights: List<FxLight>, val dust: List<FxDust>, val rain: List<FxRain> = emptyList(), val bats: List<FxBat> = emptyList(), val rats: List<FxRat> = emptyList(), val moths: List<FxMoth> = emptyList(), val drips: List<FxDrip> = emptyList(), val spiders: List<FxSpider> = emptyList(), val steam: List<FxSteam> = emptyList(), val vanish: List<FxVanish> = emptyList(), val storm: FxStormRain? = null) {
+    /** The doorway of the balcony in this picture (the attic only), set when the pictures of the room are prepared. */
+    var doorway: FxDoorway? = null
+}
 
 object BackgroundFxCore {
     /** The attic: stage 0, room 0, cameras 0 to 4 (places found by looking at the pictures). */
@@ -261,10 +268,17 @@ object BackgroundFxCore {
         val slot = floor(t / 20f).toInt()
         val at = 4f + 12f * hash01(slot * 31 + 5)
         val d = t - slot * 20f - at
-        if (d < 0f || d > 0.9f) return 0f
-        val a = (1f - d / 0.9f)
-        return a * (0.6f + 0.4f * sin(d * 40f)).coerceAtLeast(0.2f)
+        val natural = if (d < 0f || d > 0.9f) 0f else (1f - d / 0.9f) * (0.6f + 0.4f * sin(d * 40f)).coerceAtLeast(0.2f)
+        val df = t - forcedAt
+        val forced = if (df < 0f || df > 0.9f) 0f else (1f - df / 0.9f) * (0.6f + 0.4f * sin(df * 40f)).coerceAtLeast(0.2f)
+        return max(natural, forced)
     }
+
+    @Volatile
+    private var forcedAt = -1000f
+
+    /** A flash of lightning at [t] seconds, on top of the regular ones (the creature that climbs onto the balcony). */
+    fun forceFlash(t: Float) { forcedAt = t }
 
     private fun hash01(n: Int): Float {
         var x = n * 374761393 + 668265263
@@ -287,7 +301,7 @@ object BackgroundFxCore {
      * Writes into [out] (the picture scaled by [scale] from 320 x 200, [width] pixels wide) the picture [base] with the lights of [fx] at time [t] seconds: only the pixels
      * near a light or a speck are touched, the rest of [out] must already hold [base].
      */
-    fun render(base: IntArray, out: IntArray, width: Int, scale: Int, fx: FxSet, t: Float, lampOn: Boolean = true) {
+    fun render(base: IntArray, out: IntArray, width: Int, scale: Int, fx: FxSet, t: Float, lampOn: Boolean = true, doorOpen: Float = 0f) {
         val height = base.size / width
         // put the original pixels back where the last frame changed something
         for (l in fx.lights) restore(base, out, width, height, scale, boundsOf(l.shape))
@@ -297,6 +311,7 @@ object BackgroundFxCore {
         for (rt in fx.rats) restore(base, out, width, height, scale, floatArrayOf(minOf(rt.x0, rt.x1) - 14f, minOf(rt.y0, rt.y1) - 10f, maxOf(rt.x0, rt.x1) + 14f, maxOf(rt.y0, rt.y1) + 10f))
         for (m in fx.moths) restore(base, out, width, height, scale, floatArrayOf(m.cx - m.r - 2f, m.cy - m.r - 2f, m.cx + m.r + 2f, m.cy + m.r + 2f))
         for (dr in fx.drips) restore(base, out, width, height, scale, floatArrayOf(dr.x - 7f, dr.y0 - 1f, dr.x + 7f, dr.y1 + 4f))
+        fx.doorway?.let { d -> restore(base, out, width, height, scale, floatArrayOf(d.xs.min() - 1f, d.ys.min() - 1f, d.xs.max() + 1f, d.ys.max() + 1f)) }
         if (fx.storm != null) restore(base, out, width, height, scale, floatArrayOf(0f, 0f, 320f, 200f))
         for (vn in fx.vanish) {
             restore(base, out, width, height, scale, floatArrayOf(vn.x1 - 32f, vn.y1 - 52f, vn.x2 + 32f, vn.y2 + 24f))
@@ -329,6 +344,7 @@ object BackgroundFxCore {
         for (bt in fx.bats) bat(out, width, height, scale, bt, t)
         for (rt in fx.rats) rat(out, width, height, scale, rt, t)
         fx.storm?.let { stormRain(out, width, height, scale, it.count, t) }
+        fx.doorway?.let { if (doorOpen > 0f) doorway(out, width, height, scale, it, t) }
         for (m in fx.moths) if (!m.lampOnly || lampOn) moths(out, width, height, scale, m, t)
         for (dr in fx.drips) drip(out, width, height, scale, dr, t)
         for (sp in fx.spiders) spider(out, width, height, scale, sp, t)
@@ -582,6 +598,46 @@ object BackgroundFxCore {
             val px = (x * scale).toInt(); val py = (y * scale).toInt()
             for (yy in py..py + 1) for (xx in px..px + 1) if (xx in 0 until width && yy in 0 until height) add(out, yy * width + xx, (190 * a).toInt(), (235 * a).toInt(), (255 * a).toInt())
         }
+    }
+
+    /** The night in the doorway of the balcony: the storm sky above, the boards of the balcony below, rain, lightning (the door leaves are drawn over it by the renderer). */
+    private fun doorway(out: IntArray, width: Int, height: Int, scale: Int, d: FxDoorway, t: Float) {
+        val x0 = (d.xs.min() * scale).toInt().coerceIn(0, width - 1); val x1 = (d.xs.max() * scale).toInt().coerceIn(0, width - 1)
+        val y0 = (d.ys.min() * scale).toInt().coerceIn(0, height - 1); val y1 = (d.ys.max() * scale).toInt().coerceIn(0, height - 1)
+        val flash = storm(t)
+        val top = d.ys.min(); val bottom = d.ys.max()
+        for (y in y0..y1) for (x in x0..x1) {
+            val px = (x + 0.5f) / scale; val py = (y + 0.5f) / scale
+            if (!insideQuad(d, px, py)) continue
+            val f = ((py - top) / (bottom - top)).coerceIn(0f, 1f)
+            val cloud = noise(px / 9f + t * 0.7f + py * 0.4f, 5)
+            var r: Float; var g: Float; var b: Float
+            if (f < 0.66f) { // the sky: dark, with clouds that drift
+                r = 12f + 16f * f + 10f * cloud; g = 16f + 20f * f + 12f * cloud; b = 28f + 26f * f + 16f * cloud
+            } else { // the boards, wet
+                val board = ((py - top) / (bottom - top) - 0.66f) * 22f
+                val joint = if (board - floor(board) < 0.08f) 0.5f else 1f
+                val shine = 0.5f + 0.5f * noise(px / 6f + py * 1.7f, 9)
+                r = (34f + 10f * shine) * joint; g = (25f + 8f * shine) * joint; b = (19f + 10f * shine) * joint
+            }
+            // the rain: thin pale streaks
+            val streak = hash01((px * 1.7f).toInt() * 31 + ((py + t * 90f) / 6f).toInt() * 7)
+            if (streak > 0.93f) { r += 40f; g += 50f; b += 64f }
+            r += 60f * flash; g += 78f * flash; b += 110f * flash
+            val i = y * width + x
+            val p = out[i]
+            out[i] = (p and 0xFF000000.toInt()) or (r.toInt().coerceIn(0, 255) shl 16) or (g.toInt().coerceIn(0, 255) shl 8) or b.toInt().coerceIn(0, 255)
+        }
+    }
+
+    private fun insideQuad(d: FxDoorway, x: Float, y: Float): Boolean {
+        var pos = false; var neg = false
+        for (i in 0 until 4) {
+            val j = (i + 1) % 4
+            val cr = (d.xs[j] - d.xs[i]) * (y - d.ys[i]) - (d.ys[j] - d.ys[i]) * (x - d.xs[i])
+            if (cr > 0f) pos = true else if (cr < 0f) neg = true
+        }
+        return !(pos && neg)
     }
 
     private fun stormRain(out: IntArray, width: Int, height: Int, scale: Int, count: Int, t: Float) {

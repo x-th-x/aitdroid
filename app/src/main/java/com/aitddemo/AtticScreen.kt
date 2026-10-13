@@ -164,6 +164,13 @@ private class AtticUi(private val world: AtticOriginal, private val sounds: Intr
         windowViewShown = true
     }
 
+    /** What happens on the screen when the creature climbs onto the balcony: a flash of lightning and the thunder after it. */
+    var onStorm: (() -> Unit)? = null
+
+    override fun balconyStorm() {
+        onStorm?.invoke()
+    }
+
     override fun picture(index: Int, ticks: Int, sample: Int) {
         val argb = world.game.picture(index) ?: return
         picture = StartAssets.picture(argb)
@@ -456,6 +463,10 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     val ambient = remember(world) { IntroSounds({ if (it == -1) BackgroundFxCore.dripSample else if (it == -2) BackgroundFxCore.windSample else if (it == -3) BackgroundFxCore.vanishSample else if (it == -4) BackgroundFxCore.appearSample else world.game.sample(it) }) }
     DisposableEffect(ambient) { onDispose { ambient.release() } }
     val fxScope = rememberCoroutineScope()
+    ui.onStorm = {
+        BackgroundFxCore.forceFlash((System.nanoTime() - fxEpoch) / 1_000_000_000f)
+        fxScope.launch { delay(800); StartAssets.playThunder(1f) }
+    }
     val blackBackground = remember { android.graphics.Bitmap.createBitmap(AtticSceneRenderer.W, AtticSceneRenderer.H, android.graphics.Bitmap.Config.ARGB_8888).also { it.eraseColor(android.graphics.Color.BLACK) } }
 
     // Toggle: hide the camera photo and show only the 3D actors on black.
@@ -585,7 +596,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     val camera = view.cameras.getOrNull(cameraIndex) ?: view.cameras[0]
     val backgrounds = roomCache.getOrPut(view) { scaledPhotos(view) }
     // moving light on the pictures (an addition, not in the original): moonlight at the windows, candle flames, dust in the moonlight
-    val fxLayer = remember(backgrounds) { BackgroundFx(view.stage, view.room, backgrounds, view.pictureIds) }
+    val fxLayer = remember(backgrounds) { BackgroundFx(view.stage, view.room, backgrounds, view.pictureIds, view.cameras) }
     val fxMs = (System.nanoTime() - fxEpoch) / 1_000_000L
     renderer.flash = if (!intro && (view.stage == 0 || (view.stage == 1 && fxLayer.hasWindow(cameraIndex)))) BackgroundFxCore.flash(fxMs / 1000f) else 0f
     // the intro walks through rooms of four floors: they are read and their pictures scaled in the background while the car drives
@@ -619,7 +630,8 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     val roomImage = run {
         frameTick // the poses change every frame
         val actors = game.objects.filter { it.w.room == view.room || camera.viewedRooms.isEmpty() || it.w.room in camera.viewedRooms }.mapNotNull { o ->
-            o.toActor()?.also {
+            // the window of the attic is a glass door on this branch (the model is made by code)
+            (if (o.w.index == AtticGame.WINDOW_OBJECT && view.stage == 0 && view.room == 0 && !intro) DoorModel.actor(game.doorOpenFraction()) else o.toActor())?.also {
                 it.waterLimit = game.waterLimit.toFloat()
                 it.maskRoom = o.w.room
                 it.shadow = o === game.player && !intro && !emily // a soft shadow under Carnby (not in the original game)
@@ -628,7 +640,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
             }
         } + game.effects.map { e -> effectActor(e, game.time, world.game.palette, world.game).also { it.sortBox = e.sortBox() } }
         val dark = game.lightOff
-        renderer.render(camera, if (showBackground && !dark) fxLayer.frame(camera.index, fxMs, game.objects.getOrNull(13)?.w?.active == true) else blackBackground, actors, if (dark) emptyMap() else view.maskViews.getOrNull(camera.index) ?: emptyMap(), view.room)
+        renderer.render(camera, if (showBackground && !dark) fxLayer.frame(camera.index, fxMs, game.objects.getOrNull(13)?.w?.active == true, game.doorOpenFraction()) else blackBackground, actors, if (dark) emptyMap() else view.maskViews.getOrNull(camera.index) ?: emptyMap(), view.room)
         renderer.bitmap.asImageBitmap()
     }
 

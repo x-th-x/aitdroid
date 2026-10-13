@@ -22,6 +22,9 @@ interface GameUi {
     /** The ending of the game. */
     fun endSequence() {}
 
+    /** A flash of lightning that comes at once, and the thunder after it (the creature that climbs onto the balcony; not in the original game). */
+    fun balconyStorm() {}
+
     /** The player examined the window of the attic with "Open/Search": the view out of it (not in the original game). */
     fun windowView() {}
 
@@ -180,6 +183,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     init {
         vm.trace = null
+        // the creature of the window does not break through the window any more: the glass door is there, and the creature climbs onto the balcony when the player has stepped out
+        if (!intro) vm.objects.getOrNull(WINDOW_CREATURE)?.life = -1
         val seen = viewList()
         for (o in vm.objects) if (wanted(o, seen, stage, room)) activate(objects[o.index])
     }
@@ -408,8 +413,10 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             if (pendingFound >= 0 || pendingRead != null || exited || gameOver) break
         }
 
-        checkWindowSearch()
+        checkDoorSearch()
+        checkDoorway()
         checkBalconyExit()
+        checkBalconyCreature()
 
         // the floor loader of the original stops all samples when a script has taken the scene to another floor (after the scripts of the frame ran, so a sample that the
         // scripts started in that frame is cut at once; the sample that waits behind it, SAMPLE_THEN, survives and starts)
@@ -421,18 +428,18 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     private var stopSamplesAtEnd = false
 
-    /** The player climbs out of the window of the attic onto the balcony (a room that is not in the original game). */
-    fun stepOutToBalcony() {
+    /** The player goes through the door of the attic onto the balcony (a room that is not in the original game). */
+    fun stepOutToBalcony(x: Int = 0) {
         if (stage != 0 || room != 0 || intro) return
         changeRoom(0, BalconyRoom.NUMBER, null)
-        player?.actor?.teleport(0, 0, BalconyRoom.OUT_Z, 512)
+        player?.actor?.teleport(x.coerceIn(-500, 500), 0, BalconyRoom.OUT_Z, 512)
+        balconyArrival = time
     }
 
     /** The player comes back through the window into the attic. */
     private fun stepBackIn() {
         changeRoom(0, 0, null)
         player?.actor?.teleport(0, 0, BalconyRoom.IN_Z, 0)
-        windowViewAfter = time + 300
     }
 
     /** On the balcony: the player who walks into the opening of the window goes back into the attic. */
@@ -443,21 +450,85 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     }
 
     private var lastPlayerAnim = -1
-    private var windowViewAfter = 0
 
     /**
-     * "Open/Search" at the window of the attic (not in the original game): when the search animation of the player (animation 2, started by the action key in the Open/Search mode
-     * of the inventory) has ended while he stands in front of the window, he looks out of it.
+     * "Open/Search" at the glass door of the attic (not in the original game, which has a window there): when the search animation of the player (animation 2, started by the
+     * action key in the Open/Search mode of the inventory) has ended while he stands in front of the door and looks at it, the door opens.
      */
-    private fun checkWindowSearch() {
+    private fun checkDoorSearch() {
         val a = player?.actor
         val now = a?.currentAnim ?: -1
         val ended = lastPlayerAnim == SEARCH_ANIM && now != SEARCH_ANIM
         lastPlayerAnim = now
         if (a == null || !ended || stage != 0 || roomView.room != 0 || vm.vars[HAND_MODE_VAR].toInt() != SEARCH_MODE) return // only in the Open/Search mode chosen in the inventory
-        val facing = Math.abs((a.beta and 0x3FF) - 512) // the window is in the wall at the far end (+z); 512 = looking that way
-        if (time < windowViewAfter) return // a finger that stays on the action key repeats the search: not again at once
-        if (Math.abs(a.renderX) <= 1100 && a.renderZ >= 3700 && facing <= 230) { windowViewAfter = time + 300; ui.windowView() }
+        val facing = Math.abs((a.beta and 0x3FF) - 512) // the door is in the wall at the far end (+z); 512 = looking that way
+        if (vm.vars[DOOR_VAR].toInt() == 1) return
+        if (Math.abs(a.renderX) <= 1100 && a.renderZ >= 3700 && facing <= 230) {
+            vm.vars[DOOR_VAR] = 1
+            doorOpenTime = time
+            ui.playSample(DOOR_SAMPLE)
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------------------------ the balcony (not in the original game)
+
+    private var doorOpenTime = -1
+    private var balconyArrival = -1
+    private var climbStart = -1
+    private var stormSent = false
+    private var growlSent = false
+
+    /** How far the door of the balcony is open: 0 closed .. 1 wide open (it opens over [DOOR_OPEN_TICKS]; a game that is loaded with an open door has it open at once). */
+    fun doorOpenFraction(): Float =
+        if (vm.vars[DOOR_VAR].toInt() != 1) 0f else if (doorOpenTime < 0) 1f else ((time - doorOpenTime) / DOOR_OPEN_TICKS.toFloat()).coerceIn(0f, 1f)
+
+    /** The player who walks through the open door goes out onto the balcony. */
+    private fun checkDoorway() {
+        if (stage != 0 || room != 0 || intro || doorOpenFraction() < 0.95f) return
+        val a = player?.actor ?: return
+        if (Math.abs(a.renderX) <= BalconyRoom.DOOR_X && a.renderZ >= BalconyRoom.DOOR_Z) stepOutToBalcony(a.renderX)
+    }
+
+    /** On the balcony: after a few seconds the creature of the window climbs up the outside of the house over the railing (a rise from below with its climbing animation, a flash of lightning shows it). */
+    private fun checkBalconyCreature() {
+        if (stage != 0 || room != BalconyRoom.NUMBER) return
+        if (climbStart < 0) {
+            if (vm.vars[BALCONY_VAR].toInt() != 0 || balconyArrival < 0 || time - balconyArrival < CLIMB_WAIT_TICKS) return
+            startClimb()
+            return
+        }
+        val g = objects.getOrNull(WINDOW_CREATURE) ?: return
+        val a = g.actor ?: return
+        val p = ((time - climbStart) / CLIMB_TICKS.toFloat()).coerceIn(0f, 1f)
+        a.teleport(CLIMB_X, (CLIMB_DEPTH * (1f - p)).toInt(), CLIMB_Z, 0)
+        if (!stormSent && p >= 0.45f) { stormSent = true; ui.balconyStorm() }
+        if (!growlSent && p >= 0.8f) { growlSent = true; ui.playSample(CREATURE_SAMPLE) }
+        if (p >= 1f) {
+            // up: from now on the script of the creature (the chase and the bites) runs
+            g.w.life = CHASE_LIFE
+            g.w.lifeMode = 1
+            g.w.trackMode = -1
+            a.collisionsOn = true
+            climbStart = -1
+        }
+    }
+
+    private fun startClimb() {
+        val g = objects.getOrNull(WINDOW_CREATURE) ?: return
+        val w = g.w
+        w.stage = 0
+        w.room = BalconyRoom.NUMBER
+        w.x = CLIMB_X; w.y = CLIMB_DEPTH; w.z = CLIMB_Z; w.beta = 0
+        w.life = -1
+        w.anim = CLIMB_ANIM; w.animType = 1; w.animInfo = -1
+        if (g.w.active) deactivate(g)
+        activate(g)
+        g.actor?.let { it.teleport(CLIMB_X, CLIMB_DEPTH, CLIMB_Z, 0); it.hardcols = roomView.hardcols; it.collisionsOn = false }
+        vm.vars[BALCONY_VAR] = 1
+        climbStart = time
+        stormSent = false
+        growlSent = false
+        ui.playSample(RAIL_SAMPLE)
     }
 
     /**
@@ -1456,6 +1527,21 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         const val CVAR_SAMPLE_CHOC = 9
         const val CVAR_REVERSE_OBJECT = 11
         const val CVAR_BODY_FLAMME = 1
+        const val WINDOW_OBJECT = 7 // the window of the attic (the glass door on this branch)
+        const val WINDOW_CREATURE = 21 // the second creature of the attic, which comes through the window in the original
+        const val DOOR_VAR = 500 // 1 = the door of the balcony is open
+        const val BALCONY_VAR = 501 // 1 = the creature has climbed onto the balcony
+        const val DOOR_OPEN_TICKS = 100
+        const val DOOR_SAMPLE = 14 // the creak of a door
+        const val RAIL_SAMPLE = 4 // the clank of the railing when the creature takes hold of it
+        const val CREATURE_SAMPLE = 61 // its roar
+        const val CHASE_LIFE = 20 // the script of the creature that chases the player
+        const val CLIMB_ANIM = 19 // the animation with which the creature of the trapdoor climbs up
+        const val CLIMB_WAIT_TICKS = 240
+        const val CLIMB_TICKS = 260
+        const val CLIMB_DEPTH = 2800
+        const val CLIMB_X = -900
+        const val CLIMB_Z = 7800
         const val SEARCH_ANIM = 2
         const val HAND_MODE_VAR = 90 // set by the found-life script of the hand item to the action chosen in the inventory
         const val SEARCH_MODE = 64 // Open/Search

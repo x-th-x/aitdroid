@@ -11,8 +11,12 @@ object BalconyRoom {
     const val NUMBER = 1
 
     /** Where the player stands when he steps out (in front of the window, facing out) and when he comes back in (inside, facing away from the window). */
-    const val OUT_Z = 5900
+    const val OUT_Z = 5650
     const val IN_Z = 4650
+
+    /** The opening of the door in the wall of the attic: whoever walks into it with the door open (x within [DOOR_X], z from [DOOR_Z] on) is out on the balcony. */
+    const val DOOR_X = 650
+    const val DOOR_Z = 4600
 
     /** The wall of the house has the opening of the window: the player walks into it (x within [EXIT_X], z below [EXIT_Z]) to go back in. */
     const val EXIT_X = 700
@@ -27,9 +31,16 @@ object BalconyRoom {
             box(-2800, -760, 5000, 5400), // the wall of the house beside the window
             box(760, 2800, 5000, 5400),
         )
+        // what climbs up the outside of the railing (beyond z = 7450) is hidden by the floor and the railing: the mask puts the painted floor and railing back over it
+        val proj = AtticProjector(BalconyView.camera)
+        val o = FloatArray(3)
+        fun at(x: Float, y: Float, z: Float): IntArray { proj.project(x, y, z, o); return intArrayOf(o[0].toInt(), o[1].toInt()) }
+        val tl = at(-1850f, -1000f, 7540f)
+        val tr = at(1850f, -1000f, 7540f)
+        val mask = AtticData.Mask(intArrayOf(-300, 744, 300, 900), listOf(intArrayOf(tl[0] - 6, tl[1], tr[0] + 6, tr[1], 320, 200, 0, 200)))
         return RoomView(
             0, NUMBER, 0, 0, 0, hard, emptyList(),
-            listOf(BalconyView.camera), listOf(emptyList()), listOf(emptyMap()),
+            listOf(BalconyView.camera), listOf(listOf(mask)), listOf(mapOf(NUMBER to listOf(mask))),
             listOf(BalconyView.paint(palette)),
             listOf(0),
         )
