@@ -45,11 +45,11 @@ object StartAssets {
     /** A 320 x 200 ARGB picture of [StartOriginal] as an image (made once). */
     fun picture(argb: IntArray): ImageBitmap = bitmaps.getOrPut(argb) { Bitmap.createBitmap(argb, 320, 200, Bitmap.Config.ARGB_8888).asImageBitmap() }
 
-    fun playThunder() = play(original?.thunder)
+    fun playThunder(volume: Float = 1f) = play(original?.thunder, volume)
 
     fun playPageTurn() = play(original?.pageTurn)
 
-    private fun play(s: VocSample?) {
+    private fun play(s: VocSample?, volume: Float = 1f) {
         if (s == null) return
         try {
             val track = AudioTrack.Builder()
@@ -64,6 +64,7 @@ object StartAssets {
                 override fun onMarkerReached(t: AudioTrack) = t.release()
                 override fun onPeriodicNotification(t: AudioTrack) {}
             })
+            if (volume != 1f) track.setVolume(volume)
             track.play()
         } catch (_: Exception) {
             // carry on without the sound

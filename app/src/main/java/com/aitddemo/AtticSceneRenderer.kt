@@ -124,6 +124,18 @@ class AtticSceneRenderer {
     private val maskPaths = HashMap<AtticData.Mask, Path>()
     private val p0 = FloatArray(3)
 
+    /** The flash of lightning that lights the figures now (0 = none): their colours get a cool bright addition. Not in the original game. */
+    var flash = 0f
+
+    private fun lit(c: Int): Int {
+        if (flash <= 0.02f) return c
+        val a = c ushr 24
+        val rr = minOf(255, ((c shr 16) and 0xFF) + (28 * flash).toInt())
+        val gg = minOf(255, ((c shr 8) and 0xFF) + (40 * flash).toInt())
+        val bb = minOf(255, (c and 0xFF) + (70 * flash).toInt())
+        return (a shl 24) or (rr shl 16) or (gg shl 8) or bb
+    }
+
     /** One thing to draw: a triangle (kind 0), a line (kind 1, from a to b) or a filled circle (kind 2, centre a, radius in [bx]); sorted by depth with the others. */
     private class Tri(val depth: Float, val ax: Float, val ay: Float, val bx: Float, val by: Float, val cx: Float, val cy: Float, val color: Int, val kind: Int = 0, val pts: FloatArray? = null)
 
@@ -278,7 +290,7 @@ class AtticSceneRenderer {
         tris.sortByDescending { it.depth }
         for (tri in tris) {
             // transparent material (alpha code 0xFA, window glass): half covering
-            paint.color = if (tri.color ushr 24 == 0xFA) (tri.color and 0xFFFFFF) or (0x80 shl 24) else tri.color
+            paint.color = if (tri.color ushr 24 == 0xFA) (lit(tri.color) and 0xFFFFFF) or (0x80 shl 24) else lit(tri.color)
             when (tri.kind) {
                 0 -> {
                     paint.shader = if (tri.color ushr 24 == 0xFE) ditherShader(tri.color or (0xFF shl 24)) else null

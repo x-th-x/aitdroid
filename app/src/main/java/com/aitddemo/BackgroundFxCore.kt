@@ -20,7 +20,7 @@ sealed class FxShape {
 }
 
 /** How the strength of a light changes with the time. */
-enum class FxWave { MOON, CANDLE, STORM }
+enum class FxWave { MOON, CANDLE, STORM, CLOUD }
 
 /** A light of one colour (r, g, b added at full strength) on a [shape]; [strength] 1 = the colour is added fully. */
 class FxLight(val shape: FxShape, val r: Int, val g: Int, val b: Int, val strength: Float, val wave: FxWave, val seed: Int = 0, val lampOnly: Boolean = false)
@@ -31,8 +31,19 @@ class FxRain(val x1: Float, val y1: Float, val x2: Float, val y2: Float, val cou
 /** Dust that floats in a rectangle: [count] specks of a pale colour. */
 class FxDust(val x1: Float, val y1: Float, val x2: Float, val y2: Float, val count: Int, val strength: Float)
 
+/** A bat that flies across a window pane in the light of a flash of lightning (now and then). */
+class FxBat(val x1: Float, val y1: Float, val x2: Float, val y2: Float)
+
+/** A rat that runs from (x0, y0) to (x1, y1) on the floor; [s0] and [s1] are its size at the start and at the end (1 = 8 pixels long). */
+class FxRat(val x0: Float, val y0: Float, val x1: Float, val y1: Float, val s0: Float, val s1: Float)
+
+/** What happens in the house now and then (sounds and the rocking horse); the places of the times are fixed by the clock, so the sound and the picture agree. */
+enum class Ambient { THUNDER, CREAK, RAT, HORSE }
+
+class AmbientEvent(val t: Float, val kind: Ambient, val strength: Float)
+
 /** The lights of one camera. */
-class FxSet(val lights: List<FxLight>, val dust: List<FxDust>, val rain: List<FxRain> = emptyList())
+class FxSet(val lights: List<FxLight>, val dust: List<FxDust>, val rain: List<FxRain> = emptyList(), val bats: List<FxBat> = emptyList(), val rats: List<FxRat> = emptyList())
 
 object BackgroundFxCore {
     /** The attic: stage 0, room 0, cameras 0 to 4 (places found by looking at the pictures). */
@@ -46,14 +57,18 @@ object BackgroundFxCore {
             ),
             listOf(FxDust(110f, 52f, 200f, 120f, 8, 0.5f)),
             listOf(FxRain(145f, 30f, 168f, 50f, 4, 1f)),
+            listOf(FxBat(145f, 30f, 168f, 50f)),
+            listOf(FxRat(290f, 78f, 215f, 74f, 0.9f, 0.8f)),
         )
         1 -> FxSet(
             listOf(
                 FxLight(FxShape.Rect(97f, 83f, 112f, 97f), 70, 95, 140, 0.9f, FxWave.MOON),
-                FxLight(FxShape.Quad(floatArrayOf(128f, 152f, 100f, 55f), floatArrayOf(136f, 136f, 200f, 200f)), 40, 52, 80, 0.5f, FxWave.MOON),
+                FxLight(FxShape.Quad(floatArrayOf(128f, 152f, 100f, 55f), floatArrayOf(136f, 136f, 200f, 200f)), 40, 52, 80, 0.9f, FxWave.CLOUD),
             ),
             listOf(FxDust(78f, 118f, 150f, 190f, 14, 0.8f)),
             listOf(FxRain(97f, 83f, 112f, 97f, 3, 1f)),
+            listOf(FxBat(97f, 83f, 112f, 97f)),
+            listOf(FxRat(30f, 116f, 130f, 113f, 0.8f, 0.9f)),
         )
         2 -> FxSet(
             listOf(
@@ -62,7 +77,11 @@ object BackgroundFxCore {
             ),
             listOf(FxDust(130f, 40f, 215f, 130f, 8, 0.5f)),
             listOf(FxRain(143f, 5f, 156f, 32f, 3, 1f)),
+            listOf(FxBat(143f, 5f, 156f, 32f)),
+            listOf(FxRat(270f, 112f, 185f, 86f, 1.4f, 1.1f)),
         )
+        3 -> FxSet(emptyList(), emptyList(), emptyList(), emptyList(), listOf(FxRat(260f, 112f, 150f, 96f, 1.6f, 1.3f)))
+        4 -> FxSet(emptyList(), emptyList(), emptyList(), emptyList(), listOf(FxRat(318f, 122f, 200f, 100f, 2.0f, 1.5f)))
         else -> null
     }
 
@@ -71,6 +90,35 @@ object BackgroundFxCore {
         FxWave.MOON -> 0.30f + 0.12f * sin(t * 2f * PI.toFloat() / 7f) + 0.10f * sin(t * 2f * PI.toFloat() / 2.3f) + storm(t) * 1.0f
         FxWave.CANDLE -> (0.55f + 0.25f * noise(t * 9f, seed) + 0.15f * noise(t * 23f, seed + 7)).coerceIn(0f, 1f)
         FxWave.STORM -> storm(t)
+        FxWave.CLOUD -> (0.22f + 0.2f * sin(t * 2f * PI.toFloat() / 31f) + 0.14f * sin(t * 2f * PI.toFloat() / 11.3f)).coerceAtLeast(0.03f) + storm(t)
+    }
+
+    /** The strength of the flash of lightning now (0 when there is none); the figures in the room are lit by it too. */
+    fun flash(t: Float): Float = storm(t)
+
+    private const val STORM_SLOT = 20f
+    private const val CREAK_SLOT = 37f
+    private const val RAT_SLOT = 45f
+    private const val HORSE_SLOT = 61f
+    private const val RAT_SECONDS = 3.2f
+
+    private fun flashAt(slot: Int) = slot * STORM_SLOT + 4f + 12f * hash01(slot * 31 + 5)
+    private fun ratAt(slot: Int) = slot * RAT_SLOT + 12f + 20f * hash01(slot * 19 + 1)
+
+    /** The events between [from] (not included) and [to] (included) seconds: the thunder that follows each flash after a while, a creak of the house, a rat, the horse. */
+    fun events(from: Float, to: Float): List<AmbientEvent> {
+        val out = ArrayList<AmbientEvent>()
+        fun scan(slotLen: Float, at: (Int) -> Float, kind: Ambient, strength: (Int) -> Float) {
+            for (slot in floor(from / slotLen).toInt() - 1..floor(to / slotLen).toInt()) {
+                val a = at(slot)
+                if (a > from && a <= to) out.add(AmbientEvent(a, kind, strength(slot)))
+            }
+        }
+        scan(STORM_SLOT, { flashAt(it) + 1.2f + 2.8f * hash01(it * 17 + 3) }, Ambient.THUNDER) { 0.5f + 0.5f * hash01(it * 5 + 9) }
+        scan(CREAK_SLOT, { it * CREAK_SLOT + 5f + 25f * hash01(it * 13 + 9) }, Ambient.CREAK) { 0.6f + 0.4f * hash01(it * 3 + 1) }
+        scan(RAT_SLOT, { ratAt(it) }, Ambient.RAT) { 1f }
+        scan(HORSE_SLOT, { it * HORSE_SLOT + 20f + 30f * hash01(it * 23 + 2) }, Ambient.HORSE) { 1f }
+        return out.sortedBy { it.t }
     }
 
     /** Lightning: in every slot of 20 seconds one flash (two peaks) at a place of the slot that comes from the slot number. */
@@ -110,6 +158,8 @@ object BackgroundFxCore {
         for (l in fx.lights) restore(base, out, width, height, scale, boundsOf(l.shape))
         for (d in fx.dust) restore(base, out, width, height, scale, floatArrayOf(d.x1 - 3f, d.y1 - 3f, d.x2 + 3f, d.y2 + 3f))
         for (r in fx.rain) restore(base, out, width, height, scale, floatArrayOf(r.x1, r.y1, r.x2 + 1f, r.y2 + 1f))
+        for (bt in fx.bats) restore(base, out, width, height, scale, floatArrayOf(bt.x1 - 6f, bt.y1 - 6f, bt.x2 + 6f, bt.y2 + 6f))
+        for (rt in fx.rats) restore(base, out, width, height, scale, floatArrayOf(minOf(rt.x0, rt.x1) - 14f, minOf(rt.y0, rt.y1) - 10f, maxOf(rt.x0, rt.x1) + 14f, maxOf(rt.y0, rt.y1) + 10f))
         for (l in fx.lights) {
             if (l.lampOnly && !lampOn) continue
             val k = intensity(l.wave, t, l.seed) * l.strength
@@ -123,6 +173,8 @@ object BackgroundFxCore {
             }
         }
         for (r in fx.rain) rain(out, width, height, scale, r, t)
+        for (bt in fx.bats) bat(out, width, height, scale, bt, t)
+        for (rt in fx.rats) rat(out, width, height, scale, rt, t)
         for ((n, d) in fx.dust.withIndex()) {
             for (i in 0 until d.count) {
                 val h1 = hash01(i * 17 + n * 1000 + 3); val h2 = hash01(i * 29 + n * 1000 + 11); val h3 = hash01(i * 43 + n * 1000 + 19)
@@ -164,6 +216,69 @@ object BackgroundFxCore {
                     if (xx in 0 until width && y2 in 0 until height) add(out, y2 * width + xx, v, (v * 1.15f).toInt(), (v * 1.4f).toInt())
                 }
             }
+        }
+    }
+
+    /** A bat in front of a window during a flash of lightning (every second flash or so): a dark body with two wings that beat. */
+    private fun bat(out: IntArray, width: Int, height: Int, scale: Int, b: FxBat, t: Float) {
+        val slot = floor(t / STORM_SLOT).toInt()
+        if (hash01(slot * 53 + 17) > 0.55f) return
+        val d = t - flashAt(slot)
+        if (d < 0f || d > 0.9f) return
+        val w = b.x2 - b.x1
+        val x = b.x1 - 2f + (d / 0.9f) * (w + 4f)
+        val y = (b.y1 + b.y2) / 2f + 3f * sin(d * 11f)
+        val up = sin(d * 38f) > 0f
+        shade(out, width, height, scale, x, y, 0.9f, 0.7f, 6, 6, 12, 0.95f) // the body
+        for (k in 1..3) { // the wings, the tips go up and down
+            val dy = if (up) -k * 0.6f else k * 0.5f
+            shade(out, width, height, scale, x - k, y + dy, 0.8f, 0.5f, 6, 6, 12, 0.9f)
+            shade(out, width, height, scale, x + k, y + dy, 0.8f, 0.5f, 6, 6, 12, 0.9f)
+        }
+    }
+
+    /** A rat that runs along the floor now and then, as a dark shape in the picture (a body, a head with an ear, a tail that wiggles, feet that patter). */
+    private fun rat(out: IntArray, width: Int, height: Int, scale: Int, r: FxRat, t: Float) {
+        val slot = floor(t / RAT_SLOT).toInt()
+        val d = t - ratAt(slot)
+        if (d < 0f || d > RAT_SECONDS) return
+        val p = d / RAT_SECONDS
+        val x = r.x0 + (r.x1 - r.x0) * p
+        val y = r.y0 + (r.y1 - r.y0) * p
+        val s = r.s0 + (r.s1 - r.s0) * p
+        val dir = if (r.x1 >= r.x0) 1f else -1f
+        val len = 8f * s
+        val r0 = 22; val g0 = 17; val b0 = 14
+        val fade = minOf(p, 1f - p).coerceAtMost(0.12f) / 0.12f
+        val a = 0.9f * fade
+        // body
+        shade(out, width, height, scale, x, y, len * 0.5f, 1.6f * s, r0, g0, b0, a)
+        shade(out, width, height, scale, x - dir * len * 0.2f, y - 0.4f * s, len * 0.3f, 1.4f * s, r0, g0, b0, a)
+        // head and ear
+        shade(out, width, height, scale, x + dir * len * 0.55f, y, len * 0.22f, 1.0f * s, r0 + 8, g0 + 6, b0 + 5, a)
+        shade(out, width, height, scale, x + dir * len * 0.45f, y - 1.3f * s, 0.7f * s, 0.7f * s, r0 + 10, g0 + 7, b0 + 6, a)
+        // tail
+        for (k in 1..6) shade(out, width, height, scale, x - dir * (len * 0.5f + k * 0.7f * s), y + 0.6f * s * sin(t * 12f + k), 0.5f * s, 0.35f * s, r0 + 20, g0 + 14, b0 + 12, a * 0.8f)
+        // feet that patter
+        val step = sin(t * 26f)
+        shade(out, width, height, scale, x + dir * len * 0.25f + step, y + 1.5f * s, 0.5f * s, 0.4f * s, r0, g0, b0, a)
+        shade(out, width, height, scale, x - dir * len * 0.2f - step, y + 1.5f * s, 0.5f * s, 0.4f * s, r0, g0, b0, a)
+    }
+
+    /** Blends the colour (r, g, b) with weight [a] over an ellipse (centre in picture pixels, radii [rx] and [ry]). */
+    private fun shade(out: IntArray, width: Int, height: Int, scale: Int, cx: Float, cy: Float, rx: Float, ry: Float, r: Int, g: Int, b: Int, a: Float) {
+        val x0 = ((cx - rx) * scale).toInt().coerceIn(0, width - 1); val x1 = ((cx + rx) * scale).toInt().coerceIn(0, width - 1)
+        val y0 = ((cy - ry) * scale).toInt().coerceIn(0, height - 1); val y1 = ((cy + ry) * scale).toInt().coerceIn(0, height - 1)
+        for (y in y0..y1) for (x in x0..x1) {
+            val dx = ((x + 0.5f) / scale - cx) / rx
+            val dy = ((y + 0.5f) / scale - cy) / ry
+            if (dx * dx + dy * dy > 1f) continue
+            val i = y * width + x
+            val p = out[i]
+            val nr = (((p shr 16) and 0xFF) * (1f - a) + r * a).toInt()
+            val ng = (((p shr 8) and 0xFF) * (1f - a) + g * a).toInt()
+            val nb = ((p and 0xFF) * (1f - a) + b * a).toInt()
+            out[i] = (p and 0xFF000000.toInt()) or (nr shl 16) or (ng shl 8) or nb
         }
     }
 

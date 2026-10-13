@@ -29,9 +29,9 @@ class IntroSounds(private val lookup: (Int) -> VocSample?, private val priority:
     private var queuedPitch = 1f
 
     @Synchronized
-    fun play(number: Int, pitch: Float = 1f, loop: Boolean = false, then: Int = -1, thenLoop: Boolean = false) {
+    fun play(number: Int, pitch: Float = 1f, loop: Boolean = false, then: Int = -1, thenLoop: Boolean = false, volume: Float = 1f) {
         if (then >= 0) { queued = then; queuedLoop = thenLoop; queuedPitch = pitch }
-        playNow(number, pitch, loop)
+        playNow(number, pitch, loop, volume)
     }
 
     /** What the original checks every frame: when nothing sounds, the waiting sample starts. */
@@ -43,7 +43,7 @@ class IntroSounds(private val lookup: (Int) -> VocSample?, private val priority:
         playNow(q, queuedPitch, l)
     }
 
-    private fun playNow(number: Int, pitch: Float, loop: Boolean) {
+    private fun playNow(number: Int, pitch: Float, loop: Boolean, volume: Float = 1f) {
         val s = lookup(number) ?: return
         val p = priority?.invoke(number) ?: 0
         if (priority != null) {
@@ -65,6 +65,7 @@ class IntroSounds(private val lookup: (Int) -> VocSample?, private val priority:
                 .setTransferMode(AudioTrack.MODE_STATIC)
                 .build()
             track.write(s.pcm, 0, s.pcm.size)
+            if (volume != 1f) track.setVolume(volume)
             if (pitch != 1f) track.playbackRate = (s.rate * pitch).toInt().coerceIn(2000, 48000)
             if (loop) {
                 track.setLoopPoints(0, s.pcm.size, -1)

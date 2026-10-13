@@ -12,7 +12,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -439,6 +442,11 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     var dpadRight by remember { mutableStateOf(false) }
 
     val renderer = remember { AtticSceneRenderer() }
+    val fxEpoch = remember { System.nanoTime() }
+    // the sounds of the house (thunder after the flash, creaks, the patter of the rat) have a voice of their own, so they do not cut off the game's sounds
+    val ambient = remember(world) { IntroSounds({ world.game.sample(it) }) }
+    DisposableEffect(ambient) { onDispose { ambient.release() } }
+    val fxScope = rememberCoroutineScope()
     val blackBackground = remember { android.graphics.Bitmap.createBitmap(AtticSceneRenderer.W, AtticSceneRenderer.H, android.graphics.Bitmap.Config.ARGB_8888).also { it.eraseColor(android.graphics.Color.BLACK) } }
 
     // Toggle: hide the camera photo and show only the 3D actors on black.
@@ -450,6 +458,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     // The stick direction is rotated by the active camera's own yaw, so "up" always means away from the camera.
     val angleUnitToRad = 2f * PI.toFloat() / 1024f
 
+    var fxLastT = 0f
     LaunchedEffect(game) {
         var gameClock = 0
         var lastTimer = 0
@@ -491,6 +500,20 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
                     }
                 }
                 game.tick(gameClock, joy, actionHeld, run)
+                // the house: what the clock brings since the last frame (thunder, a creak, a rat, the rocking horse)
+                val nowT = (System.nanoTime() - fxEpoch) / 1_000_000_000f
+                if (game.roomView.stage == 0 && !intro) {
+                    for (e in BackgroundFxCore.events(fxLastT, nowT)) when (e.kind) {
+                        Ambient.THUNDER -> StartAssets.playThunder(0.35f + 0.5f * e.strength)
+                        Ambient.CREAK -> ambient.play(4, 0.55f, volume = 0.18f + 0.2f * e.strength)
+                        Ambient.RAT -> fxScope.launch { repeat(9) { ambient.play(31 + it % 3, 2.3f, volume = 0.16f); delay(330) } }
+                        Ambient.HORSE -> {
+                            game.objects.getOrNull(6)?.actor?.playAnim(9, 0, -1) // the animation of the horse that it plays when it is touched
+                            ambient.play(4, 0.8f, volume = 0.12f)
+                        }
+                    }
+                }
+                fxLastT = nowT
                 if (game.pendingFound >= 0) foundItem = game.pendingFound
                 game.player?.actor?.let {
                     playerX = it.renderX.toFloat()
@@ -528,6 +551,8 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     val backgrounds = roomCache.getOrPut(view) { scaledPhotos(view) }
     // moving light on the pictures (an addition, not in the original): moonlight at the windows, candle flames, dust in the moonlight
     val fxLayer = remember(backgrounds) { BackgroundFx(view.stage, view.room, backgrounds) }
+    val fxMs = (System.nanoTime() - fxEpoch) / 1_000_000L
+    renderer.flash = if (view.stage == 0 && !intro) BackgroundFxCore.flash(fxMs / 1000f) else 0f
     // the intro walks through rooms of four floors: they are read and their pictures scaled in the background while the car drives
     if (intro) LaunchedEffect(world) {
         withContext(Dispatchers.Default) {
@@ -567,7 +592,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
             }
         } + game.effects.map { e -> effectActor(e, game.time, world.game.palette, world.game).also { it.sortBox = e.sortBox() } }
         val dark = game.lightOff
-        renderer.render(camera, if (showBackground && !dark) fxLayer.frame(camera.index, System.nanoTime() / 1_000_000L, game.objects.getOrNull(13)?.w?.active == true) else blackBackground, actors, if (dark) emptyMap() else view.maskViews.getOrNull(camera.index) ?: emptyMap(), view.room)
+        renderer.render(camera, if (showBackground && !dark) fxLayer.frame(camera.index, fxMs, game.objects.getOrNull(13)?.w?.active == true) else blackBackground, actors, if (dark) emptyMap() else view.maskViews.getOrNull(camera.index) ?: emptyMap(), view.room)
         renderer.bitmap.asImageBitmap()
     }
 
