@@ -14,7 +14,7 @@ class BackgroundFx(stage: Int, room: Int, private val photos: List<Bitmap>) {
     private val lastMs = LongArray(photos.size) { -1_000_000_000_000L }
 
     /** The picture of [camera] at [nowMs] (milliseconds of a steady clock). */
-    fun frame(camera: Int, nowMs: Long): Bitmap {
+    fun frame(camera: Int, nowMs: Long, lampOn: Boolean = true): Bitmap {
         val i = camera.coerceIn(0, photos.size - 1)
         val set = sets[i] ?: return photos[i]
         val w = photos[i].width
@@ -28,7 +28,7 @@ class BackgroundFx(stage: Int, room: Int, private val photos: List<Bitmap>) {
         }
         if (nowMs - lastMs[i] >= UPDATE_MS) {
             lastMs[i] = nowMs
-            BackgroundFxCore.render(base[i]!!, out[i]!!, w, w / 320, set, nowMs / 1000f)
+            BackgroundFxCore.render(base[i]!!, out[i]!!, w, w / 320, set, nowMs / 1000f, lampOn)
             work[i]!!.setPixels(out[i]!!, 0, w, 0, 0, w, h)
         }
         return work[i]!!

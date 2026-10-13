@@ -23,13 +23,16 @@ sealed class FxShape {
 enum class FxWave { MOON, CANDLE, STORM }
 
 /** A light of one colour (r, g, b added at full strength) on a [shape]; [strength] 1 = the colour is added fully. */
-class FxLight(val shape: FxShape, val r: Int, val g: Int, val b: Int, val strength: Float, val wave: FxWave, val seed: Int = 0)
+class FxLight(val shape: FxShape, val r: Int, val g: Int, val b: Int, val strength: Float, val wave: FxWave, val seed: Int = 0, val lampOnly: Boolean = false)
+
+/** Rain that runs down a window pane: [count] drops, each a short bright streak that slides from the top to the bottom of the rectangle. */
+class FxRain(val x1: Float, val y1: Float, val x2: Float, val y2: Float, val count: Int, val strength: Float)
 
 /** Dust that floats in a rectangle: [count] specks of a pale colour. */
 class FxDust(val x1: Float, val y1: Float, val x2: Float, val y2: Float, val count: Int, val strength: Float)
 
 /** The lights of one camera. */
-class FxSet(val lights: List<FxLight>, val dust: List<FxDust>)
+class FxSet(val lights: List<FxLight>, val dust: List<FxDust>, val rain: List<FxRain> = emptyList())
 
 object BackgroundFxCore {
     /** The attic: stage 0, room 0, cameras 0 to 4 (places found by looking at the pictures). */
@@ -38,8 +41,11 @@ object BackgroundFxCore {
             listOf(
                 FxLight(FxShape.Rect(145f, 30f, 168f, 50f), 70, 95, 140, 0.9f, FxWave.MOON),
                 FxLight(FxShape.Circle(58f, 39f, 10f), 255, 165, 70, 0.75f, FxWave.CANDLE, 1),
+                // the oil lamp on the table (while it is still there): a warm light on the cloth and the floor around it
+                FxLight(FxShape.Circle(27f, 160f, 30f), 255, 150, 60, 0.5f, FxWave.CANDLE, 3, lampOnly = true),
             ),
-            emptyList(),
+            listOf(FxDust(110f, 52f, 200f, 120f, 8, 0.5f)),
+            listOf(FxRain(145f, 30f, 168f, 50f, 4, 1f)),
         )
         1 -> FxSet(
             listOf(
@@ -47,13 +53,15 @@ object BackgroundFxCore {
                 FxLight(FxShape.Quad(floatArrayOf(128f, 152f, 100f, 55f), floatArrayOf(136f, 136f, 200f, 200f)), 40, 52, 80, 0.5f, FxWave.MOON),
             ),
             listOf(FxDust(78f, 118f, 150f, 190f, 14, 0.8f)),
+            listOf(FxRain(97f, 83f, 112f, 97f, 3, 1f)),
         )
         2 -> FxSet(
             listOf(
                 FxLight(FxShape.Rect(143f, 5f, 156f, 32f), 70, 95, 140, 0.9f, FxWave.MOON),
                 FxLight(FxShape.Circle(51f, 57f, 11f), 255, 165, 70, 0.75f, FxWave.CANDLE, 2),
             ),
-            emptyList(),
+            listOf(FxDust(130f, 40f, 215f, 130f, 8, 0.5f)),
+            listOf(FxRain(143f, 5f, 156f, 32f, 3, 1f)),
         )
         else -> null
     }
@@ -96,12 +104,14 @@ object BackgroundFxCore {
      * Writes into [out] (the picture scaled by [scale] from 320 x 200, [width] pixels wide) the picture [base] with the lights of [fx] at time [t] seconds: only the pixels
      * near a light or a speck are touched, the rest of [out] must already hold [base].
      */
-    fun render(base: IntArray, out: IntArray, width: Int, scale: Int, fx: FxSet, t: Float) {
+    fun render(base: IntArray, out: IntArray, width: Int, scale: Int, fx: FxSet, t: Float, lampOn: Boolean = true) {
         val height = base.size / width
         // put the original pixels back where the last frame changed something
         for (l in fx.lights) restore(base, out, width, height, scale, boundsOf(l.shape))
         for (d in fx.dust) restore(base, out, width, height, scale, floatArrayOf(d.x1 - 3f, d.y1 - 3f, d.x2 + 3f, d.y2 + 3f))
+        for (r in fx.rain) restore(base, out, width, height, scale, floatArrayOf(r.x1, r.y1, r.x2 + 1f, r.y2 + 1f))
         for (l in fx.lights) {
+            if (l.lampOnly && !lampOn) continue
             val k = intensity(l.wave, t, l.seed) * l.strength
             val bb = boundsOf(l.shape)
             val x0 = (bb[0] * scale).toInt().coerceIn(0, width - 1); val x1 = (bb[2] * scale).toInt().coerceIn(0, width - 1)
@@ -112,6 +122,7 @@ object BackgroundFxCore {
                 add(out, y * width + x, (l.r * k * w).toInt(), (l.g * k * w).toInt(), (l.b * k * w).toInt())
             }
         }
+        for (r in fx.rain) rain(out, width, height, scale, r, t)
         for ((n, d) in fx.dust.withIndex()) {
             for (i in 0 until d.count) {
                 val h1 = hash01(i * 17 + n * 1000 + 3); val h2 = hash01(i * 29 + n * 1000 + 11); val h3 = hash01(i * 43 + n * 1000 + 19)
@@ -125,6 +136,33 @@ object BackgroundFxCore {
                 val v = (60f * d.strength * tw * edge * (intensity(FxWave.MOON, t, 0) + 0.2f)).toInt()
                 val cx = (px * scale).toInt(); val cy = (py * scale).toInt()
                 for (yy in cy..cy + 1) for (xx in cx..cx + 1) if (xx in 0 until width && yy in 0 until height) add(out, yy * width + xx, v, v, (v * 1.1f).toInt())
+            }
+        }
+    }
+
+    /** Rain on a window: the drops of every pane slide down at their own speed, rest for a while at the bottom and start again; the storm makes them heavier. */
+    private fun rain(out: IntArray, width: Int, height: Int, scale: Int, r: FxRain, t: Float) {
+        val w = r.x2 - r.x1
+        val hgt = r.y2 - r.y1
+        val heavy = 0.7f + 0.6f * storm(t)
+        for (i in 0 until r.count) {
+            val h1 = hash01(i * 13 + 101); val h2 = hash01(i * 31 + 103); val h3 = hash01(i * 47 + 107)
+            val speed = 4f + 7f * h2
+            val period = hgt / speed + 1.2f + 2.5f * h3
+            val y = (((t + h1 * period * 3f) % period)) * speed
+            if (y > hgt) continue
+            val x = r.x1 + 1f + h1 * (w - 2f) + 0.4f * sin(t * 1.3f + i)
+            for (k in 0..3) { // the streak: bright at the head, fainter above it
+                val yy = r.y1 + y - k
+                if (yy < r.y1) break
+                val v = (80f * r.strength * heavy * (1f - k * 0.27f)).toInt()
+                val px = (x * scale).toInt()
+                val py = (yy * scale).toInt()
+                for (dy in 0 until scale) for (dx in 0 until scale) {
+                    val xx = px + dx
+                    val y2 = py + dy
+                    if (xx in 0 until width && y2 in 0 until height) add(out, y2 * width + xx, v, (v * 1.15f).toInt(), (v * 1.4f).toInt())
+                }
             }
         }
     }
