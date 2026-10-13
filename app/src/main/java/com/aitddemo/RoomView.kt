@@ -21,6 +21,8 @@ class RoomView(
     val maskViews: List<Map<Int, List<AtticData.Mask>>>,
     /** 320x200 ARGB picture of each camera. */
     val photos: List<IntArray>,
+    /** The number of each camera's picture in CAMERAnn.PAK (the effects of the pictures are keyed by it). */
+    val pictureIds: List<Int> = emptyList(),
 ) {
     /** The rooms that the doors (zones of type 0) of this room lead to. */
     val linkedRooms: List<Int> = zones.filter { it.type == 0 }.map { it.parameter }.distinct()
@@ -47,6 +49,7 @@ class RoomLoader(private val files: GameFiles, private val palette: IntArray) {
             cameras.map { it.masks },
             cameras.map { it.maskViews },
             r.cameraIds.map { st.picture(it, palette) },
+            r.cameraIds.toList(),
         )
     }
 

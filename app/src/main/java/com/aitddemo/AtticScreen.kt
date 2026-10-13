@@ -505,13 +505,17 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
                 game.tick(gameClock, joy, actionHeld, run)
                 // the house: what the clock brings since the last frame (thunder, a creak, a rat, the rocking horse)
                 val nowT = (System.nanoTime() - fxEpoch) / 1_000_000_000f
-                if (game.roomView.stage == 0 && !intro) {
+                val fxStage = game.roomView.stage
+                if ((fxStage == 0 || fxStage == 1) && !intro) {
+                    val attic = fxStage == 0
+                    val bathroom = fxStage == 1 && game.roomView.pictureIds.any { it == 11 || it == 12 }
                     for (e in BackgroundFxCore.events(fxLastT, nowT)) when (e.kind) {
-                        Ambient.THUNDER -> StartAssets.playThunder(0.35f + 0.5f * e.strength)
-                        Ambient.CREAK -> ambient.play(4, 0.55f, volume = 0.18f + 0.2f * e.strength)
-                        Ambient.DRIP -> ambient.play(-1, 1f, volume = 0.35f)
-                        Ambient.WIND -> ambient.play(-2, 1f, volume = 0.5f)
-                        Ambient.RAT -> fxScope.launch {
+                        // on the floor below the storm is heard through the walls
+                        Ambient.THUNDER -> StartAssets.playThunder((0.35f + 0.5f * e.strength) * (if (attic) 1f else 0.55f))
+                        Ambient.CREAK -> if (attic) ambient.play(4, 0.55f, volume = 0.18f + 0.2f * e.strength)
+                        Ambient.DRIP -> if (attic || bathroom) ambient.play(-1, 1f, volume = 0.35f)
+                        Ambient.WIND -> ambient.play(-2, 1f, volume = if (attic) 0.5f else 0.22f)
+                        Ambient.RAT -> if (attic) fxScope.launch {
                             // the patter of the feet, and the squeaks (samples 47 and 72 of LISTSAMP.PAK: no script of the game plays them, they are quiet and high)
                             repeat(9) {
                                 ambient.play(31 + it % 3, 2.3f, volume = 0.16f)
@@ -519,7 +523,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
                                 delay(330)
                             }
                         }
-                        Ambient.HORSE -> {
+                        Ambient.HORSE -> if (attic) {
                             game.objects.getOrNull(6)?.actor?.playAnim(9, 0, -1) // the animation of the horse that it plays when it is touched
                             ambient.play(4, 0.8f, volume = 0.12f)
                         }
@@ -529,7 +533,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
                 if (game.pendingFound >= 0) foundItem = game.pendingFound
                 game.player?.actor?.let {
                     // the boards of the floor creak under the steps now and then (not in the original game)
-                    if (game.roomView.stage == 0 && !intro) {
+                    if (game.roomView.stage <= 1 && !intro) {
                         walked += kotlin.math.abs(it.renderX - playerX) + kotlin.math.abs(it.renderZ - playerZ)
                         if (walked > walkCreakAt) {
                             ambient.play(4, 0.45f + 0.25f * (walkCreakAt % 7f) / 7f, volume = 0.2f)
@@ -571,9 +575,9 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     val camera = view.cameras.getOrNull(cameraIndex) ?: view.cameras[0]
     val backgrounds = roomCache.getOrPut(view) { scaledPhotos(view) }
     // moving light on the pictures (an addition, not in the original): moonlight at the windows, candle flames, dust in the moonlight
-    val fxLayer = remember(backgrounds) { BackgroundFx(view.stage, view.room, backgrounds) }
+    val fxLayer = remember(backgrounds) { BackgroundFx(view.stage, view.room, backgrounds, view.pictureIds) }
     val fxMs = (System.nanoTime() - fxEpoch) / 1_000_000L
-    renderer.flash = if (view.stage == 0 && !intro) BackgroundFxCore.flash(fxMs / 1000f) else 0f
+    renderer.flash = if (!intro && (view.stage == 0 || (view.stage == 1 && fxLayer.hasWindow(cameraIndex)))) BackgroundFxCore.flash(fxMs / 1000f) else 0f
     // the intro walks through rooms of four floors: they are read and their pictures scaled in the background while the car drives
     if (intro) LaunchedEffect(world) {
         withContext(Dispatchers.Default) {

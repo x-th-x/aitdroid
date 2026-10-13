@@ -21,7 +21,7 @@ sealed class FxShape {
 }
 
 /** How the strength of a light changes with the time. */
-enum class FxWave { MOON, CANDLE, STORM, CLOUD }
+enum class FxWave { MOON, CANDLE, STORM, CLOUD, DRAFT }
 
 /** A light of one colour (r, g, b added at full strength) on a [shape]; [strength] 1 = the colour is added fully. */
 class FxLight(val shape: FxShape, val r: Int, val g: Int, val b: Int, val strength: Float, val wave: FxWave, val seed: Int = 0, val lampOnly: Boolean = false)
@@ -47,13 +47,16 @@ class FxMoth(val cx: Float, val cy: Float, val r: Float, val count: Int, val lam
 /** A drop of water that falls from [y0] to [y1] at [x] now and then and makes a ring on the floor. */
 class FxDrip(val x: Float, val y0: Float, val y1: Float)
 
+/** Steam that rises from a rectangle [x1]..[x2] at height [y] by [rise] pixels: [count] soft pale puffs that grow and fade. */
+class FxSteam(val x1: Float, val x2: Float, val y: Float, val rise: Float, val count: Int)
+
 /** A spider that lets itself down on a thread from [y0] to [y1] at [x], hangs there for a while and climbs up again. */
 class FxSpider(val x: Float, val y0: Float, val y1: Float)
 
 class AmbientEvent(val t: Float, val kind: Ambient, val strength: Float)
 
 /** The lights of one camera. */
-class FxSet(val lights: List<FxLight>, val dust: List<FxDust>, val rain: List<FxRain> = emptyList(), val bats: List<FxBat> = emptyList(), val rats: List<FxRat> = emptyList(), val moths: List<FxMoth> = emptyList(), val drips: List<FxDrip> = emptyList(), val spiders: List<FxSpider> = emptyList())
+class FxSet(val lights: List<FxLight>, val dust: List<FxDust>, val rain: List<FxRain> = emptyList(), val bats: List<FxBat> = emptyList(), val rats: List<FxRat> = emptyList(), val moths: List<FxMoth> = emptyList(), val drips: List<FxDrip> = emptyList(), val spiders: List<FxSpider> = emptyList(), val steam: List<FxSteam> = emptyList())
 
 object BackgroundFxCore {
     /** The attic: stage 0, room 0, cameras 0 to 4 (places found by looking at the pictures). */
@@ -99,11 +102,58 @@ object BackgroundFxCore {
         else -> null
     }
 
+    private val WINDOW_LIGHT = intArrayOf(70, 95, 140)
+
+    private fun window(x1: Float, y1: Float, x2: Float, y2: Float) = FxLight(FxShape.Rect(x1, y1, x2, y2), WINDOW_LIGHT[0], WINDOW_LIGHT[1], WINDOW_LIGHT[2], 0.9f, FxWave.MOON)
+    private fun curtain(x1: Float, y1: Float, x2: Float, y2: Float, r: Int, g: Int, b: Int, seed: Int) = FxLight(FxShape.Rect(x1, y1, x2, y2), r, g, b, 0.3f, FxWave.DRAFT, seed)
+    private fun gasLamp(x: Float, y: Float, seed: Int) = FxLight(FxShape.Circle(x, y, 11f), 255, 200, 110, 0.6f, FxWave.CANDLE, seed)
+
+    /** Floor 1 (ETAGE01): the effects of the pictures of CAMERA01.PAK by their number (places found by looking at the pictures). */
+    fun floor1(picture: Int): FxSet? = when (picture) {
+        // the hall with the wall lamps
+        2 -> FxSet(listOf(gasLamp(70f, 25f, 11)), emptyList())
+        3 -> FxSet(listOf(gasLamp(166f, 28f, 12)), emptyList())
+        // the room with the window and the chaise longue
+        5 -> FxSet(
+            listOf(window(84f, 12f, 122f, 46f), curtain(92f, 0f, 148f, 80f, 210, 170, 170, 1)),
+            listOf(FxDust(60f, 60f, 200f, 120f, 8, 0.4f)),
+            listOf(FxRain(84f, 12f, 122f, 46f, 3, 1f)),
+        )
+        // the four-poster bedroom with the window
+        7 -> FxSet(
+            listOf(
+                window(33f, 64f, 70f, 126f),
+                FxLight(FxShape.Quad(floatArrayOf(40f, 90f, 110f, 10f), floatArrayOf(140f, 140f, 200f, 200f)), 40, 52, 80, 0.35f, FxWave.CLOUD),
+                curtain(12f, 52f, 25f, 165f, 200, 110, 110, 2),
+                curtain(68f, 62f, 80f, 158f, 200, 110, 110, 3),
+            ),
+            listOf(FxDust(10f, 130f, 110f, 200f, 10, 0.6f)),
+            listOf(FxRain(33f, 64f, 70f, 126f, 4, 1f)),
+        )
+        // the red room with the wardrobe and the window on the left
+        10 -> FxSet(
+            listOf(window(6f, 50f, 34f, 100f), curtain(20f, 0f, 55f, 130f, 120, 190, 170, 4)),
+            listOf(FxDust(10f, 60f, 100f, 150f, 6, 0.4f)),
+            listOf(FxRain(6f, 50f, 34f, 100f, 3, 1f)),
+        )
+        // the bathroom: the shower drips into the bath, steam over the water, a flicker in the mirror
+        11 -> FxSet(
+            listOf(FxLight(FxShape.Rect(82f, 78f, 110f, 102f), 150, 170, 170, 0.25f, FxWave.CANDLE, 5)),
+            emptyList(), emptyList(), emptyList(), emptyList(), emptyList(),
+            listOf(FxDrip(157f, 50f, 113f)),
+            emptyList(),
+            listOf(FxSteam(132f, 174f, 112f, 40f, 6)),
+        )
+        12 -> FxSet(emptyList(), emptyList(), steam = listOf(FxSteam(6f, 124f, 138f, 45f, 7)))
+        else -> null
+    }
+
     /** The strength of a wave at [t] seconds (0..1.3). The flashes of lightning come at a fixed, irregular rhythm of about 20 seconds. */
     fun intensity(wave: FxWave, t: Float, seed: Int): Float = when (wave) {
         FxWave.MOON -> 0.30f + 0.12f * sin(t * 2f * PI.toFloat() / 7f) + 0.10f * sin(t * 2f * PI.toFloat() / 2.3f) + storm(t) * 1.0f
         FxWave.CANDLE -> (0.55f + 0.25f * noise(t * 9f, seed) + 0.15f * noise(t * 23f, seed + 7) + gust(t) * (noise(t * 31f, seed + 3) - 0.75f) * 1.1f).coerceIn(0.05f, 1f)
         FxWave.STORM -> storm(t)
+        FxWave.DRAFT -> ((0.35f + 0.35f * sin(t * 1.7f + seed) + 0.3f * sin(t * 0.63f + seed * 2f)).coerceAtLeast(0f) * (0.6f + gust(t) * 0.8f)) + storm(t) * 0.5f
         FxWave.CLOUD -> (0.22f + 0.2f * sin(t * 2f * PI.toFloat() / 31f) + 0.14f * sin(t * 2f * PI.toFloat() / 11.3f)).coerceAtLeast(0.03f) + storm(t)
     }
 
@@ -226,6 +276,7 @@ object BackgroundFxCore {
         for (rt in fx.rats) restore(base, out, width, height, scale, floatArrayOf(minOf(rt.x0, rt.x1) - 14f, minOf(rt.y0, rt.y1) - 10f, maxOf(rt.x0, rt.x1) + 14f, maxOf(rt.y0, rt.y1) + 10f))
         for (m in fx.moths) restore(base, out, width, height, scale, floatArrayOf(m.cx - m.r - 2f, m.cy - m.r - 2f, m.cx + m.r + 2f, m.cy + m.r + 2f))
         for (dr in fx.drips) restore(base, out, width, height, scale, floatArrayOf(dr.x - 7f, dr.y0 - 1f, dr.x + 7f, dr.y1 + 4f))
+        for (st in fx.steam) restore(base, out, width, height, scale, floatArrayOf(st.x1 - 8f, st.y - st.rise - 10f, st.x2 + 8f, st.y + 4f))
         for (sp in fx.spiders) restore(base, out, width, height, scale, floatArrayOf(sp.x - 5f, sp.y0, sp.x + 5f, sp.y1 + 5f))
         for (l in fx.lights) {
             if (l.lampOnly && !lampOn) continue
@@ -245,6 +296,7 @@ object BackgroundFxCore {
         for (m in fx.moths) if (!m.lampOnly || lampOn) moths(out, width, height, scale, m, t)
         for (dr in fx.drips) drip(out, width, height, scale, dr, t)
         for (sp in fx.spiders) spider(out, width, height, scale, sp, t)
+        for (st in fx.steam) steam(out, width, height, scale, st, t)
         val lit = storm(t) > 0.25f
         for ((n, d) in fx.dust.withIndex()) {
             for (i in 0 until d.count) {
@@ -367,6 +419,18 @@ object BackgroundFxCore {
             // a ring: two ellipses, the inner one in the colour of what is below
             shade(out, width, height, scale, d.x, d.y1 + 1f, rad, rad * 0.35f, 150, 170, 190, a)
             if (rad > 2.2f) shade(out, width, height, scale, d.x, d.y1 + 1f, rad - 1.3f, (rad - 1.3f) * 0.35f, 70, 62, 55, a * 1.2f)
+        }
+    }
+
+    /** Steam over a bath: puffs rise slowly, grow and fade out, and sway a little. */
+    private fun steam(out: IntArray, width: Int, height: Int, scale: Int, s: FxSteam, t: Float) {
+        for (i in 0 until s.count) {
+            val h1 = hash01(i * 5 + 401); val h2 = hash01(i * 9 + 403)
+            val p = (t * (0.08f + 0.06f * h1) + h2) % 1f
+            val x = s.x1 + (s.x2 - s.x1) * h1 + 3f * sin(t * 0.7f + i * 1.7f)
+            val y = s.y - s.rise * p
+            val a = 0.12f * sin(p * PI.toFloat())
+            shade(out, width, height, scale, x, y, 4f + 7f * p, 2.5f + 4f * p, 175, 190, 190, a)
         }
     }
 
