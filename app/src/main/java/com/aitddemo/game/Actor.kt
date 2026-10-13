@@ -479,7 +479,7 @@ class Actor(
                 var x = w(2)
                 var z = w(3)
                 if (w(1) != roomNumber) roomShift(w(1))?.let { x -= it[0]; z += it[2] }
-                if (Math.hypot((renderX - x).toDouble(), (renderZ - z).toDouble()) >= TRACK_REACHED) {
+                if (Math.abs(renderX - x) + Math.abs(renderZ - z) >= TRACK_REACHED) { // the distance of the original is the sum of both differences
                     turnToward(x, z, timer, 64, 15)
                 } else {
                     positionInTrack += 4
@@ -520,7 +520,7 @@ class Actor(
                 var z = w(4)
                 val time = w(5)
                 if (w(1) != roomNumber) roomShift(w(1))?.let { x -= it[0]; y += it[1]; z += it[2] }
-                if (y == renderY && Math.hypot((renderX - x).toDouble(), (renderZ - z).toDouble()) < TRACK_REACHED) {
+                if (y == renderY && Math.abs(renderX - x) + Math.abs(renderZ - z) < TRACK_REACHED) {
                     positionInTrack += 6
                 } else {
                     if (ySteps == 0 && y != renderY) {

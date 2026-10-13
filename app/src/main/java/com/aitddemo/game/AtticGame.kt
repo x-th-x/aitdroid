@@ -181,7 +181,30 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     }
 
     /** The rooms of the floor that count as seen from the current room: itself and the rooms its doors lead to (InitViewedRoomList of the original). */
-    private fun viewList(): Set<Int> = HashSet<Int>().also { it.add(room); it.addAll(roomView.linkedRooms) }
+    private fun viewList(): Set<Int> = HashSet<Int>().also {
+        it.add(room)
+        it.addAll(roomView.linkedRooms)
+        roomView.cameras.getOrNull(currentCamera)?.let { c -> it.addAll(c.viewedRooms) } // and the rooms the camera that shows the scene sees (InitViewedRoomList)
+    }
+
+    /** The camera that shows the scene now (the screen tells it), -1 = not known yet. */
+    private var currentCamera = -1
+
+    /**
+     * The camera of the scene changed: the list of the rooms that count as seen is made again (it holds the rooms the camera sees) and the objects that now belong to it
+     * join the scene, those that no longer do leave (GenereActiveList of the original, which runs when a camera is loaded).
+     */
+    fun cameraChanged(index: Int) {
+        if (index == currentCamera) return
+        currentCamera = index
+        val seen = viewList()
+        for (o in vm.objects) {
+            val g = objects[o.index]
+            if (o.index == playerIndex || o.index == leader) continue
+            val want = wanted(o, seen, stage, room)
+            if (want && !o.active) activate(g) else if (!want && o.active) deactivate(g)
+        }
+    }
 
     /**
      * Is the object part of the scene (GenereActiveList of the original)? Objects of the floor with a life script live by their life mode: 0 always, 1 while the player is in
@@ -240,13 +263,22 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             frameDelta(w.room)?.let { d -> g.actor?.moveToRoomOrigin(d[0], d[1], d[2]) }
             g.actor?.hardcols = geometryOf(w.room).first
         }
-        if (w.typeZv == 4 && w.room == room) { // the box of the room's collider with this object's parameter (foundName), and the place at its centre
-            val h = roomView.hardcols.firstOrNull { it.type == 9 && it.parameter == w.foundName }
-            g.fixedZv = h?.let { intArrayOf(it.x1, it.x2, it.y1, it.y2, it.z1, it.z2) }
-            if (h != null) {
-                w.x = (h.x1 + h.x2) / 2; w.y = (h.y1 + h.y2) / 2; w.z = (h.z1 + h.z2) / 2
-            }
-        }
+        applyHardZv(g)
+    }
+
+    /**
+     * An object of ZV type 4 has the box of the collider of its own room with its parameter (foundName; type 9) as its box and stands at its centre. The box is kept in the
+     * frame of the current room, so it is applied again whenever the frame changes (the helper that holds a camera in the intro lies in a room the scene enters later).
+     */
+    private fun applyHardZv(g: GameObject) {
+        val w = g.w
+        if (w.typeZv != 4) return
+        val own = if (w.room == room) roomView else try { data.rooms.room(stage, w.room) } catch (_: Exception) { null } ?: return
+        val h = own.hardcols.firstOrNull { it.type == 9 && it.parameter == w.foundName }
+        if (h == null) { g.fixedZv = null; return }
+        w.x = (h.x1 + h.x2) / 2; w.y = (h.y1 + h.y2) / 2; w.z = (h.z1 + h.z2) / 2
+        val d = frameDelta(w.room)
+        g.fixedZv = if (d == null) intArrayOf(h.x1, h.x2, h.y1, h.y2, h.z1, h.z2) else intArrayOf(h.x1 - d[0], h.x2 - d[0], h.y1 + d[1], h.y2 + d[1], h.z1 + d[2], h.z2 + d[2])
     }
 
     private fun deactivate(g: GameObject) {
@@ -371,7 +403,16 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             if (w.life != -1 && w.lifeMode != -1) vm.runObject(w.index)
             if (pendingFound >= 0 || pendingRead != null || exited || gameOver) break
         }
+
+        // the floor loader of the original stops all samples when a script has taken the scene to another floor (after the scripts of the frame ran, so a sample that the
+        // scripts started in that frame is cut at once; the sample that waits behind it, SAMPLE_THEN, survives and starts)
+        if (stopSamplesAtEnd) {
+            stopSamplesAtEnd = false
+            ui.stopSamples()
+        }
     }
+
+    private var stopSamplesAtEnd = false
 
     /**
      * A creature on its way touches other objects, the player too (checkCollision of the original reports every box it overlaps, it does not need to be blocked): the
@@ -482,6 +523,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         // the objects that stay: the scene keeps those the original keeps (see [wanted]) and moves them into the frame of the new room, the others leave
         val oldView = roomView
         val oldStage = stage
+        currentCamera = -1
+        if (newStage != oldStage) stopSamplesAtEnd = true
         stage = newStage
         room = newRoom
         roomView = view
@@ -502,6 +545,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                 deactivate(g)
             }
         }
+        for (g in objects) if (g.w.active && g.w.typeZv == 4) applyHardZv(g)
         val p = if (intro) null else player
         p?.w?.stage = newStage
         p?.w?.room = newRoom

@@ -23,8 +23,27 @@ class IntroSounds(private val lookup: (Int) -> VocSample?, private val priority:
      * Plays sample [number]. [pitch] changes the speed (1 = as recorded), [loop] repeats it until [stopAll], [then] is a sample that follows when this one has
      * ended ([thenLoop]: and is repeated).
      */
+    /** The sample that waits for the one that sounds (SAMPLE_THEN): it is kept even when the first one is not started or is cut off, as in the original. */
+    private var queued = -1
+    private var queuedLoop = false
+    private var queuedPitch = 1f
+
     @Synchronized
     fun play(number: Int, pitch: Float = 1f, loop: Boolean = false, then: Int = -1, thenLoop: Boolean = false) {
+        if (then >= 0) { queued = then; queuedLoop = thenLoop; queuedPitch = pitch }
+        playNow(number, pitch, loop)
+    }
+
+    /** What the original checks every frame: when nothing sounds, the waiting sample starts. */
+    private fun playQueued() {
+        if (queued < 0 || active.isNotEmpty()) return
+        val q = queued
+        val l = queuedLoop
+        queued = -1
+        playNow(q, queuedPitch, l)
+    }
+
+    private fun playNow(number: Int, pitch: Float, loop: Boolean) {
         val s = lookup(number) ?: return
         val p = priority?.invoke(number) ?: 0
         if (priority != null) {
@@ -57,7 +76,7 @@ class IntroSounds(private val lookup: (Int) -> VocSample?, private val priority:
                         if (released) {
                             if (priority != null && active.isEmpty()) { currentNumber = -1; currentPriority = -1 }
                             t.release()
-                            if (then >= 0) play(then, pitch, thenLoop)
+                            synchronized(this@IntroSounds) { playQueued() }
                         }
                     }
 
@@ -71,10 +90,11 @@ class IntroSounds(private val lookup: (Int) -> VocSample?, private val priority:
         }
     }
 
-    /** STOP_SAMPLE: everything that sounds is cut off (a sample that was waiting for another one does not start it). */
+    /** STOP_SAMPLE: everything that sounds is cut off; a sample that waits behind it (SAMPLE_THEN) starts at once, as the original's frame check does. */
     @Synchronized
     fun stopAll() {
         release()
+        playQueued()
     }
 
     @Synchronized

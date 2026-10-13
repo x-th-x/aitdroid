@@ -502,10 +502,10 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
                 val targetObject = game.objects.getOrNull(game.cameraTarget)?.takeIf { it.w.active }
                 val target = targetObject?.actor ?: game.player?.actor
                 // an object without a body (the helper places of the intro) has no box: its place counts
-                val camX = target?.renderX?.toFloat() ?: targetObject?.w?.x?.toFloat() ?: playerX
-                val tz = target?.zv
+                val camX = target?.renderX?.toFloat() ?: targetObject?.fixedZv?.let { (it[0] + it[1]) / 2f } ?: targetObject?.w?.x?.toFloat() ?: playerX
+                val tz = target?.zv ?: targetObject?.fixedZv
                 val tx1 = tz?.get(0) ?: camX.toInt(); val tx2 = tz?.get(1) ?: camX.toInt()
-                val camZ = target?.renderZ?.toFloat() ?: targetObject?.w?.z?.toFloat() ?: playerZ
+                val camZ = target?.renderZ?.toFloat() ?: targetObject?.fixedZv?.let { (it[4] + it[5]) / 2f } ?: targetObject?.w?.z?.toFloat() ?: playerZ
                 val tz1 = tz?.get(4) ?: camZ.toInt(); val tz2 = tz?.get(5) ?: camZ.toInt()
                 val tBeta = target?.beta?.and(0x3FF) ?: 0
                 if (shownRoom !== view) { // a new room: the camera of the zone the target stands in
@@ -514,6 +514,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
                 } else {
                     cameraIndex = resolveAtticCamera(tx1, tx2, tz1, tz2, tBeta, cameraIndex, view.cameras)
                 }
+                game.cameraChanged(cameraIndex)
             }
             frameTick++
         }
