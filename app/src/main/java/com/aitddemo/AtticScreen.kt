@@ -507,7 +507,14 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
                     for (e in BackgroundFxCore.events(fxLastT, nowT)) when (e.kind) {
                         Ambient.THUNDER -> StartAssets.playThunder(0.35f + 0.5f * e.strength)
                         Ambient.CREAK -> ambient.play(4, 0.55f, volume = 0.18f + 0.2f * e.strength)
-                        Ambient.RAT -> fxScope.launch { repeat(9) { ambient.play(31 + it % 3, 2.3f, volume = 0.16f); delay(330) } }
+                        Ambient.RAT -> fxScope.launch {
+                            // the patter of the feet, and the squeaks (samples 47 and 72 of LISTSAMP.PAK: no script of the game plays them, they are quiet and high)
+                            repeat(9) {
+                                ambient.play(31 + it % 3, 2.3f, volume = 0.16f)
+                                if (it % 4 == 0) ambient.play(if (it % 8 == 0) 47 else 72, 1.15f, volume = 1f)
+                                delay(330)
+                            }
+                        }
                         Ambient.HORSE -> {
                             game.objects.getOrNull(6)?.actor?.playAnim(9, 0, -1) // the animation of the horse that it plays when it is touched
                             ambient.play(4, 0.8f, volume = 0.12f)
