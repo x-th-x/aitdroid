@@ -41,6 +41,9 @@ class AtticActor(
     var maskShiftX = 0
     var maskShiftZ = 0
 
+    /** A soft shadow on the floor under the object (not in the original game; set for the player on the shadow branch). */
+    var shadow = false
+
     /** The wall box the object touches: its spheres whose centre is inside are not drawn (the original's primitive loop does this with the box of GET_HARD_CLIP). */
     var clipBox: IntArray? = null
 
@@ -162,6 +165,7 @@ class AtticSceneRenderer {
         }.sortedByDescending { it.second }.map { it.first }
         val order = unboxed + DrawOrder.sort(boxed, { it.sortBox!! }, proj.camX, proj.camY, proj.camZ)
         for (a in order) {
+            if (a.shadow) drawShadow(proj, a, background, maskViews[if (a.maskRoom >= 0) a.maskRoom else pictureRoom] ?: emptyList())
             val box = drawActor(proj, a) ?: continue
             // the masks of the room the object is in (each room that the camera sees has its own)
             val masks = maskViews[if (a.maskRoom >= 0) a.maskRoom else pictureRoom] ?: emptyList()
@@ -173,6 +177,43 @@ class AtticSceneRenderer {
                 canvas.drawBitmap(background, 0f, 0f, null)
                 canvas.restore()
             }
+        }
+    }
+
+    private val shadowPaint = Paint().apply { isAntiAlias = true; style = Paint.Style.FILL }
+    private val shadowPath = Path()
+    private val sp = FloatArray(3)
+
+    /** A soft dark patch on the floor under the object: nested discs of the floor plane (at the lowest point of the body) seen through the camera, then the covering masks again over it. */
+    private fun drawShadow(proj: AtticProjector, a: AtticActor, background: Bitmap, masks: List<AtticData.Mask>) {
+        var floorY = -Float.MAX_VALUE
+        for (i in 0 until a.worldVertices.size / 3) floorY = max(floorY, a.worldVertices[i * 3 + 1])
+        if (floorY == -Float.MAX_VALUE) return
+        val radius = (((a.zvX2 - a.zvX1) + (a.zvZ2 - a.zvZ1)) * 10f / 4f * 0.9f).coerceIn(180f, 380f)
+        var l = Float.MAX_VALUE; var t = Float.MAX_VALUE; var r = -Float.MAX_VALUE; var b = -Float.MAX_VALUE
+        for ((scale, alpha) in listOf(1.0f to 38, 0.72f to 50, 0.45f to 66)) {
+            shadowPath.rewind()
+            var ok = true
+            for (k in 0 until 20) {
+                val ang = k * 2.0 * Math.PI / 20.0
+                if (!proj.project(a.originX + (cos(ang) * radius * scale).toFloat(), floorY, a.originZ + (kotlin.math.sin(ang) * radius * scale).toFloat(), sp)) { ok = false; break }
+                val x = sp[0] * S; val y = sp[1] * S
+                if (k == 0) shadowPath.moveTo(x, y) else shadowPath.lineTo(x, y)
+                l = min(l, x); t = min(t, y); r = max(r, x); b = max(b, y)
+            }
+            if (!ok) return
+            shadowPath.close()
+            shadowPaint.color = alpha shl 24
+            canvas.drawPath(shadowPath, shadowPaint)
+        }
+        // what stands in front of the figure covers its shadow too
+        for (m in masks) {
+            if (!covers(m, a)) continue
+            canvas.save()
+            canvas.clipRect(l - 1f, t - 1f, r + 1f, b + 1f)
+            canvas.clipPath(maskPath(m))
+            canvas.drawBitmap(background, 0f, 0f, null)
+            canvas.restore()
         }
     }
 
