@@ -526,6 +526,8 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     val view = game.roomView
     val camera = view.cameras.getOrNull(cameraIndex) ?: view.cameras[0]
     val backgrounds = roomCache.getOrPut(view) { scaledPhotos(view) }
+    // moving light on the pictures (an addition, not in the original): moonlight at the windows, candle flames, dust in the moonlight
+    val fxLayer = remember(backgrounds) { BackgroundFx(view.stage, view.room, backgrounds) }
     // the intro walks through rooms of four floors: they are read and their pictures scaled in the background while the car drives
     if (intro) LaunchedEffect(world) {
         withContext(Dispatchers.Default) {
@@ -565,7 +567,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
             }
         } + game.effects.map { e -> effectActor(e, game.time, world.game.palette, world.game).also { it.sortBox = e.sortBox() } }
         val dark = game.lightOff
-        renderer.render(camera, if (showBackground && !dark) backgrounds[camera.index.coerceIn(0, backgrounds.size - 1)] else blackBackground, actors, if (dark) emptyMap() else view.maskViews.getOrNull(camera.index) ?: emptyMap(), view.room)
+        renderer.render(camera, if (showBackground && !dark) fxLayer.frame(camera.index, System.nanoTime() / 1_000_000L) else blackBackground, actors, if (dark) emptyMap() else view.maskViews.getOrNull(camera.index) ?: emptyMap(), view.room)
         renderer.bitmap.asImageBitmap()
     }
 
