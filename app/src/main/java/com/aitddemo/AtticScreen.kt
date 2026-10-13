@@ -6,6 +6,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -569,7 +570,30 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
         renderer.bitmap.asImageBitmap()
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    // the intro is skipped by a swipe up (80 dp)
+    val skipThresholdPx = with(androidx.compose.ui.platform.LocalDensity.current) { 80.dp.toPx() }
+    var swipeAccumPx by remember { mutableFloatStateOf(0f) }
+    var swipeDone by remember { mutableStateOf(false) }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .then(
+                if (!intro) Modifier else Modifier.pointerInput(Unit) {
+                    detectVerticalDragGestures(
+                        onDragStart = { swipeAccumPx = 0f },
+                        onVerticalDrag = { _, dragAmount ->
+                            if (swipeDone) return@detectVerticalDragGestures
+                            swipeAccumPx += dragAmount
+                            if (swipeAccumPx < -skipThresholdPx) {
+                                swipeDone = true
+                                onExit()
+                            }
+                        },
+                    )
+                },
+            ),
+    ) {
         PlateAspectBox {
             // SHAKING: every second tick of the 60 per second the display starts two of the 200 lines later
             val shift = if (game.shaking && game.time and 1 == 1) -2f / 200f else 0f
