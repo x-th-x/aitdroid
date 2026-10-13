@@ -431,7 +431,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         val now = a?.currentAnim ?: -1
         val ended = lastPlayerAnim == SEARCH_ANIM && now != SEARCH_ANIM
         lastPlayerAnim = now
-        if (a == null || !ended || stage != 0 || roomView.room != 0) return
+        if (a == null || !ended || stage != 0 || roomView.room != 0 || vm.vars[HAND_MODE_VAR].toInt() != SEARCH_MODE) return // only in the Open/Search mode chosen in the inventory
         val facing = Math.abs((a.beta and 0x3FF) - 512) // the window is in the wall at the far end (+z); 512 = looking that way
         if (time < windowViewAfter) return // a finger that stays on the action key repeats the search: not again at once
         if (Math.abs(a.renderX) <= 1100 && a.renderZ >= 3700 && facing <= 230) { windowViewAfter = time + 300; ui.windowView() }
@@ -1434,6 +1434,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         const val CVAR_REVERSE_OBJECT = 11
         const val CVAR_BODY_FLAMME = 1
         const val SEARCH_ANIM = 2
+        const val HAND_MODE_VAR = 90 // set by the found-life script of the hand item to the action chosen in the inventory
+        const val SEARCH_MODE = 64 // Open/Search
         const val ACTION_CLICK = 0x2000
         const val ACTION_TAKE = 0x800
         const val MAX_WEIGHT_CVAR = 2
