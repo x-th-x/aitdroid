@@ -50,8 +50,8 @@ class FxDrip(val x: Float, val y0: Float, val y1: Float)
 /** Steam that rises from a rectangle [x1]..[x2] at height [y] by [rise] pixels: [count] soft pale puffs that grow and fade. */
 class FxSteam(val x1: Float, val x2: Float, val y: Float, val rise: Float, val count: Int)
 
-/** A thing of the picture that is gone after some flashes of lightning and back after others: its rectangle is painted over with the wall beside it. */
-class FxVanish(val x1: Float, val y1: Float, val x2: Float, val y2: Float)
+/** A thing of the picture (the rectangle) that dissolves after some flashes of lightning and forms again somewhere else ((bedX, bedY) = bottom centre there, [bedScale] its size): its place is painted over with the wall beside it. */
+class FxVanish(val x1: Float, val y1: Float, val x2: Float, val y2: Float, val bedX: Float, val bedY: Float, val bedScale: Float)
 
 /** A spider that lets itself down on a thread from [y0] to [y1] at [x], hangs there for a while and climbs up again. */
 class FxSpider(val x: Float, val y0: Float, val y1: Float)
@@ -132,7 +132,7 @@ object BackgroundFxCore {
             ),
             listOf(FxDust(10f, 130f, 110f, 200f, 10, 0.6f)),
             listOf(FxRain(33f, 64f, 70f, 126f, 4, 1f)),
-            vanish = listOf(FxVanish(169f, 102f, 187f, 119f)), // the teddy bear on the chest of drawers
+            vanish = listOf(FxVanish(169f, 102f, 186f, 119f, 108f, 176f, 1.3f)), // the teddy bear on the chest of drawers; it wanders to the bed
         )
         // the red room with the wardrobe and the window on the left
         10 -> FxSet(
@@ -236,8 +236,11 @@ object BackgroundFxCore {
         scan(DRIP_SLOT, { it * DRIP_SLOT + 0.55f }, Ambient.DRIP) { 1f }
         scan(WIND_SLOT, { windAt(it) }, Ambient.WIND) { 1f }
         for (slot in floor(from / STORM_SLOT).toInt() - 1..floor(to / STORM_SLOT).toInt()) {
+            if (vanishOnBed(slot) == vanishOnBed(slot - 1)) continue
             val a = flashAt(slot) + VANISH_START
-            if (a > from && a <= to && vanishGone(slot) != vanishGone(slot - 1)) out.add(AmbientEvent(a, Ambient.VANISH, if (vanishGone(slot)) 1f else 0f))
+            if (a > from && a <= to) out.add(AmbientEvent(a, Ambient.VANISH, 1f)) // it dissolves
+            val b = a + VANISH_SECONDS + VANISH_GAP
+            if (b > from && b <= to) out.add(AmbientEvent(b, Ambient.VANISH, 0f)) // it forms again at the other place
         }
         scan(HORSE_SLOT, { it * HORSE_SLOT + 20f + 30f * hash01(it * 23 + 2) }, Ambient.HORSE) { 1f }
         return out.sortedBy { it.t }
@@ -284,14 +287,19 @@ object BackgroundFxCore {
         for (rt in fx.rats) restore(base, out, width, height, scale, floatArrayOf(minOf(rt.x0, rt.x1) - 14f, minOf(rt.y0, rt.y1) - 10f, maxOf(rt.x0, rt.x1) + 14f, maxOf(rt.y0, rt.y1) + 10f))
         for (m in fx.moths) restore(base, out, width, height, scale, floatArrayOf(m.cx - m.r - 2f, m.cy - m.r - 2f, m.cx + m.r + 2f, m.cy + m.r + 2f))
         for (dr in fx.drips) restore(base, out, width, height, scale, floatArrayOf(dr.x - 7f, dr.y0 - 1f, dr.x + 7f, dr.y1 + 4f))
-        for (vn in fx.vanish) restore(base, out, width, height, scale, floatArrayOf(vn.x1 - 28f, vn.y1 - 48f, vn.x2 + 28f, vn.y2 + 4f))
+        for (vn in fx.vanish) {
+            restore(base, out, width, height, scale, floatArrayOf(vn.x1 - 32f, vn.y1 - 52f, vn.x2 + 32f, vn.y2 + 24f))
+            restore(base, out, width, height, scale, floatArrayOf(vn.bedX - 36f, vn.bedY - 64f, vn.bedX + 36f, vn.bedY + 20f))
+        }
         for (st in fx.steam) restore(base, out, width, height, scale, floatArrayOf(st.x1 - 8f, st.y - st.rise - 10f, st.x2 + 8f, st.y + 4f))
         for (sp in fx.spiders) restore(base, out, width, height, scale, floatArrayOf(sp.x - 5f, sp.y0, sp.x + 5f, sp.y1 + 5f))
         if (fx.vanish.isNotEmpty()) {
             val vs = vanishState(t)
             for (vn in fx.vanish) {
-                if (vs.visible < 1f) paintOver(base, out, width, scale, vn, vs.visible)
-                if (vs.progress >= 0f) vanishEffects(out, width, height, scale, vn, vs.progress, vs.appearing)
+                if (vs.first < 1f) paintOver(base, out, width, scale, vn, vs.first)
+                if (vs.bed > 0f) drawOnBed(base, out, width, scale, vn, vs.bed)
+                if (vs.effect == 1) vanishEffects(out, width, height, scale, (vn.x1 + vn.x2) / 2f, (vn.y1 + vn.y2) / 2f, vs.progress, vs.appearing)
+                if (vs.effect == 2) vanishEffects(out, width, height, scale, vn.bedX, vn.bedY - 10f * vn.bedScale, vs.progress, vs.appearing)
             }
         }
         for (l in fx.lights) {
@@ -440,25 +448,37 @@ object BackgroundFxCore {
 
     private const val VANISH_START = 0.1f
     private const val VANISH_SECONDS = 1.6f
+    private const val VANISH_GAP = 0.15f
 
-    private fun vanishGone(slot: Int) = hash01(slot * 7 + 2) > 0.5f
+    /** Where the thing is after the flash of [slot]: on the bed (true) or in its first place (false); about every second flash it goes to the other place. */
+    private fun vanishOnBed(slot: Int) = hash01(slot * 7 + 2) > 0.5f
 
     /**
-     * How much of the thing that vanishes in the lightning is there at [t] (1 = all, 0 = gone), and how far the change has gone ([progress] 0..1, -1 when none runs; [appearing] says
-     * which way). It changes after a flash of lightning (about every second flash it is the other way round) and takes [VANISH_SECONDS].
+     * How much of the thing is there at [t] at its first place ([first]) and at the bed ([bed]; 1 = all, 0 = nothing), and the glow that goes with a change: [effect] 1 = at the
+     * first place, 2 = at the bed, 0 = none, with its [progress] 0..1 and the direction ([appearing]). After a flash it dissolves where it was, and then forms again at the other place.
      */
-    class VanishState(val visible: Float, val progress: Float, val appearing: Boolean)
+    class VanishState(val first: Float, val bed: Float, val effect: Int, val progress: Float, val appearing: Boolean)
 
     fun vanishState(t: Float): VanishState {
         val slot = floor(t / STORM_SLOT).toInt()
-        val prev = vanishGone(slot - 1)
-        val cur = vanishGone(slot)
+        val prev = vanishOnBed(slot - 1)
+        val cur = vanishOnBed(slot)
+        fun steady(onBed: Boolean) = VanishState(if (onBed) 0f else 1f, if (onBed) 1f else 0f, 0, -1f, false)
         val t0 = flashAt(slot) + VANISH_START
-        if (prev == cur) return VanishState(if (cur) 0f else 1f, -1f, false)
-        if (t < t0) return VanishState(if (prev) 0f else 1f, -1f, false)
-        if (t >= t0 + VANISH_SECONDS) return VanishState(if (cur) 0f else 1f, -1f, false)
-        val p = (t - t0) / VANISH_SECONDS
-        return VanishState(if (cur) 1f - p else p, p, !cur)
+        if (prev == cur || t < t0) return steady(prev)
+        val t1 = t0 + VANISH_SECONDS
+        if (t < t1) {
+            val p = (t - t0) / VANISH_SECONDS
+            return VanishState(if (prev) 0f else 1f - p, if (prev) 1f - p else 0f, if (prev) 2 else 1, p, false)
+        }
+        val t2 = t1 + VANISH_GAP
+        if (t < t2) return VanishState(0f, 0f, 0, -1f, false)
+        val t3 = t2 + VANISH_SECONDS
+        if (t < t3) {
+            val p = (t - t2) / VANISH_SECONDS
+            return VanishState(if (cur) 0f else p, if (cur) p else 0f, if (cur) 2 else 1, p, true)
+        }
+        return steady(cur)
     }
 
     /** The sounds of the change: a shimmer that falls in pitch when the thing goes and rises when it comes back. */
@@ -499,13 +519,34 @@ object BackgroundFxCore {
         }
     }
 
+    /** Draws the thing (the pixels of its first place that differ from the wall beside it) again at the bed, [k] times as big, as far as [visible] says (it forms pixel by pixel). */
+    private fun drawOnBed(base: IntArray, out: IntArray, width: Int, scale: Int, v: FxVanish, visible: Float) {
+        val height = base.size / width
+        val sx0 = (v.x1 * scale).toInt().coerceIn(3 * scale, width - 1); val sx1 = (v.x2 * scale).toInt().coerceIn(0, width - 1)
+        val sy0 = (v.y1 * scale).toInt().coerceIn(0, height - 1); val sy1 = (v.y2 * scale).toInt().coerceIn(0, height - 1)
+        val span = 3 * scale
+        val k = v.bedScale
+        val w = ((sx1 - sx0 + 1) * k).toInt(); val h = ((sy1 - sy0 + 1) * k).toInt()
+        val dx0 = (v.bedX * scale).toInt() - w / 2; val dy0 = (v.bedY * scale).toInt() - h
+        for (dy in 0 until h) for (dx in 0 until w) {
+            val x = dx0 + dx; val y = dy0 + dy
+            if (x !in 0 until width || y !in 0 until height) continue
+            val sx = sx0 + (dx / k).toInt(); val sy = sy0 + (dy / k).toInt()
+            if (sx > sx1 || sy > sy1) continue
+            val p = base[sy * width + sx]
+            val wall = base[sy * width + sx0 - span + (sx - sx0) % span]
+            val diff = abs(((p shr 16) and 0xFF) - ((wall shr 16) and 0xFF)) + abs(((p shr 8) and 0xFF) - ((wall shr 8) and 0xFF)) + abs((p and 0xFF) - (wall and 0xFF))
+            if (diff < 30) continue // the wall, not the thing
+            val key = hash01((x / scale) * 131 + (y / scale) * 7919 + 17) * 0.8f + 0.2f * (dy.toFloat() / h)
+            if (key < visible) out[y * width + x] = p
+        }
+    }
+
     /** The glow, the ring and the sparkles round the thing while it goes or comes back (p = 0..1 of the change). */
-    private fun vanishEffects(out: IntArray, width: Int, height: Int, scale: Int, v: FxVanish, p: Float, appearing: Boolean) {
-        val cx = (v.x1 + v.x2) / 2f
-        val cy = (v.y1 + v.y2) / 2f
+    private fun vanishEffects(out: IntArray, width: Int, height: Int, scale: Int, cx: Float, cy: Float, p: Float, appearing: Boolean) {
         val pulse = sin(p * PI.toFloat())
         // a cold glow that swells and dies
-        val rg = 20f
+        val rg = 28f
         val x0 = ((cx - rg) * scale).toInt().coerceIn(0, width - 1); val x1 = ((cx + rg) * scale).toInt().coerceIn(0, width - 1)
         val y0 = ((cy - rg) * scale).toInt().coerceIn(0, height - 1); val y1 = ((cy + rg) * scale).toInt().coerceIn(0, height - 1)
         val ring = if (appearing) (1f - p) * 26f else p * 26f // the ring flies out when it goes, in when it comes back
