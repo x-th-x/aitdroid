@@ -13,6 +13,9 @@ object TogetherIntro {
         intArrayOf(10, 2050), intArrayOf(-80, 2330), intArrayOf(-300, 2500), intArrayOf(-560, 2640), intArrayOf(-1150, 2960),
     )
 
+    /** The points of the drive (room 0), for the smooth steering of the car. */
+    val drivePath: List<IntArray> get() = DRIVE.toList()
+
     /** Where the heroes get out (beside the parked car) and the door of the house they walk to (room 0). */
     const val GET_OUT_X = -880
     const val GET_OUT_Z = 2640

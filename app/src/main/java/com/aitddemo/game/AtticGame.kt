@@ -314,23 +314,69 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         val dy = lead.renderY - a.renderY // on stairs it keeps the height of the player
         if (dy != 0) a.moveYBy(dy)
         val anims = playerAnims ?: MoveAnims(player?.w?.anim ?: -1, -1, -1, -1, -1, -1, -1)
-        val threat = nearestThreat(a)
-        if (threat != null) fight(c, a, threat, anims) else c.follow(partnerClock(time), lead, anims, { placeCompanion() })
+        val threat = nearestThreat(a, lead)
+        if (threat != null) {
+            sideTarget = null
+            fight(c, a, threat, anims)
+        } else {
+            val clock = partnerClock(time)
+            val distToPlayer = Math.hypot((lead.renderX - a.renderX).toDouble(), (lead.renderZ - a.renderZ).toDouble()).toFloat()
+            // the player comes up to him: he steps aside a few steps (to the left, to the right or back, where there is room) and then follows again
+            if (sideTarget == null && distToPlayer < SIDESTEP_DISTANCE) { sideTarget = pickSideStep(a, lead); sideUntil = time + SIDESTEP_TICKS }
+            val st = sideTarget
+            if (st != null) {
+                c.goTo(clock, st[0], st[1], anims, { placeCompanion() }, 300f, 120f, 99999f, false)
+                val left = Math.hypot((st[0] - a.renderX).toDouble(), (st[1] - a.renderZ).toDouble())
+                if (left < 160 || time > sideUntil) sideTarget = null
+            } else {
+                c.follow(clock, lead, anims, { placeCompanion() })
+            }
+        }
         a.update(partnerClock(time))
         c.obj.w.anim = a.currentAnim
         c.obj.w.frame = a.frameIndex
         if (c.obj.actionType != 0) processAction(c.obj)
     }
 
+    /** The place he steps aside to, and until when. */
+    private var sideTarget: IntArray? = null
+    private var sideUntil = 0
+
+    /** A free place a few steps from the other hero, away from the player: to the side first (the side that is free), else straight back. */
+    private fun pickSideStep(a: Actor, lead: Actor): IntArray? {
+        var vx = (a.renderX - lead.renderX).toDouble(); var vz = (a.renderZ - lead.renderZ).toDouble()
+        val len = Math.hypot(vx, vz)
+        if (len < 1.0) { // exactly on the player: any way is as good as another
+            val ang = (lead.beta and 0x3FF) * 2.0 * Math.PI / 1024.0
+            vx = Math.sin(ang); vz = -Math.cos(ang)
+        } else { vx /= len; vz /= len }
+        val candidates = arrayOf(doubleArrayOf(-vz, vx), doubleArrayOf(vz, -vx), doubleArrayOf(vx, vz), doubleArrayOf(-vz * 0.7 + vx * 0.7, vx * 0.7 + vz * 0.7), doubleArrayOf(vz * 0.7 + vx * 0.7, -vx * 0.7 + vz * 0.7))
+        for (dist in intArrayOf(SIDESTEP_LENGTH, SIDESTEP_LENGTH / 2)) {
+            for (cand in candidates) {
+                val x = a.renderX + (cand[0] * dist).toInt(); val z = a.renderZ + (cand[1] * dist).toInt()
+                val box = a.zv.copyOf()
+                val sx = x - a.renderX; val sz = z - a.renderZ
+                box[0] += sx; box[1] += sx; box[4] += sz; box[5] += sz
+                // the box that is passed on the way (half way) must be free as well
+                val half = a.zv.copyOf(); half[0] += sx / 2; half[1] += sx / 2; half[4] += sz / 2; half[5] += sz / 2
+                if (boxFree(box) && boxFree(half)) return intArrayOf(x, z)
+            }
+        }
+        return null
+    }
+
     // ------------------------------------------------------------------------------------------------------------------ fighting together
 
     /** The nearest monster in the room that the other hero can go for, or null. */
-    private fun nearestThreat(from: Actor): GameObject? {
+    private fun nearestThreat(from: Actor, player: Actor): GameObject? {
         var best: GameObject? = null
-        var bestDist = THREAT_RANGE
+        var bestDist = Int.MAX_VALUE
         for (g in objects) {
             if (!isMonster(g) || !g.w.active || g.w.room != room) continue
             val m = g.actor ?: continue
+            // only a monster that is near the player (in the picture): the other hero does not run off after one that is far away
+            val toPlayer = Math.hypot((m.renderX - player.renderX).toDouble(), (m.renderZ - player.renderZ).toDouble()).toInt()
+            if (toPlayer > THREAT_RANGE) continue
             val d = Math.hypot((m.renderX - from.renderX).toDouble(), (m.renderZ - from.renderZ).toDouble()).toInt()
             if (d < bestDist) { best = g; bestDist = d }
         }
@@ -794,6 +840,51 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             stopSamplesAtEnd = false
             ui.stopSamples()
         }
+
+        if (intro && data.hasCompanion) steerCar()
+    }
+
+    // ---- the car of the intro in Together mode: smooth steering
+
+    private var carHeading = -1f
+    private var carSegment = 0
+    private var carPath: List<IntArray>? = null
+
+    /**
+     * The path of the car turns by the rules of the original (a quarter turn in 15 ticks, then a new waypoint), which looks jerky at the bends. From the end of the road on the heading is
+     * steered smoothly instead: the car aims at a point of its path a little ahead of it and its heading follows that direction at a gentle, steady rate (after the scripts of the tick,
+     * so the next step is taken in that direction). The place, the speed and the stop at the house stay as the track gives them.
+     */
+    private fun steerCar() {
+        val car = objects.getOrNull(INTRO_CAR)?.takeIf { it.w.active }?.actor
+        if (car == null || car.roomNumber != 0 || car.mark != 14) { if (car == null || car.mark != 14) { carHeading = -1f; carPath = null; carSegment = 0 }; return }
+        val path = carPath ?: (listOf(intArrayOf(car.renderX, car.renderZ)) + TogetherIntro.drivePath).also { carPath = it }
+        // the segment the car is on: it only moves forward along the path
+        fun along(i: Int, px: Int, pz: Int): Double {
+            val ax = path[i][0].toDouble(); val az = path[i][1].toDouble(); val bx = path[i + 1][0].toDouble(); val bz = path[i + 1][1].toDouble()
+            val len2 = (bx - ax) * (bx - ax) + (bz - az) * (bz - az)
+            return if (len2 < 1.0) 1.0 else (((px - ax) * (bx - ax) + (pz - az) * (bz - az)) / len2)
+        }
+        while (carSegment < path.size - 2 && along(carSegment, car.renderX, car.renderZ) >= 1.0) carSegment++
+        // the point ahead: walk along the path from the car's place by the look-ahead distance
+        var remain = CAR_LOOK_AHEAD
+        var i = carSegment
+        var px = car.renderX.toDouble(); var pz = car.renderZ.toDouble()
+        var tx = path[path.size - 1][0].toDouble(); var tz = path[path.size - 1][1].toDouble()
+        while (i < path.size - 1) {
+            val bx = path[i + 1][0].toDouble(); val bz = path[i + 1][1].toDouble()
+            val seg = Math.hypot(bx - px, bz - pz)
+            if (seg >= remain) { tx = px + (bx - px) * remain / seg; tz = pz + (bz - pz) * remain / seg; break }
+            remain -= seg; px = bx; pz = bz; i++
+            tx = bx; tz = bz
+        }
+        val want = Partner.headingOf((tx - car.renderX).toFloat(), (tz - car.renderZ).toFloat())
+        if (carHeading < 0f) carHeading = (car.beta and 0x3FF).toFloat()
+        var diff = (want - carHeading) % 1024f
+        if (diff > 512f) diff -= 1024f
+        if (diff < -512f) diff += 1024f
+        carHeading = ((carHeading + (diff * CAR_STEER_EASE).coerceIn(-CAR_STEER_MAX, CAR_STEER_MAX)) % 1024f + 1024f) % 1024f
+        car.beta = Math.round(carHeading) and 0x3FF
     }
 
     private var stopSamplesAtEnd = false
@@ -828,6 +919,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             boxes.add(Actor.Collider(a.zv, !foundable && g.w.flags and AF_MOVABLE != 0, !foundable))
             owners.add(g.w.index)
         }
+        // Together mode: the other hero is a solid body (he steps aside, see [tickCompanion])
+        if (companionAlive) companion?.actor?.let { boxes.add(Actor.Collider(it.zv, false, true)); owners.add(-1) }
         colliderIndexes = owners.toIntArray()
         return boxes
     }
@@ -1811,7 +1904,10 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         private val MONSTER_SCRIPTS = setOf(18, 21, 53, 74, 84, 91, 92, 123, 131, 132, 142, 268, 353, 366, 400, 405, 410, 415, 442, 445, 448, 467, 476, 480, 484, 501, 517)
 
         /** How far away a monster is for the other hero to go for it, the reach of his fist (centre to centre), the pause between two blows, the data of the fist (HIT 37 1 18 200 force 38). */
-        private const val THREAT_RANGE = 9000
+        private const val THREAT_RANGE = 5500
+        private const val SIDESTEP_DISTANCE = 850f
+        private const val SIDESTEP_LENGTH = 1100
+        private const val SIDESTEP_TICKS = 100
         private const val FIGHT_REACH = 950f
         private const val BLOW_PAUSE = 50
         private val FIST_ANIMS = intArrayOf(37, 39, 40, 41)
@@ -1836,6 +1932,11 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
         /** The floor of the intro that lies outdoors. */
         private const val INTRO_OUTDOORS_STAGE = 7
+
+        /** The steering of the car: how far ahead on its path it aims (units), the share of the remaining turn it takes each tick, and the largest turn in one tick (1024 = a full turn). */
+        private const val CAR_LOOK_AHEAD = 650.0
+        private const val CAR_STEER_EASE = 0.10f
+        private const val CAR_STEER_MAX = 2.2f
         private const val WALK_PLACE_PATIENCE = 25
 
         /** The heroes in the car are drawn this much larger than the body of the film (the car's own occupants were drawn larger than life as well). */

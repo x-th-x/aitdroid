@@ -38,10 +38,14 @@ class Partner(val obj: GameObject) {
      * runs when it is far behind, and takes a short turn to one side when it makes no headway (a table, a corner). [onLost] is called when it is too far or stuck for
      * too long: the game puts it next to the player.
      */
-    fun follow(time: Int, lead: Actor, anims: MoveAnims, onLost: () -> Unit, start: Float = START_DISTANCE, stop: Float = STOP_DISTANCE, run: Float = RUN_DISTANCE, turnInPlace: Boolean = false) {
+    fun follow(time: Int, lead: Actor, anims: MoveAnims, onLost: () -> Unit, start: Float = START_DISTANCE, stop: Float = STOP_DISTANCE, run: Float = RUN_DISTANCE, turnInPlace: Boolean = false) =
+        goTo(time, lead.renderX, lead.renderZ, anims, onLost, start, stop, run, turnInPlace)
+
+    /** The same walking to a place: walks when it is farther than [start], stops nearer than [stop]. */
+    fun goTo(time: Int, targetX: Int, targetZ: Int, anims: MoveAnims, onLost: () -> Unit, start: Float = START_DISTANCE, stop: Float = STOP_DISTANCE, run: Float = RUN_DISTANCE, turnInPlace: Boolean = false) {
         val a = actor ?: return
-        val dx = lead.renderX - a.renderX
-        val dz = lead.renderZ - a.renderZ
+        val dx = targetX - a.renderX
+        val dz = targetZ - a.renderZ
         val dist = hypot(dx.toFloat(), dz.toFloat())
         if (dist > LOST_DISTANCE) { onLost(); return }
         if (moving) { if (dist < stop) moving = false } else if (dist > start) moving = true
