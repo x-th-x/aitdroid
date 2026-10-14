@@ -100,6 +100,10 @@ private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: 
     // who plays: Carnby (the default) or Emily; chosen on the character screen, by the floor selection or by the saved game
     var emily by remember { mutableStateOf(false) }
 
+    // Together mode (an option): both heroes play at the same time; kept between runs
+    val prefs = remember { context.getSharedPreferences("aitdroid", android.content.Context.MODE_PRIVATE) }
+    var together by remember { mutableStateOf(prefs.getBoolean("together", false)) }
+
     // set by the floor selection of the main menu, cleared by every other way into the game
     var floorStart by remember { mutableStateOf<FloorStart?>(null) }
 
@@ -166,16 +170,18 @@ private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: 
                 onBack = { screen = Screen.MENU },
                 onPick = { slot -> loadSlot = slot; emily = SaveStore.isEmily(context, slot); floorStart = null; screen = Screen.ATTIC },
             )
-            Screen.INTRO -> AtticScreen(onExit = { loadSlot = null; floorStart = null; screen = Screen.ATTIC }, controlMode = controlMode, intro = true, emily = emily)
+            Screen.INTRO -> AtticScreen(onExit = { loadSlot = null; floorStart = null; screen = Screen.ATTIC }, controlMode = controlMode, intro = true, emily = emily, together = together)
             Screen.FLOORS -> FloorSelectScreen(onStart = { floorStart = it; emily = it.emily; loadSlot = null; screen = Screen.ATTIC }, onBack = { screen = Screen.MENU })
             Screen.MODELS -> ModelsScreen(onExit = { screen = Screen.MENU })
             Screen.MUSIC -> MusicViewerScreen(onExit = { screen = Screen.MENU })
-            Screen.ATTIC -> AtticScreen(onExit = { screen = Screen.MENU }, controlMode = controlMode, developerMode = developerMode, devItems = devItems, devPos = devPos, loadSlot = loadSlot, floorStart = floorStart, emily = emily)
+            Screen.ATTIC -> AtticScreen(onExit = { screen = Screen.MENU }, controlMode = controlMode, developerMode = developerMode, devItems = devItems, devPos = devPos, loadSlot = loadSlot, floorStart = floorStart, emily = emily, together = together)
             Screen.OPTIONS -> OptionsScreen(
                 controlMode = controlMode,
                 onControlModeChange = { controlMode = it },
                 developerMode = developerMode,
                 onDeveloperModeChange = { developerMode = it },
+                together = together,
+                onTogetherChange = { together = it; prefs.edit().putBoolean("together", it).apply() },
                 onBack = { screen = Screen.MENU }
             )
         }

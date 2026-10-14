@@ -32,6 +32,8 @@ fun OptionsScreen(
     onControlModeChange: (ControlMode) -> Unit,
     developerMode: Boolean,
     onDeveloperModeChange: (Boolean) -> Unit,
+    together: Boolean,
+    onTogetherChange: (Boolean) -> Unit,
     onBack: () -> Unit
 ) {
     BackHandler { onBack() }
@@ -86,11 +88,22 @@ fun OptionsScreen(
                 BitmapText(text = controlsLabel, scale = unit.value, color = Color(0xFFF2E4B8))
             }
 
+            // Together mode: both heroes play at the same time, the one that was not chosen follows the player
+            val togetherLabel = "Together: " + if (together) "On" else "Off"
+            val togetherTextX = 160 - bitmapTextWidth(togetherLabel) / 2
+            Box(
+                modifier = Modifier
+                    .offset(x = unit * togetherTextX, y = gy(92))
+                    .clickable { onTogetherChange(!together) }
+            ) {
+                BitmapText(text = togetherLabel, scale = unit.value, color = Color(0xFFF2E4B8))
+            }
+
             // Developer Mode gates whether the work-in-progress intro/attic flow can be started. Read-only status here.
             val devLabel = "Developer Mode: " + if (developerMode) "Yes" else "No"
             val devTextX = 160 - bitmapTextWidth(devLabel) / 2
             Box(
-                modifier = Modifier.offset(x = unit * devTextX, y = gy(94))
+                modifier = Modifier.offset(x = unit * devTextX, y = gy(110))
             ) {
                 BitmapText(text = devLabel, scale = unit.value, color = Color(0xFFF2E4B8))
             }

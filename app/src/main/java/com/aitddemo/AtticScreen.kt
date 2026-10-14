@@ -362,10 +362,10 @@ private fun effectActor(e: Effect, now: Int, palette: IntArray, data: com.aitdde
 
 /** Entry point: reads the room from the original game files, shows an error message when that is not possible. */
 @Composable
-fun AtticScreen(onExit: () -> Unit, controlMode: ControlMode = ControlMode.STEERING, developerMode: Boolean = false, devItems: List<Int> = emptyList(), devPos: List<Int>? = null, loadSlot: Int? = null, floorStart: FloorStart? = null, intro: Boolean = false, emily: Boolean = false) {
-    val loader = rememberOriginalFiles(if (emily) AtticOriginalReader::missingFilesEmily else AtticOriginalReader::missingFiles, cacheKey = if (emily) "attic-emily" else "attic") { files -> AtticOriginalReader.read(files, emily) }
+fun AtticScreen(onExit: () -> Unit, controlMode: ControlMode = ControlMode.STEERING, developerMode: Boolean = false, devItems: List<Int> = emptyList(), devPos: List<Int>? = null, loadSlot: Int? = null, floorStart: FloorStart? = null, intro: Boolean = false, emily: Boolean = false, together: Boolean = false) {
+    val loader = rememberOriginalFiles(if (together) AtticOriginalReader::missingFilesTogether else if (emily) AtticOriginalReader::missingFilesEmily else AtticOriginalReader::missingFiles, cacheKey = (if (emily) "attic-emily" else "attic") + (if (together) "-together" else "")) { files -> AtticOriginalReader.read(files, emily, together) }
     when (val state = loader.state) {
-        is OriginalState.Ready -> AtticRoom(state.data, onExit, controlMode, developerMode, devItems, devPos, loadSlot, floorStart, intro, emily)
+        is OriginalState.Ready -> AtticRoom(state.data, onExit, controlMode, developerMode, devItems, devPos, loadSlot, floorStart, intro, emily, together)
         is OriginalState.Failed -> OriginalFilesErrorScreen(state.message, onChooseFolder = loader.chooseFolder, onExit = onExit)
         OriginalState.Loading -> Box(Modifier.fillMaxSize().background(Color.Black)) {
             BitmapText(text = "Lade Originaldateien...", scale = 2f, color = Color(0xFFF2E4B8), modifier = Modifier.align(Alignment.Center))
@@ -375,7 +375,7 @@ fun AtticScreen(onExit: () -> Unit, controlMode: ControlMode = ControlMode.STEER
 }
 
 @Composable
-private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: ControlMode, developerMode: Boolean, devItems: List<Int>, devPos: List<Int>?, loadSlot: Int?, floorStart: FloorStart?, intro: Boolean, emily: Boolean) {
+private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: ControlMode, developerMode: Boolean, devItems: List<Int>, devPos: List<Int>?, loadSlot: Int?, floorStart: FloorStart?, intro: Boolean, emily: Boolean, together: Boolean) {
     BackHandler { onExit() }
     // the attic plays the first track of LISTMUS.PAK in a loop (the intro music stops); leaving the attic stops it
     DisposableEffect(world) {
@@ -387,7 +387,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     val ui = remember(world) { AtticUi(world, sounds) }
     val context = androidx.compose.ui.platform.LocalContext.current
     // the intro is the film of stage 7 that the life scripts play (startGame(7, 1) of the original): the car, the driver, his walk through the house up to the attic stairs
-    val game = remember(world) { (if (intro) AtticGame(world.game, ui, 7, 1, true) else AtticGame(world.game, ui)).also { g ->
+    val game = remember(world) { (if (intro) AtticGame(world.game, ui, 7, 1, true, together) else AtticGame(world.game, ui, together = together)).also { g ->
         if (intro) return@also
         devItems.forEach { g.take(it) }
         floorStart?.let { f ->
@@ -580,6 +580,12 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
                 it.maskRoom = o.w.room
                 // an object of another room is covered by the masks of that room, which are in the coordinates of that room
                 if (o.w.room != view.room) game.roomShift(o.w.room)?.let { d -> it.maskShiftX = d[0] / 10; it.maskShiftZ = -d[2] / 10 }
+            }
+        } + listOfNotNull(game.companionObject, game.driverSeatObject).mapNotNull { f ->
+            // the heroes of the Together mode (the other hero, and in the intro the one who plays, seated in the car) are in the room of the scene
+            f.toActor()?.also {
+                it.waterLimit = game.waterLimit.toFloat()
+                it.maskRoom = view.room
             }
         } + game.effects.map { e -> effectActor(e, game.time, world.game.palette, world.game).also { it.sortBox = e.sortBox() } }
         val dark = game.lightOff

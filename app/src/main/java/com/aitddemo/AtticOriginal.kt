@@ -58,11 +58,14 @@ object AtticOriginalReader {
 
     fun missingFilesEmily(files: GameFiles): List<String> = (REQUIRED - BODY_FILE - ANIM_FILE + EMILY_BODY_FILE + EMILY_ANIM_FILE).filter { !files.exists(it) }
 
-    fun read(files: GameFiles, emily: Boolean = false): AtticOriginal {
-        val missing = if (emily) missingFilesEmily(files) else missingFiles(files)
+    /** Together mode needs the lists of both heroes. */
+    fun missingFilesTogether(files: GameFiles): List<String> = (REQUIRED + EMILY_BODY_FILE + EMILY_ANIM_FILE).filter { !files.exists(it) }
+
+    fun read(files: GameFiles, emily: Boolean = false, together: Boolean = false): AtticOriginal {
+        val missing = if (together) missingFilesTogether(files) else if (emily) missingFilesEmily(files) else missingFiles(files)
         if (missing.isNotEmpty()) throw OriginalFilesException("Fehlende Dateien: " + missing.joinToString(", "))
         try {
-            return readAll(files, emily)
+            return readAll(files, emily, together)
         } catch (e: OriginalFilesException) {
             throw e
         } catch (e: Exception) {
@@ -70,7 +73,7 @@ object AtticOriginalReader {
         }
     }
 
-    private fun readAll(files: GameFiles, emily: Boolean): AtticOriginal {
+    private fun readAll(files: GameFiles, emily: Boolean, together: Boolean): AtticOriginal {
         val palette = readPalette(Pak(files.read(RESOURCE_FILE)!!).get(PALETTE_ENTRY) ?: throw OriginalFilesException("$RESOURCE_FILE: Palette fehlt"))
 
         // ---- the game logic: objects, scripts, variables, bodies, animations, sounds, texts
@@ -87,6 +90,8 @@ object AtticOriginalReader {
             // DEFINES.ITD: 16 bit values, high byte first
             files.read(DEFINES_FILE)?.let { d -> ShortArray(d.size / 2) { (((d[it * 2].toInt() and 0xFF) shl 8) or (d[it * 2 + 1].toInt() and 0xFF)).toShort() } } ?: ShortArray(0),
             files.read(PRIORITY_FILE),
+            if (together) Pak(files.read(if (emily) BODY_FILE else EMILY_BODY_FILE)!!) else null,
+            if (together) Pak(files.read(if (emily) ANIM_FILE else EMILY_ANIM_FILE)!!) else null,
         )
         game.rooms.room(STAGE, ROOM) // the first room must be readable now (it is cached for the start)
         val music = musicPak.get(ATTIC_MUSIC + 1) ?: throw OriginalFilesException("${MusicOriginalReader.FILE}: Musik $ATTIC_MUSIC fehlt")

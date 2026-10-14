@@ -18,6 +18,13 @@ class BodyAsset(
     val parts: AnimatedParts?,
 ) {
     val groupCount: Int get() = parts?.groups?.size?.div(12) ?: 0
+
+    /** The same body without its round parts of one size (the two heads that stand for the occupants of the car in the intro). */
+    fun withoutSpheresOfRadius(radius: Int): BodyAsset {
+        val kept = ArrayList<Int>()
+        for (i in 0 until spheres.size / 3) if (spheres[i * 3 + 1] != radius) { kept.add(spheres[i * 3]); kept.add(spheres[i * 3 + 1]); kept.add(spheres[i * 3 + 2]) }
+        return BodyAsset(number, zv, vertices, triangles, lines, kept.toIntArray(), parts)
+    }
 }
 
 /** The text table of the game (ENGLISH.PAK, first entry): `@number:text` lines. */
@@ -72,12 +79,20 @@ class GameData(
     val defines: ShortArray = ShortArray(0),
     /** PRIORITY.ITD: one byte for each sample, how important it is (a sample does not interrupt one with a higher priority), or null when the file is missing. */
     private val priorities: ByteArray? = null,
+    /** Together mode: the bodies and animations of the other hero (Emily's when Carnby plays and the other way round), same numbers as the player's own lists. */
+    private val companionBodyPak: Pak? = null,
+    private val companionAnimPak: Pak? = null,
 ) {
+    /** Does this game have the other hero's bodies and animations (Together mode)? */
+    val hasCompanion: Boolean get() = companionBodyPak != null && companionAnimPak != null
+
     /** The priority of sample [n] (0 when the file is missing). */
     fun samplePriority(n: Int): Int = priorities?.getOrNull(n)?.toInt()?.and(0xFF) ?: 0
 
     private val bodies = HashMap<Int, BodyAsset?>()
     private val anims = HashMap<Int, AnimData?>()
+    private val companionBodies = HashMap<Int, BodyAsset?>()
+    private val companionAnims = HashMap<Int, AnimData?>()
     private val samples = HashMap<Int, VocSample?>()
     private val scripts = HashMap<Int, ShortArray?>()
     private val tracks = HashMap<Int, ShortArray?>()
@@ -88,21 +103,35 @@ class GameData(
     }
 
     /** Body [n] (entry n + 1 of LISTBODY.PAK) or null. */
-    fun body(n: Int): BodyAsset? = bodies.getOrPut(n) {
-        try {
-            val d = bodyPak.get(n + 1) ?: return@getOrPut null
+    fun body(n: Int): BodyAsset? = bodies.getOrPut(n) { readBody(bodyPak, n) }
+
+    /** Body [n] of the other hero's list (Together mode), or null. */
+    fun companionBody(n: Int): BodyAsset? = companionBodies.getOrPut(n) { companionBodyPak?.let { readBody(it, n) } }
+
+    private fun readBody(pak: Pak, n: Int): BodyAsset? = try {
+        val d = pak.get(n + 1)
+        if (d == null) null else {
             val b = OriginalBody.parse(d)
             val (v, t) = b.toMesh(palette)
             BodyAsset(n, b.zv, v, t, b.lines(palette), b.spheres(palette), if (b.isArticulated) b.animatedParts() else null)
-        } catch (_: Exception) {
-            null
         }
+    } catch (_: Exception) {
+        null
     }
 
     /** Animation [n] (entry n + 1 of LISTANIM.PAK) or null. */
     fun anim(n: Int): AnimData? = anims.getOrPut(n) {
         try {
             animPak.get(n + 1)?.let { AnimData.parse(it) }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** Animation [n] of the other hero's list (Together mode), or null. */
+    fun companionAnim(n: Int): AnimData? = companionAnims.getOrPut(n) {
+        try {
+            companionAnimPak?.get(n + 1)?.let { AnimData.parse(it) }
         } catch (_: Exception) {
             null
         }

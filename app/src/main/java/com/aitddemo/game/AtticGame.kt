@@ -1,6 +1,8 @@
 package com.aitddemo.game
 
 import com.aitddemo.RoomView
+import com.aitddemo.initRot
+import com.aitddemo.rotatePoint
 import com.aitddemo.life.LifeHost
 import com.aitddemo.life.LifeVm
 import com.aitddemo.life.WorldObject
@@ -95,7 +97,7 @@ class GameObject(val w: WorldObject) {
  * interprets the scripts; this class is its host: it moves the actors, plays their animations, collides them with the room and with each other, and
  * turns script operations (animations, items, messages, sounds) into effects.
  */
-class AtticGame(val data: GameData, private val ui: GameUi, private var stage: Int = 0, private var room: Int = 0, private val intro: Boolean = false) : LifeHost {
+class AtticGame(val data: GameData, private val ui: GameUi, private var stage: Int = 0, private var room: Int = 0, private val intro: Boolean = false, private val together: Boolean = false) : LifeHost {
     override var time = 0
     val vm = LifeVm({ data.script(it) }, data.objectData, data.vars, this).also { for (i in data.defines.indices) if (i < it.cvars.size) it.cvars[i] = data.defines[i] }
     val objects: Array<GameObject> = Array(vm.objects.size) { GameObject(vm.objects[it]) }
@@ -178,6 +180,193 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         vm.trace = null
         val seen = viewList()
         for (o in vm.objects) if (wanted(o, seen, stage, room)) activate(objects[o.index])
+    }
+
+    // ------------------------------------------------------------------------------------------------------------------ Together mode
+
+    /** Together mode: the other hero, who follows the player (null when the mode is off). It is not an object of the original game, the game moves it. */
+    var companion: Partner? = null
+        private set
+
+    /** The animations the player's script uses for ANIM_MOVE (stand, walk, run, stop, backward, turns), which the companion walks with as well. */
+    private var playerAnims: MoveAnims? = null
+
+    /** The companion as an object to draw (it has an actor and a body of the other hero's list), or null. */
+    val companionObject: GameObject? get() = companion?.obj
+
+    /** A figure that is not an object of the original (no life script, not in the object table) but has a body and an actor: [own] = the body of the player's list, else of the other hero's. */
+    private fun makeFigure(bodyNumber: Int, own: Boolean, x: Int, y: Int, z: Int, beta: Int, anim: Int): GameObject? {
+        if (!together || !data.hasCompanion) return null
+        val asset = (if (own) data.body(bodyNumber) else data.companionBody(bodyNumber)) ?: return null
+        fun animOf(n: Int): AnimData? = if (own) data.anim(n) else data.companionAnim(n) ?: data.anim(n) // an animation the other list lacks: the player's
+        val w = WorldObject(playerIndex.coerceAtLeast(0), data.objectData)
+        w.body = bodyNumber; w.active = true; w.stage = stage; w.room = room
+        w.life = -1; w.lifeMode = -1; w.x = x; w.y = y; w.z = z; w.beta = beta
+        val g = GameObject(w)
+        g.asset = asset
+        val groups = asset.groupCount.coerceAtLeast(1)
+        val rig = ActorRig(groups, Array(groups) { GroupState() }, asset.zv)
+        g.actor = Actor(rig, { n -> animOf(n) ?: error("animation $n") }, x, y, z, beta, if (animOf(anim) != null) anim else -1, time, roomView.hardcols, w.typeZv)
+        return g
+    }
+
+    private fun makeCompanion(bodyNumber: Int, x: Int, y: Int, z: Int, beta: Int, anim: Int): Partner? = makeFigure(bodyNumber, false, x, y, z, beta, anim)?.let { Partner(it) }
+
+    /** The game starts: the other hero stands next to the player. */
+    private fun startCompanion() {
+        if (!together) return
+        val p = player ?: return
+        val a = p.actor ?: return
+        companion = makeCompanion(vm.objects[playerIndex].body, a.renderX, a.renderY, a.renderZ, a.beta and 0x3FF, p.w.anim) ?: return
+        placeCompanion()
+    }
+
+    /** Is the box free of walls and of the objects of the room? */
+    private fun boxFree(box: IntArray): Boolean {
+        fun hits(b: IntArray) = b[0] < box[1] && box[0] < b[1] && b[2] < box[3] && box[2] < b[3] && b[4] < box[5] && box[4] < b[5]
+        if (roomView.hardcols.any { hits(intArrayOf(it.x1, it.x2, it.y1, it.y2, it.z1, it.z2)) }) return false
+        for (g in objects) {
+            if (!g.w.active || g.w.flags and AF_FOUNDABLE != 0) continue
+            val other = g.actor ?: continue
+            if (hits(other.zv)) return false
+        }
+        return true
+    }
+
+    /**
+     * Puts the companion next to the player at a free place: behind him if that is free, else to one side, farther back, in front. Used when the scene changes
+     * (the other hero comes through the door with the player) and when the companion has lost him.
+     */
+    private fun placeCompanion() {
+        val c = companion ?: return
+        val a = c.actor ?: return
+        val lead = player?.actor ?: return
+        val back = (lead.beta and 0x3FF) + 512
+        var best: IntArray? = null
+        search@ for (radius in intArrayOf(1100, 1500, 2000, 700)) {
+            for (turn in intArrayOf(0, 160, -160, 320, -320, 480, -480, 640, -640)) {
+                val ang = (back + turn) * 2.0 * Math.PI / 1024.0
+                val x = lead.renderX + (Math.sin(ang) * radius).toInt()
+                val z = lead.renderZ - (Math.cos(ang) * radius).toInt()
+                val box = a.zv.copyOf()
+                val sx = x - a.renderX; val sy = lead.renderY - a.renderY; val sz = z - a.renderZ
+                box[0] += sx; box[1] += sx; box[2] += sy; box[3] += sy; box[4] += sz; box[5] += sz
+                if (boxFree(box)) { best = intArrayOf(x, z); break@search }
+            }
+        }
+        val at = best ?: intArrayOf(lead.renderX, lead.renderZ)
+        a.teleport(at[0], lead.renderY, at[1], lead.beta and 0x3FF)
+        a.hardcols = roomView.hardcols
+        c.obj.w.stage = stage; c.obj.w.room = room
+        c.reset(time)
+    }
+
+    /** One tick of the companion in the game: it follows the player (see [Partner.follow]). */
+    private fun tickCompanion() {
+        val c = companion ?: return
+        val a = c.actor ?: return
+        val lead = player?.actor ?: return
+        a.hardcols = roomView.hardcols
+        a.colliders = objects.filter { it.w.active && it.actor != null }.map { Actor.Collider(it.actor!!.zv, false, it.w.flags and AF_FOUNDABLE == 0) }
+        c.obj.w.stage = stage; c.obj.w.room = room
+        val dy = lead.renderY - a.renderY // on stairs it keeps the height of the player
+        if (dy != 0) a.moveYBy(dy)
+        val anims = playerAnims ?: MoveAnims(player?.w?.anim ?: -1, -1, -1, -1, -1, -1, -1)
+        c.follow(time, lead, anims) { placeCompanion() }
+        a.update(time)
+    }
+
+    init {
+        if (intro) startIntroFigures() else startCompanion() // after the properties above exist
+    }
+
+    // ---- the intro in Together mode: both heroes sit in the car, then walk to the house side by side
+
+    /** The hero who plays, seated at the wheel of the car in the intro (the other one, the companion, sits next to him). */
+    var driverSeatObject: GameObject? = null
+        private set
+
+    /** Which of the places beside the walker the companion walks at (it changes when a wall is in the way). */
+    private var walkSide = 0
+
+    private fun startIntroFigures() {
+        if (!together || !data.hasCompanion) return
+        val bodyNumber = vm.objects[INTRO_WALKER].body // the body the hero has in the film of the intro
+        val c = makeCompanion(bodyNumber, 0, 0, 0, 0, -1) ?: return
+        c.obj.w.active = false
+        companion = c
+        driverSeatObject = makeFigure(bodyNumber, true, 0, 0, 0, 0, -1)?.also { it.w.active = false }
+    }
+
+    /** Is the box free of the walls of the room? (the objects do not count: the companion walks next to the hero) */
+    private fun wallFree(box: IntArray): Boolean = roomView.hardcols.none { it.x1 < box[1] && box[0] < it.x2 && it.y1 < box[3] && box[2] < it.y2 && it.z1 < box[5] && box[4] < it.z2 }
+
+    /** Puts a figure to a place and heading. */
+    private fun putFigure(g: GameObject, x: Int, y: Int, z: Int, beta: Int) {
+        val a = g.actor ?: return
+        a.teleport(x, y, z, beta)
+        g.w.stage = stage; g.w.room = room
+    }
+
+    /**
+     * One tick of the two figures of the intro. While the car drives they sit in it (the occupants of the car body are left out then); when the script lets the hero
+     * walk to the house the companion walks beside and a little behind him, with the same animation, on the side where no wall is.
+     */
+    private fun tickIntroFigures() {
+        val c = companion ?: return
+        val ca = c.actor ?: return
+        val driver = driverSeatObject
+        val walker = objects.getOrNull(INTRO_WALKER)?.takeIf { it.w.active }
+        val wa = walker?.actor
+        val car = objects.getOrNull(INTRO_CAR)?.takeIf { it.w.active }
+        val carActor = car?.actor
+        if (wa != null) {
+            driver?.w?.active = false
+            c.obj.w.active = true
+            ca.wallCollision = false
+            ca.colliders = emptyList()
+            // beside and behind the hero (x across, z back in his own frame), the other side or straight behind when a wall is there
+            val rot = initRot(0, wa.beta and 0x3FF, 0)
+            var chosen = -1
+            for (k in 0 until WALK_PLACES.size) {
+                val place = WALK_PLACES[(walkSide + k) % WALK_PLACES.size]
+                val (ox, _, oz) = rotatePoint(place[0].toFloat(), 0f, place[1].toFloat(), rot)
+                val box = ca.zv.copyOf()
+                val sx = wa.renderX + ox.toInt() - ca.renderX; val sz = wa.renderZ + oz.toInt() - ca.renderZ; val sy = wa.renderY - ca.renderY
+                box[0] += sx; box[1] += sx; box[2] += sy; box[3] += sy; box[4] += sz; box[5] += sz
+                if (wallFree(box)) { chosen = (walkSide + k) % WALK_PLACES.size; break }
+            }
+            if (chosen < 0) chosen = WALK_PLACES.size - 1
+            walkSide = chosen
+            val place = WALK_PLACES[walkSide]
+            val (ox, _, oz) = rotatePoint(place[0].toFloat(), 0f, place[1].toFloat(), rot)
+            val tx = wa.renderX + ox.toInt(); val tz = wa.renderZ + oz.toInt()
+            // it glides to the place (a jump from one side to the other would be seen), and snaps when it is far away
+            val gap = Math.abs(tx - ca.renderX) + Math.abs(tz - ca.renderZ)
+            val nx = if (gap > 150) tx else ca.renderX + (tx - ca.renderX) * 35 / 100
+            val nz = if (gap > 150) tz else ca.renderZ + (tz - ca.renderZ) * 35 / 100
+            val anim = wa.currentAnim
+            if (anim != ca.currentAnim && data.companionAnim(anim) != null) ca.playAnim(anim, 1, -1)
+            ca.update(time)
+            putFigure(c.obj, nx, wa.renderY, nz, wa.beta and 0x3FF)
+        } else if (carActor != null) {
+            // seated in the car, turned as the car is, at the places of the two heads of the car body
+            val rot = initRot(0, carActor.beta and 0x3FF, 0)
+            fun seat(g: GameObject?, place: FloatArray, driverSeat: Boolean) {
+                val a = g?.actor ?: return
+                val (ox, oy, oz) = rotatePoint(place[0], place[1], place[2], rot)
+                g.w.active = true
+                // the hip joint of the body is at about half its height: the figure is lowered until the hip is at the seat height of the place
+                val hip = -(g.asset?.zv?.get(2) ?: -177) * 52 / 100
+                putFigure(g, carActor.renderX + ox.toInt(), carActor.renderY + oy.toInt() + hip, carActor.renderZ + oz.toInt(), carActor.beta and 0x3FF)
+                SeatedPose.apply(a, g.asset, driverSeat)
+            }
+            seat(driver, CAR_DRIVER, true)
+            seat(c.obj, CAR_PASSENGER, false)
+        } else {
+            driver?.w?.active = false
+            c.obj.w.active = false
+        }
     }
 
     /** The rooms of the floor that count as seen from the current room: itself and the rooms its doors lead to (InitViewedRoomList of the original). */
@@ -307,7 +496,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             g.asset = null
             return
         }
-        g.asset = asset
+        // in Together mode the two figures sit in the car: its two heads (round parts of 20 units) stand for the occupants of the original and are left out
+        g.asset = if (together && intro && w.index == INTRO_CAR && data.hasCompanion) asset.withoutSpheresOfRadius(20) else asset
         val groups = asset.groupCount.coerceAtLeast(1)
         val rig = ActorRig(groups, Array(groups) { GroupState() }, asset.zv)
         val old = g.actor
@@ -399,6 +589,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             if (w.flags and AF_FALLABLE != 0) processFall(g)
             if (g.flightTicks >= 0) processFlight(g)
         }
+
+        if (intro) tickIntroFigures() else tickCompanion()
 
         effects.removeAll { time - it.born > (when (it.kind) { 0 -> EVAPORATION_TICKS; 3 -> 3; 4 -> SMOKE_TICKS; else -> EFFECT_TICKS }) }
 
@@ -566,6 +758,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             it.w.roomChronoStart = time
             it.w.hardDec = -1
         }
+        if (!intro) placeCompanion()
     }
 
     /** For testing (floor selection of the main menu): puts the player into a room of the game at a free place that its first camera sees. */
@@ -737,7 +930,9 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     override fun animMove(obj: Int, anims: IntArray) {
         val a = objects.getOrNull(obj)?.actor ?: return
-        a.chooseMoveAnim(MoveAnims(anims[0], anims[1], anims[2], anims[3], anims[4], anims[5], anims[6]))
+        val moves = MoveAnims(anims[0], anims[1], anims[2], anims[3], anims[4], anims[5], anims[6])
+        if (obj == playerIndex) playerAnims = moves
+        a.chooseMoveAnim(moves)
     }
 
     /** HIT: a punch or weapon swing starts its animation; at the given frame the zone around the hand (the bone group's base point) hits what stands in it. */
@@ -1395,11 +1590,23 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                 a.memoX = x[5]; a.memoY = x[6]; a.memoZ = x[7]
             }
         }
+        if (!intro) { if (companion == null) startCompanion() else placeCompanion() }
         return true
     }
 
     companion object {
         const val PLAYER_SCRIPT = 549
+
+        /** The car and the walking hero of the intro (objects of the film). */
+        const val INTRO_CAR = 286
+        const val INTRO_WALKER = 288
+
+        /** Together mode, the intro: the places beside the walker (across, back) in his own frame, in order of liking: beside and a little behind on one side, the other side, straight behind. */
+        private val WALK_PLACES = arrayOf(intArrayOf(75, 40), intArrayOf(-75, 40), intArrayOf(0, 120))
+
+        /** Together mode, the intro: where the two figures sit in the car body (x across, y up is negative, z back; the car looks along -z): the driver's head, the passenger's. */
+        private val CAR_DRIVER = floatArrayOf(20f, -85f, 30f)
+        private val CAR_PASSENGER = floatArrayOf(-20f, -85f, 30f)
         const val AF_SPECIAL = 0x20
         const val AF_TRIGGER = 0x40
         const val AF_FOUNDABLE = 0x80
