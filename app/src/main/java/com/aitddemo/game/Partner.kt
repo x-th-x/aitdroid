@@ -119,11 +119,25 @@ object SeatedPose {
         intArrayOf(6, 1016, 0),
     )
 
-    fun apply(actor: Actor, asset: BodyAsset?, driver: Boolean) {
+    fun apply(actor: Actor, asset: BodyAsset?, driver: Boolean, time: Int, seed: Int) {
         if (asset == null || asset.groupCount != GROUPS) return
         for (b in if (driver) DRIVER else PASSENGER) {
             val s = actor.state[b[0]]
             s.type = 0; s.x = b[1]; s.y = b[2] and 0x3FF; s.z = 0
+        }
+        // breathing and a little unrest, each figure with its own rhythm: the upper body rises and sinks, the head turns slowly, the driver's hands move on the wheel
+        val t = time / 60.0
+        val breath = Math.sin(t * 2.0 * Math.PI / (3.6 + 0.7 * seed) + seed * 1.9)
+        val upper = actor.state[6]
+        upper.x = (upper.x + (breath * 5).toInt()) and 0x3FF
+        val head = actor.state[7]
+        head.type = 0
+        head.x = ((Math.sin(t * 2.0 * Math.PI / (6.5 + seed) + seed) * 6).toInt()) and 0x3FF
+        head.y = ((Math.sin(t * 2.0 * Math.PI / (9.0 + 2 * seed) + 2 * seed) * 22).toInt()) and 0x3FF
+        if (driver) {
+            val wobble = (Math.sin(t * 2.0 * Math.PI / 2.3) * 7).toInt()
+            actor.state[9].x = (actor.state[9].x + wobble) and 0x3FF
+            actor.state[12].x = (actor.state[12].x - wobble) and 0x3FF
         }
     }
 }

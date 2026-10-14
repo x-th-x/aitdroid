@@ -88,8 +88,13 @@ class GameObject(val w: WorldObject) {
         val a = asset ?: return null
         val parts = a.parts ?: return a.vertices
         val act = actor ?: return a.vertices
-        return BodyPose.pose(parts.vertices, parts.groups, parts.groupOrder, act.state)
+        val posed = BodyPose.pose(parts.vertices, parts.groups, parts.groupOrder, act.state)
+        if (scale == 1f) return posed
+        return FloatArray(posed.size) { posed[it] * scale } // Together mode: the heroes seated in the car are drawn larger
     }
+
+    /** Together mode: the factor the body is drawn larger by (about its feet). */
+    var scale = 1f
 }
 
 /**
@@ -194,6 +199,9 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     /** The companion as an object to draw (it has an actor and a body of the other hero's list), or null. */
     val companionObject: GameObject? get() = companion?.obj
 
+    /** The clock of the other hero: it runs a little slower than the game's, so its steps and its breathing do not stay in step with the player's. */
+    private fun partnerClock(t: Int): Int = t * 92 / 100
+
     /** A figure that is not an object of the original (no life script, not in the object table) but has a body and an actor: [own] = the body of the player's list, else of the other hero's. */
     private fun makeFigure(bodyNumber: Int, own: Boolean, x: Int, y: Int, z: Int, beta: Int, anim: Int): GameObject? {
         if (!together || !data.hasCompanion) return null
@@ -206,7 +214,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         g.asset = asset
         val groups = asset.groupCount.coerceAtLeast(1)
         val rig = ActorRig(groups, Array(groups) { GroupState() }, asset.zv)
-        g.actor = Actor(rig, { n -> animOf(n) ?: error("animation $n") }, x, y, z, beta, if (animOf(anim) != null) anim else -1, time, roomView.hardcols, w.typeZv)
+        g.actor = Actor(rig, { n -> animOf(n) ?: error("animation $n") }, x, y, z, beta, if (animOf(anim) != null) anim else -1, if (own) time else partnerClock(time), roomView.hardcols, w.typeZv)
         return g
     }
 
@@ -219,7 +227,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         val groups = asset.groupCount.coerceAtLeast(1)
         val rig = ActorRig(groups, Array(groups) { GroupState() }, asset.zv)
         val anim = if (data.companionAnim(old.currentAnim) != null) old.currentAnim else -1
-        g.actor = Actor(rig, { n -> data.companionAnim(n) ?: data.anim(n) ?: error("animation $n") }, old.renderX, old.renderY, old.renderZ, old.beta and 0x3FF, anim, time, roomView.hardcols, g.w.typeZv)
+        g.actor = Actor(rig, { n -> data.companionAnim(n) ?: data.anim(n) ?: error("animation $n") }, old.renderX, old.renderY, old.renderZ, old.beta and 0x3FF, anim, partnerClock(time), roomView.hardcols, g.w.typeZv)
     }
 
     private fun makeCompanion(bodyNumber: Int, x: Int, y: Int, z: Int, beta: Int, anim: Int): Partner? = makeFigure(bodyNumber, false, x, y, z, beta, anim)?.let { Partner(it) }
@@ -284,8 +292,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         val dy = lead.renderY - a.renderY // on stairs it keeps the height of the player
         if (dy != 0) a.moveYBy(dy)
         val anims = playerAnims ?: MoveAnims(player?.w?.anim ?: -1, -1, -1, -1, -1, -1, -1)
-        c.follow(time, lead, anims) { placeCompanion() }
-        a.update(time)
+        c.follow(partnerClock(time), lead, anims) { placeCompanion() }
+        a.update(partnerClock(time))
     }
 
     init {
@@ -329,6 +337,10 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
      * walk to the house the companion walks beside and a little behind him, with the same animation, on the side where no wall is.
      */
     private fun tickIntroFigures() {
+        // the car slows down towards the house: from the end of the road on, it drives at less than half its speed
+        objects.getOrNull(INTRO_CAR)?.takeIf { it.w.active }?.actor?.let { car ->
+            car.moveFactor = if (car.roomNumber == 0) 45 + (car.renderX - 450).coerceIn(0, 1050) * 55 / 1050 else 100
+        }
         val c = companion ?: return
         val ca = c.actor ?: return
         val driver = driverSeatObject
@@ -340,6 +352,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         if (wa != null) {
             driver?.w?.active = false
             c.obj.w.active = true
+            c.obj.scale = 1f
             if (c.obj.w.body != walker.w.body && walker.w.body >= 0) refitCompanion(c.obj, walker.w.body)
             val ca = c.actor ?: return
             ca.wallCollision = false
@@ -347,26 +360,30 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             // beside and behind the hero (x across, z back in his own frame), the other side or straight behind when a wall is there
             val rot = initRot(0, wa.beta and 0x3FF, 0)
             var chosen = -1
-            for (k in 0 until WALK_PLACES.size) {
-                val place = WALK_PLACES[(walkSide + k) % WALK_PLACES.size]
+            val places = if (roomView.stage == INTRO_OUTDOORS_STAGE) WALK_PLACES else WALK_PLACES_INDOORS
+            for (k in 0 until places.size) {
+                val place = places[(walkSide + k) % places.size]
                 val (ox, _, oz) = rotatePoint(place[0].toFloat(), 0f, place[1].toFloat(), rot)
                 // only the feet are tested (a slim box above the floor): the boxes of door lintels and the like reach down to the height of the body and are not in the way of a step
                 val px = wa.renderX + ox.toInt(); val pz = wa.renderZ + oz.toInt()
                 val box = intArrayOf(px - 22, px + 22, wa.renderY - 40, wa.renderY - 5, pz - 22, pz + 22)
-                if (wallFree(box)) { chosen = (walkSide + k) % WALK_PLACES.size; break }
+                if (wallFree(box)) { chosen = (walkSide + k) % places.size; break }
             }
-            if (chosen < 0) chosen = WALK_PLACES.size - 1
+            if (chosen < 0) chosen = places.size - 1
             walkSide = chosen
-            val place = WALK_PLACES[walkSide]
+            val place = places[walkSide]
             val (ox, _, oz) = rotatePoint(place[0].toFloat(), 0f, place[1].toFloat(), rot)
             val tx = wa.renderX + ox.toInt(); val tz = wa.renderZ + oz.toInt()
             // it glides to the place (a jump from one side to the other would be seen), and snaps when it is far away
             val gap = Math.abs(tx - ca.renderX) + Math.abs(tz - ca.renderZ)
             val nx = if (gap > 150) tx else ca.renderX + (tx - ca.renderX) * 35 / 100
             val nz = if (gap > 150) tz else ca.renderZ + (tz - ca.renderZ) * 35 / 100
+            // the same animation as the leader, but half a cycle later and at a slightly different tempo (see [partnerClock]): the steps are not taken together
             val anim = wa.currentAnim
-            if (anim != ca.currentAnim && data.companionAnim(anim) != null) ca.playAnim(anim, 1, -1)
-            ca.update(time)
+            var started = false
+            if (anim != ca.currentAnim && data.companionAnim(anim) != null) started = ca.playAnim(anim, 1, -1)
+            ca.update(partnerClock(time))
+            if (started) data.companionAnim(anim)?.let { d -> ca.seekFrame(d.frames.size / 2, partnerClock(time)) }
             putFigure(c.obj, nx, wa.renderY, nz, wa.beta and 0x3FF)
         } else if (carActor != null) {
             // seated in the car, turned as the car is, at the places of the two heads of the car body
@@ -376,9 +393,10 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                 val (ox, oy, oz) = rotatePoint(place[0], place[1], place[2], rot)
                 g.w.active = true
                 // the hip joint of the body is at about half its height: the figure is lowered until the hip is at the seat height of the place
-                val hip = -(g.asset?.zv?.get(2) ?: -177) * 52 / 100
+                g.scale = SEAT_SCALE
+                val hip = (-(g.asset?.zv?.get(2) ?: -177) * 52 / 100 * SEAT_SCALE).toInt()
                 putFigure(g, carActor.renderX + ox.toInt(), carActor.renderY + oy.toInt() + hip, carActor.renderZ + oz.toInt(), carActor.beta and 0x3FF)
-                SeatedPose.apply(a, g.asset, driverSeat)
+                SeatedPose.apply(a, g.asset, driverSeat, time, if (driverSeat) 0 else 1)
             }
             seat(driver, CAR_DRIVER, true)
             seat(c.obj, CAR_PASSENGER, false)
@@ -1623,9 +1641,18 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         /** Together mode, the intro: the places beside the walker (across, back) in his own frame, in order of liking: beside and a little behind on one side, the other side, straight behind. */
         private val WALK_PLACES = arrayOf(intArrayOf(75, 40), intArrayOf(-75, 40), intArrayOf(65, 110), intArrayOf(-65, 110), intArrayOf(0, 130))
 
+        /** Inside the house the second hero keeps a good distance behind the first (about three metres), well to one side so he is not hidden by him. */
+        private val WALK_PLACES_INDOORS = arrayOf(intArrayOf(120, 300), intArrayOf(-120, 300), intArrayOf(0, 330), intArrayOf(100, 240), intArrayOf(-100, 240), intArrayOf(0, 200))
+
+        /** The floor of the intro that lies outdoors. */
+        private const val INTRO_OUTDOORS_STAGE = 7
+
+        /** The heroes in the car are drawn this much larger than the body of the film (the car's own occupants were drawn larger than life as well). */
+        private const val SEAT_SCALE = 1.3f
+
         /** Together mode, the intro: where the two figures sit in the car body (x across, y up is negative, z back; the car looks along -z): the driver's head, the passenger's. */
-        private val CAR_DRIVER = floatArrayOf(20f, -85f, 30f)
-        private val CAR_PASSENGER = floatArrayOf(-20f, -85f, 30f)
+        private val CAR_DRIVER = floatArrayOf(20f, -42f, 30f)
+        private val CAR_PASSENGER = floatArrayOf(-20f, -42f, 30f)
         const val AF_SPECIAL = 0x20
         const val AF_TRIGGER = 0x40
         const val AF_FOUNDABLE = 0x80

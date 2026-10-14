@@ -213,6 +213,18 @@ class Actor(
         boxFor(rig.zv, typeZv, worldX, worldY, worldZ, beta).copyInto(zv)
     }
 
+    /** Together mode: how much of the step of the animation the figure really moves, in percent (the car of the intro drives slower up to the house). */
+    var moveFactor = 100
+
+    /** Together mode: puts a running animation at another key frame (the second hero does not take the same step as the first). Call it after the first [update] of the animation. */
+    fun seekFrame(index: Int, timer: Int) {
+        val d = animData ?: return
+        if (d.frames.isEmpty()) return
+        frame = index.coerceIn(0, d.frames.size - 1)
+        previous = copyOf(state)
+        keyStart = timer
+    }
+
     /** Setzt die Figur an eine neue Stelle (STAGE-Befehl des Skripts): Position, Blickrichtung, Hüllquader neu. */
     fun teleport(x: Int, y: Int, z: Int, newBeta: Int) {
         worldX = x
@@ -695,8 +707,8 @@ class Actor(
 
         // Schritt der Animation in Blickrichtung drehen (walkStep: x = sx*cos - sz*sin, z = sx*sin + sz*cos)
         val a = (beta and 0x3FF) * 2.0 * Math.PI / 1024.0
-        val moveX = (animStepX * cos(a) - animStepZ * sin(a)).toInt()
-        val moveZ = (animStepX * sin(a) + animStepZ * cos(a)).toInt()
+        val moveX = (animStepX * cos(a) - animStepZ * sin(a)).toInt() * moveFactor / 100
+        val moveZ = (animStepX * sin(a) + animStepZ * cos(a)).toInt() * moveFactor / 100
         var sx = moveX + animNegX - oldStepX
         var sz = moveZ + animNegZ - oldStepZ
 

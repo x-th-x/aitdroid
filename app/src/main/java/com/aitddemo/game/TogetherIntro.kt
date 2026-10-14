@@ -8,13 +8,14 @@ package com.aitddemo.game
 object TogetherIntro {
     /** The drive of the car in room 0 (x, z), from the place where the road ends in the film up to the house: through the gate, up the drive, round the bend. */
     private val DRIVE = arrayOf(
-        intArrayOf(-40, 220), intArrayOf(-60, 700), intArrayOf(-20, 1500), intArrayOf(10, 2050),
-        intArrayOf(-80, 2330), intArrayOf(-300, 2490), intArrayOf(-600, 2540), intArrayOf(-950, 2580),
+        // a wide bend from the road into the gate (the car is slow here, so the bend is tight), straight through the gate, then up the drive and round its bend
+        intArrayOf(216, 187), intArrayOf(103, 263), intArrayOf(27, 376), intArrayOf(0, 520), intArrayOf(0, 800), intArrayOf(0, 1150), intArrayOf(-5, 1500),
+        intArrayOf(10, 2050), intArrayOf(-80, 2330), intArrayOf(-300, 2500), intArrayOf(-560, 2640), intArrayOf(-1150, 2960),
     )
 
     /** Where the heroes get out (beside the parked car) and the door of the house they walk to (room 0). */
-    const val GET_OUT_X = -900
-    const val GET_OUT_Z = 2730
+    const val GET_OUT_X = -880
+    const val GET_OUT_Z = 2640
     private const val DOOR_X = -1800
     private const val DOOR_Z = 2700
 
