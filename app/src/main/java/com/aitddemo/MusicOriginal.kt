@@ -30,10 +30,10 @@ object MusicOriginalReader {
                 tracks.add(trackOf(i, d))
             }
             if (tracks.isEmpty()) throw OriginalFilesException("$FILE enthält keine AdLib-Musik")
-            // new tracks made from the music of the attic (track 1), listed first; their numbers (101 and up) are not entries of the file
+            // new tracks (composed ones first, then those derived from the music of the attic, track 1), listed first; their numbers (101 and up) are not entries of the file
             val base = tracks.firstOrNull { it.number == 1 }
             val derived = if (base == null) emptyList() else try {
-                MusicRemix.derive(base.data).mapIndexed { k, n -> trackOf(101 + k, n.data, n.name) }
+                (MusicCompose.compose(base.data) + MusicRemix.derive(base.data)).mapIndexed { k, n -> trackOf(101 + k, n.data, n.name) }
             } catch (_: Exception) {
                 emptyList()
             }
