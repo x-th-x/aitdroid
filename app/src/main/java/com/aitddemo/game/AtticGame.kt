@@ -282,7 +282,13 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     }
 
     private fun deactivate(g: GameObject) {
-        g.actor?.let { g.w.trackPos = it.positionInTrack; g.w.anim = it.currentAnim; g.w.animType = it.currentAnimType; g.w.animInfo = it.currentAnimInfo }
+        g.actor?.let {
+            g.w.trackPos = it.positionInTrack
+            // an animation that was asked for in this very tick and has not begun yet is kept (a script that starts one and then takes the object to another room: the walker of the intro)
+            val pending = it.pendingAnim
+            if (pending != null) { g.w.anim = pending[0]; g.w.animType = pending[1] and 3; g.w.animInfo = pending[2] }
+            else { g.w.anim = it.currentAnim; g.w.animType = it.currentAnimType; g.w.animInfo = it.currentAnimInfo }
+        }
         g.w.active = false
         g.actor = null
         g.asset = null

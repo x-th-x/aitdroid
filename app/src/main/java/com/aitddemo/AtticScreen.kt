@@ -510,8 +510,12 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
                 val tz1 = tz?.get(4) ?: camZ.toInt(); val tz2 = tz?.get(5) ?: camZ.toInt()
                 val tBeta = target?.beta?.and(0x3FF) ?: 0
                 if (shownRoom !== view) { // a new room: the camera of the zone the target stands in
+                    // a camera that sees both rooms stays in use across the border (the new room lists it without a zone of its own): the shot is not cut where the target crosses into the
+                    // next room, only when the target comes into the zone of another camera (this is what the cameras of the intro are made for, the car drives past the border)
+                    val keptId = shownRoom?.pictureIds?.getOrNull(cameraIndex)
+                    val kept = if (keptId == null) -1 else view.pictureIds.indexOf(keptId)
                     shownRoom = view
-                    cameraIndex = resolveAtticCamera(tx1, tx2, tz1, tz2, tBeta, -1, view.cameras) // a new room: the best camera for the target, whatever camera was used before
+                    cameraIndex = resolveAtticCamera(tx1, tx2, tz1, tz2, tBeta, kept, view.cameras)
                 } else {
                     cameraIndex = resolveAtticCamera(tx1, tx2, tz1, tz2, tBeta, cameraIndex, view.cameras)
                 }
