@@ -184,10 +184,14 @@ private class AtticUi(private val world: AtticOriginal, private val sounds: Intr
 }
 
 /** An object of the game as something to draw: its posed vertices turned by the object's angles and moved to its place. */
-private fun GameObject.toActor(): AtticActor? {
+private fun GameObject.toActor(lostPlace: Boolean = false): AtticActor? {
     val act = actor ?: return null
-    val local = posedVertices() ?: return null
+    val posed = posedVertices() ?: return null
     val asset = asset ?: return null
+    // the things of the lost place are ruins: a copy of the body that has decayed (static bodies get their own vertices, animated ones lose polygons and rot in colour)
+    val worn = if (lostPlace) LostPlaceModels.worn(asset) else null
+    val local = worn?.vertices ?: posed
+    val triangles = worn?.triangles ?: asset.triangles
     if (!w.active || w.body < 0) return null
     val x = act.renderX
     val y = act.renderY
@@ -206,9 +210,9 @@ private fun GameObject.toActor(): AtticActor? {
     val zv = act.zv
     // figures (articulated bodies) use their body box for the background masks, furniture the box of its vertices
     val actor = if (asset.parts != null) {
-        AtticActor(out, asset.triangles, x.toFloat(), y.toFloat(), z.toFloat(), zv[0] / 10, zv[1] / 10, zv[4] / 10, zv[5] / 10, asset.lines, asset.spheres)
+        AtticActor(out, triangles, x.toFloat(), y.toFloat(), z.toFloat(), zv[0] / 10, zv[1] / 10, zv[4] / 10, zv[5] / 10, asset.lines, asset.spheres)
     } else {
-        AtticActor(out, asset.triangles, x.toFloat(), y.toFloat(), z.toFloat(), (lowX / 10).toInt(), (highX / 10).toInt(), (lowZ / 10).toInt(), (highZ / 10).toInt(), asset.lines, asset.spheres)
+        AtticActor(out, triangles, x.toFloat(), y.toFloat(), z.toFloat(), (lowX / 10).toInt(), (highX / 10).toInt(), (lowZ / 10).toInt(), (highZ / 10).toInt(), asset.lines, asset.spheres)
     }
     actor.sortBox = zv.copyOf(6)
     actor.clipBox = clipBox
@@ -634,7 +638,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
         frameTick // the poses change every frame
         val actors = game.objects.filter { it.w.room == view.room || camera.viewedRooms.isEmpty() || it.w.room in camera.viewedRooms }.mapNotNull { o ->
             // the window of the attic is a glass door on this branch (the model is made by code)
-            (if (o.w.index == AtticGame.WINDOW_OBJECT && view.stage == 0 && view.room == 0 && !intro) DoorModel.actor(game.doorOpenFraction()) else o.toActor())?.also {
+            (if (o.w.index == AtticGame.WINDOW_OBJECT && view.stage == 0 && view.room == 0 && !intro) DoorModel.actor(game.doorOpenFraction()) else o.toActor(lostPlace))?.also {
                 it.waterLimit = game.waterLimit.toFloat()
                 it.maskRoom = o.w.room
                 it.shadow = o === game.player && !intro && !emily // a soft shadow under Carnby (not in the original game)
