@@ -66,8 +66,8 @@ class GameData(
     val objectData: ByteArray,
     private val lifePak: Pak,
     val vars: ShortArray,
-    private val bodyPak: Pak,
-    private val animPak: Pak,
+    bodyPak0: Pak,
+    animPak0: Pak,
     private val samplePak: Pak?,
     val palette: IntArray,
     val rooms: RoomLoader,
@@ -80,19 +80,38 @@ class GameData(
     /** PRIORITY.ITD: one byte for each sample, how important it is (a sample does not interrupt one with a higher priority), or null when the file is missing. */
     private val priorities: ByteArray? = null,
     /** Together mode: the bodies and animations of the other hero (Emily's when Carnby plays and the other way round), same numbers as the player's own lists. */
-    private val companionBodyPak: Pak? = null,
-    private val companionAnimPak: Pak? = null,
+    companionBodyPak0: Pak? = null,
+    companionAnimPak0: Pak? = null,
 ) {
+    private var bodyPak: Pak = bodyPak0
+    private var animPak: Pak = animPak0
+    private var companionBodyPak: Pak? = companionBodyPak0
+    private var companionAnimPak: Pak? = companionAnimPak0
+
+    /** Together mode: have the two heroes changed places (the player controls the hero of the second list)? */
+    var swapped = false
+        private set
+
+    /** The player and the other hero swap their bodies and animations: [body] and [anim] now give the lists of the other hero, [companionBody] and [companionAnim] those of the first. */
+    fun swapHeroes() {
+        val bp = bodyPak; val ap = animPak
+        bodyPak = companionBodyPak ?: return; animPak = companionAnimPak ?: return
+        companionBodyPak = bp; companionAnimPak = ap
+        val b = bodies; bodies = companionBodies; companionBodies = b
+        val a = anims; anims = companionAnims; companionAnims = a
+        swapped = !swapped
+    }
+
     /** Does this game have the other hero's bodies and animations (Together mode)? */
     val hasCompanion: Boolean get() = companionBodyPak != null && companionAnimPak != null
 
     /** The priority of sample [n] (0 when the file is missing). */
     fun samplePriority(n: Int): Int = priorities?.getOrNull(n)?.toInt()?.and(0xFF) ?: 0
 
-    private val bodies = HashMap<Int, BodyAsset?>()
-    private val anims = HashMap<Int, AnimData?>()
-    private val companionBodies = HashMap<Int, BodyAsset?>()
-    private val companionAnims = HashMap<Int, AnimData?>()
+    private var bodies = HashMap<Int, BodyAsset?>()
+    private var anims = HashMap<Int, AnimData?>()
+    private var companionBodies = HashMap<Int, BodyAsset?>()
+    private var companionAnims = HashMap<Int, AnimData?>()
     private val samples = HashMap<Int, VocSample?>()
     private val scripts = HashMap<Int, ShortArray?>()
     private val tracks = HashMap<Int, ShortArray?>()

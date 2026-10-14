@@ -38,15 +38,15 @@ class Partner(val obj: GameObject) {
      * runs when it is far behind, and takes a short turn to one side when it makes no headway (a table, a corner). [onLost] is called when it is too far or stuck for
      * too long: the game puts it next to the player.
      */
-    fun follow(time: Int, lead: Actor, anims: MoveAnims, onLost: () -> Unit) {
+    fun follow(time: Int, lead: Actor, anims: MoveAnims, onLost: () -> Unit, start: Float = START_DISTANCE, stop: Float = STOP_DISTANCE, run: Float = RUN_DISTANCE, turnInPlace: Boolean = false) {
         val a = actor ?: return
         val dx = lead.renderX - a.renderX
         val dz = lead.renderZ - a.renderZ
         val dist = hypot(dx.toFloat(), dz.toFloat())
         if (dist > LOST_DISTANCE) { onLost(); return }
-        if (moving) { if (dist < STOP_DISTANCE) moving = false } else if (dist > START_DISTANCE) moving = true
+        if (moving) { if (dist < stop) moving = false } else if (dist > start) moving = true
         var joy = 0
-        if (moving) {
+        if (moving || turnInPlace) {
             var target = headingOf(dx.toFloat(), dz.toFloat())
             if (time < detourUntil) target += detourSide * DETOUR_TURN
             var diff = (target - (a.beta and 0x3FF)) % 1024f
@@ -54,11 +54,11 @@ class Partner(val obj: GameObject) {
             if (diff < -512f) diff += 1024f
             if (diff > 40f) joy = joy or Joy.LEFT
             if (diff < -40f) joy = joy or Joy.RIGHT
-            if (abs(diff) < 300f) joy = joy or Joy.FORWARD
+            if (moving && abs(diff) < 300f) joy = joy or Joy.FORWARD
         }
         a.processManual(joy, time, anims)
-        if (moving && dist > RUN_DISTANCE && a.speed == 4) a.speed = 5
-        if (moving && dist <= RUN_DISTANCE && a.speed == 5) a.speed = 4
+        if (moving && dist > run && a.speed == 4) a.speed = 5
+        if (moving && dist <= run && a.speed == 5) a.speed = 4
 
         // no headway: step round the obstacle, and when that does not help for a long time, give up
         if (!moving) {

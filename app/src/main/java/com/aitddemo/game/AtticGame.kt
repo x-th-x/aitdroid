@@ -107,6 +107,9 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     val vm = LifeVm({ data.script(it) }, data.objectData, data.vars, this).also { for (i in data.defines.indices) if (i < it.cvars.size) it.cvars[i] = data.defines[i] }
     val objects: Array<GameObject> = Array(vm.objects.size) { GameObject(vm.objects[it]) }
 
+    /** A new game starts with the heroes as they were chosen (an earlier game may have swapped them). */
+    private val heroesReset = run { if (data.swapped) data.swapHeroes() }
+
     /** The room the game is in now (colliders, zones, cameras); it changes when the player enters another room or floor. */
     var roomView: RoomView = data.rooms.room(stage, room)
         private set
@@ -199,6 +202,23 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     /** The companion as an object to draw (it has an actor and a body of the other hero's list), or null. */
     val companionObject: GameObject? get() = companion?.obj
 
+    /** The health of the hero who is not selected (the selected hero's health is the variable 21 of the game); and whether he is still there. */
+    var helperHp = 20
+        private set
+    var companionAlive = true
+        private set
+
+    /** Is the object a monster right now (its life script is one of the fights that hit)? */
+    private fun isMonster(g: GameObject): Boolean = g.w.life in MONSTER_SCRIPTS
+
+    /** When (tick) the other hero last hit a monster, by the monster's index: the hit effect appears at his hand. */
+    private val companionHitTime = HashMap<Int, Int>()
+    private var nextBlow = 0
+    private var blowIndex = 0
+
+    /** The other hero can be switched to (he is there). */
+    val canSwitch: Boolean get() = companion != null && companionAlive && !intro
+
     /** The clock of the other hero: it runs a little slower than the game's, so its steps and its breathing do not stay in step with the player's. */
     private fun partnerClock(t: Int): Int = t * 92 / 100
 
@@ -237,6 +257,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         if (!together) return
         val p = player ?: return
         val a = p.actor ?: return
+        if (!companionAlive) return
+        helperHp = vm.vars.getOrElse(21) { 20 }.toInt().coerceAtLeast(1)
         companion = makeCompanion(vm.objects[playerIndex].body, a.renderX, a.renderY, a.renderZ, a.beta and 0x3FF, p.w.anim) ?: return
         placeCompanion()
     }
@@ -292,8 +314,95 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         val dy = lead.renderY - a.renderY // on stairs it keeps the height of the player
         if (dy != 0) a.moveYBy(dy)
         val anims = playerAnims ?: MoveAnims(player?.w?.anim ?: -1, -1, -1, -1, -1, -1, -1)
-        c.follow(partnerClock(time), lead, anims) { placeCompanion() }
+        val threat = nearestThreat(a)
+        if (threat != null) fight(c, a, threat, anims) else c.follow(partnerClock(time), lead, anims, { placeCompanion() })
         a.update(partnerClock(time))
+        c.obj.w.anim = a.currentAnim
+        c.obj.w.frame = a.frameIndex
+        if (c.obj.actionType != 0) processAction(c.obj)
+    }
+
+    // ------------------------------------------------------------------------------------------------------------------ fighting together
+
+    /** The nearest monster in the room that the other hero can go for, or null. */
+    private fun nearestThreat(from: Actor): GameObject? {
+        var best: GameObject? = null
+        var bestDist = THREAT_RANGE
+        for (g in objects) {
+            if (!isMonster(g) || !g.w.active || g.w.room != room) continue
+            val m = g.actor ?: continue
+            val d = Math.hypot((m.renderX - from.renderX).toDouble(), (m.renderZ - from.renderZ).toDouble()).toInt()
+            if (d < bestDist) { best = g; bestDist = d }
+        }
+        return best
+    }
+
+    /** The other hero goes for the monster: he runs to it, stops at the reach of his fist, turns to it, and punches with the fist animations of the game. */
+    private fun fight(c: Partner, a: Actor, target: GameObject, anims: MoveAnims) {
+        val m = target.actor ?: return
+        val clock = partnerClock(time)
+        val punching = a.currentAnim in FIST_ANIMS
+        if (!punching) c.follow(clock, m, anims, { placeCompanion() }, FIGHT_REACH + 250f, FIGHT_REACH, 2600f, true)
+        val dx = (m.renderX - a.renderX).toFloat(); val dz = (m.renderZ - a.renderZ).toFloat()
+        val dist = Math.hypot(dx.toDouble(), dz.toDouble()).toFloat()
+        var diff = (Partner.headingOf(dx, dz) - (a.beta and 0x3FF)) % 1024f
+        if (diff > 512f) diff -= 1024f
+        if (diff < -512f) diff += 1024f
+        if (!punching && time >= nextBlow && dist <= FIGHT_REACH + 300f && Math.abs(diff) < 80f) {
+            val anim = FIST_ANIMS[blowIndex % FIST_ANIMS.size]
+            if (startBlow(c.obj, anim)) { blowIndex++; nextBlow = time + BLOW_PAUSE }
+        }
+    }
+
+    /** A blow of the other hero: the same data as the player's fist (HIT 37 1 18 200 force 38 of the item script). */
+    private fun startBlow(g: GameObject, anim: Int): Boolean {
+        val a = g.actor ?: return false
+        if (data.companionAnim(anim) == null) return false
+        if (!a.playAnim(anim, 0, FIST_NEXT)) return false
+        g.actionType = 1
+        g.actionAnim = anim; g.actionFrame = FIST_FRAME; g.actionGroup = FIST_GROUP; g.actionRange = FIST_SIZE; g.actionForce = FIST_FORCE
+        return true
+    }
+
+    /** A monster hit the other hero. When his health is gone he dissolves in bubbles as the monsters do, and is gone (the game goes on). */
+    private fun hurtCompanion(force: Int) {
+        helperHp -= force.coerceAtLeast(1)
+        if (helperHp <= 0) killCompanion()
+    }
+
+    private fun killCompanion() {
+        val c = companion ?: return
+        c.actor?.let { a -> effects.add(Effect(0, a.renderX, a.renderY, a.renderZ, time, a.zv.copyOf(), 0, a.beta and 0x3FF, 0)) }
+        ui.playSample(DEATH_SAMPLE)
+        companion = null
+        companionAlive = false
+    }
+
+    /**
+     * The player takes over the other hero: the two heroes swap their bodies and animation lists, their places and their health, so each stays where he stands and the control
+     * (and the camera) goes to the other one. The hero that is not controlled any more follows and helps in fights.
+     */
+    fun switchHero(): Boolean {
+        val c = companion ?: return false
+        val p = player ?: return false
+        val pa = p.actor ?: return false
+        val ca = c.actor ?: return false
+        if (!companionAlive || intro) return false
+        val px = pa.renderX; val py = pa.renderY; val pz = pa.renderZ; val pb = pa.beta and 0x3FF
+        val cx = ca.renderX; val cy = ca.renderY; val cz = ca.renderZ; val cb = ca.beta and 0x3FF
+        val health = vm.vars[21].toInt()
+        vm.vars[21] = helperHp.toShort()
+        helperHp = health.coerceAtLeast(1)
+        data.swapHeroes()
+        // the player's object gets the other hero's body (the lists are swapped) and the other hero's place
+        createActor(p, -1, 0, -1)
+        p.actor?.let { na -> na.teleport(cx, cy, cz, cb); na.hardcols = roomView.hardcols; na.resetMove() }
+        p.w.x = cx; p.w.y = cy; p.w.z = cz; p.w.beta = cb
+        // the helper gets the body of the hero that was controlled, and his place
+        refitCompanion(c.obj, c.obj.w.body)
+        c.actor?.let { na -> na.teleport(px, py, pz, pb); na.hardcols = roomView.hardcols }
+        c.reset(time)
+        return true
     }
 
     init {
@@ -1060,23 +1169,39 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             }
             2 -> {
                 if (w.anim != g.actionAnim) g.actionType = 0
-                val hot = hotPoint(g, g.actionGroup) ?: intArrayOf(0, 0, 0)
                 val a = g.actor ?: return
+                val ours = g === companion?.obj
+                // a body without the hand group: the zone lies in front of the hero
+                val hot = hotPoint(g, g.actionGroup) ?: if (ours) {
+                    val ang = (a.beta and 0x3FF) * 2.0 * Math.PI / 1024.0
+                    intArrayOf((Math.sin(ang) * 450).toInt(), -900, (-Math.cos(ang) * 450).toInt())
+                } else intArrayOf(0, 0, 0)
                 val x = a.renderX + hot[0]
                 val y = a.renderY + hot[1]
                 val z = a.renderZ + hot[2]
                 val r = g.actionRange
                 for (other in objects) {
                     if (other === g || !other.w.active) continue
+                    if (ours && !isMonster(other)) continue // the other hero fights monsters only (not the player, not the furniture)
                     val zv = other.actor?.zv ?: continue
                     if (!(zv[0] < x + r && x - r < zv[1] && zv[2] < y + r && y - r < zv[3] && zv[4] < z + r && z - r < zv[5])) continue
                     w.hit = other.w.index
                     other.w.hitBy = w.index
                     other.w.hitForce = g.actionForce
+                    if (ours) companionHitTime[other.w.index] = time
                     if (other.actor?.animated == true) {
                         g.actionType = 0
                         return
                     }
+                }
+                // a monster's blow can hit the other hero as well
+                val cmp = companion
+                val cz = cmp?.actor?.zv
+                if (!ours && cmp != null && cz != null && isMonster(g) &&
+                    cz[0] < x + r && x - r < cz[1] && cz[2] < y + r && y - r < cz[3] && cz[4] < z + r && z - r < cz[5]) {
+                    hurtCompanion(g.actionForce)
+                    g.actionType = 0
+                    return
                 }
             }
             6 -> {
@@ -1321,7 +1446,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         when (kind) {
             0 -> if (a != null) effects.add(Effect(0, a.renderX, a.renderY, a.renderZ, time, a.zv.copyOf(), g.w.alpha, a.beta and 0x3FF, g.w.gamma))
             1 -> { // flow at the hand of the one that hit this object
-                val by = objects.getOrNull(g.w.hitBy)
+                val byCompanion = companion != null && (companionHitTime[obj] ?: -99) >= time - 3
+                val by = if (byCompanion) companion?.obj else objects.getOrNull(g.w.hitBy)
                 val h = by?.let { b -> b.shotPoint?.also { b.shotPoint = null } ?: hotPoint(b, b.actionGroup) }
                 val b = by?.actor
                 if (b != null) effects.add(Effect(1, b.renderX + (h?.get(0) ?: 0), b.renderY + (h?.get(1) ?: 0), b.renderZ + (h?.get(2) ?: 0), time, null, 0, (-b.beta) and 0x3FF, 0))
@@ -1608,6 +1734,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                 out.writeBoolean(a.wallCollision); out.writeBoolean(a.triggersOn); out.writeInt(a.memoX); out.writeInt(a.memoY); out.writeInt(a.memoZ)
             }
         }
+        // Together mode: who is controlled, the health of the other hero, and whether he is still there
+        out.writeBoolean(data.swapped); out.writeInt(helperHp); out.writeBoolean(companionAlive)
     }
 
     /** Puts the game back into a state written by [saveState]; false when the saved room cannot be read. */
@@ -1634,6 +1762,11 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                 Saved(f, active, null, null)
             }
         }
+        var savedSwapped = false; var savedHelperHp = -1; var savedAlive = true
+        try { savedSwapped = inp.readBoolean(); savedHelperHp = inp.readInt(); savedAlive = inp.readBoolean() } catch (_: java.io.IOException) { }
+        if (savedSwapped != data.swapped && data.hasCompanion) data.swapHeroes()
+        companionAlive = savedAlive
+        if (savedHelperHp >= 0) helperHp = savedHelperHp
         // the scene is rebuilt from nothing
         for (g in objects) { g.actor = null; g.asset = null; g.w.active = false; g.actionType = 0; g.fallTicks = -1; g.flightTicks = -1; g.alphaTarget = -1 }
         stage = newStage; room = newRoom; roomView = view; roomVersion++
@@ -1667,12 +1800,29 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                 a.memoX = x[5]; a.memoY = x[6]; a.memoZ = x[7]
             }
         }
-        if (!intro) { if (companion == null) startCompanion() else placeCompanion() }
+        if (!intro) { if (companion == null) { val keep = helperHp; startCompanion(); if (savedHelperHp >= 0) helperHp = keep } else placeCompanion() }
         return true
     }
 
     companion object {
         const val PLAYER_SCRIPT = 549
+
+        /** The life scripts of the monsters (the ones that hit and dissolve when they die). */
+        private val MONSTER_SCRIPTS = setOf(18, 21, 53, 74, 84, 91, 92, 123, 131, 132, 142, 268, 353, 366, 400, 405, 410, 415, 442, 445, 448, 467, 476, 480, 484, 501, 517)
+
+        /** How far away a monster is for the other hero to go for it, the reach of his fist (centre to centre), the pause between two blows, the data of the fist (HIT 37 1 18 200 force 38). */
+        private const val THREAT_RANGE = 9000
+        private const val FIGHT_REACH = 950f
+        private const val BLOW_PAUSE = 50
+        private val FIST_ANIMS = intArrayOf(37, 39, 40, 41)
+        private const val FIST_NEXT = 38
+        private const val FIST_FRAME = 1
+        private const val FIST_GROUP = 18
+        private const val FIST_SIZE = 220
+        private const val FIST_FORCE = 3
+
+        /** The sound of a monster that dissolves (SAMPLE 6 of its script). */
+        private const val DEATH_SAMPLE = 6
 
         /** The car and the walking hero of the intro (objects of the film). */
         const val INTRO_CAR = 286

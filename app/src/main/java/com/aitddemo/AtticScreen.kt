@@ -723,6 +723,18 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
             onHeld = { actionHeld = it },
         )
 
+        // Together mode: the control goes to the other hero
+        if (!intro && game.canSwitch) Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(bottom = if (controlMode == ControlMode.DPAD) 24.dp else 40.dp, end = if (controlMode == ControlMode.DPAD) 340.dp else 190.dp)
+                .background(Color.Black.copy(alpha = 0.5f))
+                .clickable { game.switchHero(); stickBase = null; stickThumb = null; stickX = 0f; stickY = 0f }
+                .padding(horizontal = 12.dp, vertical = 10.dp)
+        ) {
+            BitmapText(text = "Switch", scale = 2f, color = Color(0xFFF2E4B8))
+        }
+
         BackButton(onClick = onExit)
 
         if (!intro) Box(
