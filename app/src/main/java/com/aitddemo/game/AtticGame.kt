@@ -359,25 +359,27 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             ca.colliders = emptyList()
             // beside and behind the hero (x across, z back in his own frame), the other side or straight behind when a wall is there
             val rot = initRot(0, wa.beta and 0x3FF, 0)
+            // indoors the film's scale is ten times larger (the body of the house is 1775 units high, the one outdoors 177): places and boxes are given in units of the outdoor scale
+            val unit = if (roomView.stage == INTRO_OUTDOORS_STAGE) 1 else 10
             var chosen = -1
             val places = if (roomView.stage == INTRO_OUTDOORS_STAGE) WALK_PLACES else WALK_PLACES_INDOORS
             for (k in 0 until places.size) {
                 val place = places[(walkSide + k) % places.size]
-                val (ox, _, oz) = rotatePoint(place[0].toFloat(), 0f, place[1].toFloat(), rot)
+                val (ox, _, oz) = rotatePoint(place[0].toFloat() * unit, 0f, place[1].toFloat() * unit, rot)
                 // only the feet are tested (a slim box above the floor): the boxes of door lintels and the like reach down to the height of the body and are not in the way of a step
                 val px = wa.renderX + ox.toInt(); val pz = wa.renderZ + oz.toInt()
-                val box = intArrayOf(px - 22, px + 22, wa.renderY - 40, wa.renderY - 5, pz - 22, pz + 22)
+                val box = intArrayOf(px - 22 * unit, px + 22 * unit, wa.renderY - 40 * unit, wa.renderY - 5 * unit, pz - 22 * unit, pz + 22 * unit)
                 if (wallFree(box)) { chosen = (walkSide + k) % places.size; break }
             }
             if (chosen < 0) chosen = places.size - 1
             walkSide = chosen
             val place = places[walkSide]
-            val (ox, _, oz) = rotatePoint(place[0].toFloat(), 0f, place[1].toFloat(), rot)
+            val (ox, _, oz) = rotatePoint(place[0].toFloat() * unit, 0f, place[1].toFloat() * unit, rot)
             val tx = wa.renderX + ox.toInt(); val tz = wa.renderZ + oz.toInt()
             // it glides to the place (a jump from one side to the other would be seen), and snaps when it is far away
             val gap = Math.abs(tx - ca.renderX) + Math.abs(tz - ca.renderZ)
-            val nx = if (gap > 150) tx else ca.renderX + (tx - ca.renderX) * 35 / 100
-            val nz = if (gap > 150) tz else ca.renderZ + (tz - ca.renderZ) * 35 / 100
+            val nx = if (gap > 150 * unit) tx else ca.renderX + (tx - ca.renderX) * 35 / 100
+            val nz = if (gap > 150 * unit) tz else ca.renderZ + (tz - ca.renderZ) * 35 / 100
             // the same animation as the leader, but half a cycle later and at a slightly different tempo (see [partnerClock]): the steps are not taken together
             val anim = wa.currentAnim
             var started = false
@@ -392,10 +394,11 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                 val a = g?.actor ?: return
                 val (ox, oy, oz) = rotatePoint(place[0], place[1], place[2], rot)
                 g.w.active = true
-                // the hip joint of the body is at about half its height: the figure is lowered until the hip is at the seat height of the place
+                // the sole of the seated body rests on the floor of the car: the hip joint is (hip to sole) above it, and the origin of the body (its feet) lies a hip height below the hip joint
                 g.scale = SEAT_SCALE
-                val hip = (-(g.asset?.zv?.get(2) ?: -177) * 52 / 100 * SEAT_SCALE).toInt()
-                putFigure(g, carActor.renderX + ox.toInt(), carActor.renderY + oy.toInt() + hip, carActor.renderZ + oz.toInt(), carActor.beta and 0x3FF)
+                val hipHeight = -(g.asset?.zv?.get(2) ?: -177) * 52 / 100f * SEAT_SCALE
+                val originY = CAR_FLOOR - SEATED_HIP_TO_SOLE * SEAT_SCALE + hipHeight
+                putFigure(g, carActor.renderX + ox.toInt(), carActor.renderY + oy.toInt() + originY.toInt(), carActor.renderZ + oz.toInt(), carActor.beta and 0x3FF)
                 SeatedPose.apply(a, g.asset, driverSeat, time, if (driverSeat) 0 else 1)
             }
             seat(driver, CAR_DRIVER, true)
@@ -1641,18 +1644,22 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         /** Together mode, the intro: the places beside the walker (across, back) in his own frame, in order of liking: beside and a little behind on one side, the other side, straight behind. */
         private val WALK_PLACES = arrayOf(intArrayOf(75, 40), intArrayOf(-75, 40), intArrayOf(65, 110), intArrayOf(-65, 110), intArrayOf(0, 130))
 
-        /** Inside the house the second hero keeps a good distance behind the first (about three metres), well to one side so he is not hidden by him. */
-        private val WALK_PLACES_INDOORS = arrayOf(intArrayOf(120, 300), intArrayOf(-120, 300), intArrayOf(0, 330), intArrayOf(100, 240), intArrayOf(-100, 240), intArrayOf(0, 200))
+        /** Inside the house the second hero keeps a good distance behind the first (more than two metres, in the outdoor scale of the places), well to one side so he is not hidden by him. */
+        private val WALK_PLACES_INDOORS = arrayOf(intArrayOf(90, 230), intArrayOf(-90, 230), intArrayOf(65, 190), intArrayOf(-65, 190), intArrayOf(0, 260), intArrayOf(0, 180))
 
         /** The floor of the intro that lies outdoors. */
         private const val INTRO_OUTDOORS_STAGE = 7
 
         /** The heroes in the car are drawn this much larger than the body of the film (the car's own occupants were drawn larger than life as well). */
-        private const val SEAT_SCALE = 1.3f
+        private const val SEAT_SCALE = 1.6f
 
         /** Together mode, the intro: where the two figures sit in the car body (x across, y up is negative, z back; the car looks along -z): the driver's head, the passenger's. */
-        private val CAR_DRIVER = floatArrayOf(20f, -42f, 30f)
-        private val CAR_PASSENGER = floatArrayOf(-20f, -42f, 30f)
+        private val CAR_DRIVER = floatArrayOf(20f, 0f, 30f)
+        private val CAR_PASSENGER = floatArrayOf(-20f, 0f, 30f)
+
+        /** The floor of the car (y, up is negative): the soles of the seated heroes rest on it; from the hip joint to the sole of a seated body are 52 units (before it is scaled). */
+        private const val CAR_FLOOR = -42f
+        private const val SEATED_HIP_TO_SOLE = 52f
         const val AF_SPECIAL = 0x20
         const val AF_TRIGGER = 0x40
         const val AF_FOUNDABLE = 0x80
