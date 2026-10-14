@@ -63,14 +63,14 @@ private fun MusicList(tracks: List<MusicTrack>, onExit: () -> Unit) {
                 BitmapText(text = title, scale = unit.value, color = Color(0xFFF2E4B8))
             }
             tracks.forEachIndexed { i, track ->
-                val y = 42 + i * 15
+                val y = 36 + i * 13
                 val isPlaying = playing == track.number
-                val label = "Track ${i + 1}   ${lengthText(track.seconds)}   ${track.voices} voices" + if (track.rhythm) "  drums" else ""
+                val label = (if (track.name != null) "New: ${track.name}" else "Track ${track.number}") + "   ${lengthText(track.seconds)}   ${track.voices} voices" + if (track.rhythm) "  drums" else ""
                 if (isPlaying) {
                     Box(
                         modifier = Modifier
                             .offset(x = gx(36), y = gy(y))
-                            .size(gx(248), gy(15))
+                            .size(gx(248), gy(13))
                             .background(Color(0xFF4A1420).copy(alpha = 0.6f)),
                     )
                 }
@@ -91,7 +91,7 @@ private fun MusicList(tracks: List<MusicTrack>, onExit: () -> Unit) {
                 }
             }
             val hint = "Tap a track to play, tap again to stop"
-            Box(modifier = Modifier.offset(x = unit * (160 - bitmapTextWidth(hint) / 2), y = gy(172))) {
+            Box(modifier = Modifier.offset(x = unit * (160 - bitmapTextWidth(hint) / 2), y = gy(180))) {
                 BitmapText(text = hint, scale = unit.value, color = Color(0xFF9C8B6E))
             }
         }
