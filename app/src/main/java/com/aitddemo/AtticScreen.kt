@@ -166,6 +166,9 @@ private class AtticUi(private val world: AtticOriginal, private val sounds: Intr
     }
 }
 
+private const val INTRO_CAR = 286 // the car of the intro, which the camera follows
+private const val CAMERA_HOLD_TICKS = 90 // how long its last picture stays after the car has stopped (1.5 seconds of the 60 ticks per second)
+
 /** An object of the game as something to draw: its posed vertices turned by the object's angles and moved to its place. */
 private fun GameObject.toActor(): AtticActor? {
     val act = actor ?: return null
@@ -414,6 +417,9 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     val startNanos = remember { System.nanoTime() }
     var frameTick by remember { mutableIntStateOf(0) }
     var cameraIndex by remember { mutableIntStateOf(ATTIC_INITIAL_CAMERA_INDEX) }
+    var lastCameraTarget = -1
+    var holdCameraTarget = -1
+    var holdCameraUntil = 0
     // the room the game is in; its cameras, pictures and masks are prepared the first time it is shown
     val roomCache = remember(world) { java.util.concurrent.ConcurrentHashMap<RoomView, List<android.graphics.Bitmap>>() }
     var shownRoom by remember { mutableStateOf<RoomView?>(null) }
@@ -500,7 +506,14 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
                 // the room's camera follows the player by the engine's zone rule (checkIfCameraChangeIsRequired)
                 val view = game.roomView
                 // the camera follows the object the scripts point it at (the player, or for a moment a creature entering)
-                val targetObject = game.objects.getOrNull(game.cameraTarget)?.takeIf { it.w.active }
+                // in the intro a shot is not cut away at the moment the script gives the camera another target: the picture stays with the old target (the car that has come to a stop)
+                // for a moment, so that its stop is seen before the next view comes (the script of the car moves the camera on in the same tick in which the car stops)
+                if (intro && game.cameraTarget != lastCameraTarget) {
+                    if (lastCameraTarget == INTRO_CAR) { holdCameraTarget = lastCameraTarget; holdCameraUntil = game.time + CAMERA_HOLD_TICKS }
+                    lastCameraTarget = game.cameraTarget
+                }
+                val cameraTargetIndex = if (intro && game.time < holdCameraUntil) holdCameraTarget else game.cameraTarget
+                val targetObject = game.objects.getOrNull(cameraTargetIndex)?.takeIf { it.w.active }
                 val target = targetObject?.actor ?: game.player?.actor
                 // an object without a body (the helper places of the intro) has no box: its place counts
                 val camX = target?.renderX?.toFloat() ?: targetObject?.fixedZv?.let { (it[0] + it[1]) / 2f } ?: targetObject?.w?.x?.toFloat() ?: playerX
