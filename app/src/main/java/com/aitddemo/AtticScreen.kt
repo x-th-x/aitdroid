@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.runtime.getValue
@@ -165,6 +166,20 @@ private class AtticUi(private val world: AtticOriginal, private val sounds: Intr
         const val MESSAGE_NANOS = 2_800_000_000L
     }
 }
+
+/** Emily's umbrella in the intro: over the walker of the intro (object 288) while it is outside the house (not in the original game). */
+private fun emilyUmbrella(game: AtticGame, view: RoomView, camera: AtticCameraDef, wanted: Boolean): List<AtticActor> {
+    if (!wanted || view.stage != 7) return emptyList()
+    val o = game.objects.getOrNull(INTRO_WALKER)?.takeIf { it.w.active && it.w.stage == 7 } ?: return emptyList()
+    if (!(o.w.room == view.room || camera.viewedRooms.isEmpty() || o.w.room in camera.viewedRooms)) return emptyList()
+    val a = o.actor ?: return emptyList()
+    return listOf(UmbrellaModel.actor(a.renderX.toFloat(), a.renderY.toFloat(), a.renderZ.toFloat(), a.beta and 0x3FF, (game.time % 90) / 90f).also {
+        it.maskRoom = o.w.room
+        if (o.w.room != view.room) game.roomShift(o.w.room)?.let { d -> it.maskShiftX = d[0] / 10; it.maskShiftZ = -d[2] / 10 }
+    })
+}
+
+private const val INTRO_WALKER = 288 // the driver of the intro (Emily when she plays)
 
 /** An object of the game as something to draw: its posed vertices turned by the object's angles and moved to its place. */
 private fun GameObject.toActor(): AtticActor? {
@@ -380,6 +395,8 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     }
 
     val sounds = remember(world) { IntroSounds({ world.game.sample(it) }, { world.game.samplePriority(it) }) }
+    val rainSound = remember { RainSound() }
+    DisposableEffect(rainSound) { onDispose { rainSound.stop() } }
     DisposableEffect(sounds) { onDispose { sounds.release() } }
     val ui = remember(world) { AtticUi(world, sounds) }
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -568,10 +585,15 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
                 // an object of another room is covered by the masks of that room, which are in the coordinates of that room
                 if (o.w.room != view.room) game.roomShift(o.w.room)?.let { d -> it.maskShiftX = d[0] / 10; it.maskShiftZ = -d[2] / 10 }
             }
-        } + game.effects.map { e -> effectActor(e, game.time, world.game.palette, world.game).also { it.sortBox = e.sortBox() } }
+        } + game.effects.map { e -> effectActor(e, game.time, world.game.palette, world.game).also { it.sortBox = e.sortBox() } } + emilyUmbrella(game, view, camera, intro && emily)
         val dark = game.lightOff
         renderer.render(camera, if (showBackground && !dark) backgrounds[camera.index.coerceIn(0, backgrounds.size - 1)] else blackBackground, actors, if (dark) emptyMap() else view.maskViews.getOrNull(camera.index) ?: emptyMap(), view.room)
         renderer.bitmap.asImageBitmap()
+    }
+
+    // the sound of the rain, as loud as the rain is (only outside the house in Emily's intro)
+    SideEffect {
+        if (intro && emily && view.stage == 7) { rainSound.start(); rainSound.level(rainLevel(game.time / 60f)) } else rainSound.stop()
     }
 
     // the intro is skipped by a swipe up (80 dp)
@@ -602,6 +624,8 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
             // SHAKING: every second tick of the 60 per second the display starts two of the 200 lines later
             val shift = if (game.shaking && game.time and 1 == 1) -2f / 200f else 0f
             Image(bitmap = roomImage, contentDescription = null, contentScale = ContentScale.Fit, filterQuality = FilterQuality.None, modifier = Modifier.fillMaxSize().graphicsLayer { translationY = size.height * shift })
+            // Emily's intro outside the house: it rains, harder and harder (not in the original game)
+            if (intro && emily && view.stage == 7) RainOverlay(rainLevel(game.time / 60f), game.time / 60f)
         }
 
         // Floating joystick: appears where the thumb touches; drag distance is clamped and normalized to -1..1.
