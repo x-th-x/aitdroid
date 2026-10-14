@@ -417,6 +417,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         checkDoorway()
         checkBalconyExit()
         checkBalconyCreature()
+        checkBalconyMusic()
 
         // the floor loader of the original stops all samples when a script has taken the scene to another floor (after the scripts of the frame ran, so a sample that the
         // scripts started in that frame is cut at once; the sample that waits behind it, SAMPLE_THEN, survives and starts)
@@ -435,7 +436,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         player?.actor?.teleport(x.coerceIn(-500, 500), 0, BalconyRoom.OUT_Z, 512)
         balconyArrival = time
         musicBefore = vm.currentMusic
-        ui.music(MUSIC_BALCONY, true) // the violins of the new music
+        // the violins of the new music; when the creature of the balcony is still alive from an earlier visit, the chase music
+        ui.music(if (vm.vars[BALCONY_VAR].toInt() == 1 && vm.objects[WINDOW_CREATURE].room == BalconyRoom.NUMBER) MUSIC_PURSUIT else MUSIC_BALCONY, true)
     }
 
     /** The player comes back through the window into the attic. */
@@ -509,7 +511,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         val z = JUMP_Z0 + (JUMP_Z1 - JUMP_Z0) * p
         val y = JUMP_Y0 * (1f - p) - JUMP_HEIGHT * 4f * p * (1f - p)
         a.teleport(x.toInt(), y.toInt(), z.toInt(), 0)
-        if (!stormSent && p >= 0.35f) { stormSent = true; ui.balconyStorm() }
+        if (!stormSent && p >= 0.35f) { stormSent = true; ui.balconyStorm(); ui.music(MUSIC_PURSUIT, true) } // the flash shows the creature, the chase music starts with it
         if (!growlSent && p >= 0.5f) { growlSent = true; ui.playSample(CREATURE_SAMPLE) }
         if (p >= 1f) {
             // down: it lands with a thump, from now on the script of the creature (the chase and the bites) runs
@@ -520,6 +522,12 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             a.collisionsOn = true
             climbStart = -1
         }
+    }
+
+    /** On the balcony: when the creature is dead (the script deleted it) the quiet music comes back. */
+    private fun checkBalconyMusic() {
+        if (stage != 0 || room != BalconyRoom.NUMBER || climbStart >= 0) return
+        if (vm.vars[BALCONY_VAR].toInt() == 1 && vm.objects[WINDOW_CREATURE].room == -1 && vm.currentMusic == MUSIC_PURSUIT) ui.music(MUSIC_BALCONY, true)
     }
 
     private fun startClimb() {
@@ -1535,6 +1543,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         const val CVAR_SAMPLE_CHOC = 9
         const val CVAR_REVERSE_OBJECT = 11
         const val CVAR_BODY_FLAMME = 1
+        const val MUSIC_PURSUIT = 101 // "Pursuit", composed at runtime too: the creature leaps onto the balcony
         const val MUSIC_BALCONY = 100 // not a track of the file: "Nocturne Violin", composed at runtime (MusicCompose)
         const val WINDOW_OBJECT = 7 // the window of the attic (the glass door on this branch)
         const val WINDOW_CREATURE = 21 // the second creature of the attic, which comes through the window in the original
