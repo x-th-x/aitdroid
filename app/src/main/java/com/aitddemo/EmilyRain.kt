@@ -101,12 +101,14 @@ object UmbrellaModel {
     private const val STICK = 0xFF2A2018.toInt()
 
     /** The umbrella over a figure at ([x], [y], [z]) turned by [beta] (engine angle, 1024 = full turn); [sway] 0..1 moves it a little as she walks. */
-    fun actor(x: Float, y: Float, z: Float, beta: Int, sway: Float): AtticActor {
+    fun actor(x: Float, y: Float, z: Float, beta: Int, sway: Float, scale: Float = 1f): AtticActor {
         val v = ArrayList<Float>()
         val t = ArrayList<Int>()
         val th = beta * 2f * Math.PI.toFloat() / 1024f
         val c = cos(th); val s = sin(th)
-        fun vert(lx: Float, ly: Float, lz: Float): Int {
+        fun vert(lx0: Float, ly0: Float, lz0: Float): Int {
+            // the umbrella is as big as the figure: the body of the intro outside the house is small, the umbrella takes its scale
+            val lx = lx0 * scale; val ly = ly0 * scale; val lz = lz0 * scale
             // the umbrella leans a little with her steps
             val tilt = 0.06f * sin(sway * 6.2832f)
             val tx = lx + ly * -tilt * 0.3f
@@ -132,8 +134,9 @@ object UmbrellaModel {
         // the hook of the handle
         val h1 = vert(-30f, -1130f, 0f); val h2 = vert(30f, -1130f, 0f); val h3 = vert(30f, -1060f, 0f); val h4 = vert(-30f, -1060f, 0f)
         t.add(h1); t.add(h2); t.add(h3); t.add(STICK); t.add(h1); t.add(h3); t.add(h4); t.add(STICK)
-        val actor = AtticActor(v.toFloatArray(), t.toIntArray(), x, y - 1100f, z, (x / 10).toInt() - 70, (x / 10).toInt() + 70, (z / 10).toInt() - 70, (z / 10).toInt() + 70)
-        actor.sortBox = intArrayOf(x.toInt() - 700, x.toInt() + 700, (y - 2300f).toInt(), (y - 1050f).toInt(), z.toInt() - 700, z.toInt() + 700)
+        val r = (700f * scale).toInt().coerceAtLeast(20)
+        val actor = AtticActor(v.toFloatArray(), t.toIntArray(), x, y - 1100f * scale, z, (x / 10).toInt() - r / 10, (x / 10).toInt() + r / 10, (z / 10).toInt() - r / 10, (z / 10).toInt() + r / 10)
+        actor.sortBox = intArrayOf(x.toInt() - r, x.toInt() + r, (y - 2300f * scale).toInt(), (y - 1050f * scale).toInt(), z.toInt() - r, z.toInt() + r)
         return actor
     }
 }

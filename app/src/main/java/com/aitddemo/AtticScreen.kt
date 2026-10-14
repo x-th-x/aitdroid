@@ -173,7 +173,11 @@ private fun emilyUmbrella(game: AtticGame, view: RoomView, camera: AtticCameraDe
     val o = game.objects.getOrNull(INTRO_WALKER)?.takeIf { it.w.active && it.w.stage == 7 } ?: return emptyList()
     if (!(o.w.room == view.room || camera.viewedRooms.isEmpty() || o.w.room in camera.viewedRooms)) return emptyList()
     val a = o.actor ?: return emptyList()
-    return listOf(UmbrellaModel.actor(a.renderX.toFloat(), a.renderY.toFloat(), a.renderZ.toFloat(), a.beta and 0x3FF, (game.time % 90) / 90f).also {
+    // the figure outside the house is a small body (the scene is far away): the umbrella has the height of the body
+    var top = 0f; var bottom = 0f
+    o.asset?.vertices?.let { vs -> for (i in 0 until vs.size / 3) { top = minOf(top, vs[i * 3 + 1]); bottom = maxOf(bottom, vs[i * 3 + 1]) } }
+    val scale = ((bottom - top) / 1775f).coerceIn(0.03f, 1.5f)
+    return listOf(UmbrellaModel.actor(a.renderX.toFloat(), a.renderY.toFloat(), a.renderZ.toFloat(), a.beta and 0x3FF, (game.time % 90) / 90f, scale).also {
         it.maskRoom = o.w.room
         if (o.w.room != view.room) game.roomShift(o.w.room)?.let { d -> it.maskShiftX = d[0] / 10; it.maskShiftZ = -d[2] / 10 }
     })
