@@ -59,6 +59,7 @@ class MainActivity : ComponentActivity() {
         val devPos = intent?.getStringExtra("devPos")?.split(",")?.mapNotNull { it.trim().toIntOrNull() }?.takeIf { it.size == 3 }
         // `--es devVars 19=1,20=0` sets script variables when the attic starts (for testing; 19=1 starts the second creature)
         DevOptions.vars = intent?.getStringExtra("devVars")?.split(",")?.mapNotNull { e -> e.split("=").takeIf { it.size == 2 }?.let { p -> p[0].trim().toIntOrNull()?.let { i -> p[1].trim().toIntOrNull()?.let { v -> i to v } } } } ?: emptyList()
+        DevOptions.emily = intent?.getBooleanExtra("devEmily", false) ?: false
         setContent { StartGate(devAutoAttic, devAutoIntro, devAutoMusic, devControlMode, devItems, devPos) }
     }
 }
@@ -98,7 +99,7 @@ private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: 
 
     var loadSlot by remember { mutableStateOf<Int?>(null) } // a saved game to continue from when the attic opens
     // who plays: Carnby (the default) or Emily; chosen on the character screen, by the floor selection or by the saved game
-    var emily by remember { mutableStateOf(false) }
+    var emily by remember { mutableStateOf(DevOptions.emily) }
 
     // set by the floor selection of the main menu, cleared by every other way into the game
     var floorStart by remember { mutableStateOf<FloorStart?>(null) }
@@ -310,4 +311,7 @@ private fun LoadScreen(onBack: () -> Unit, onPick: (Int) -> Unit) {
 /** Settings for testing that come in as intent extras. */
 object DevOptions {
     var vars: List<Pair<Int, Int>> = emptyList()
+
+    /** `--ez devEmily true`: Emily plays (for testing, together with devAutoIntro or devAutoAttic). */
+    var emily = false
 }
