@@ -214,6 +214,9 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     /** When (tick) the other hero last hit a monster, by the monster's index: the hit effect appears at his hand. */
     private val companionHitTime = HashMap<Int, Int>()
     private var nextBlow = 0
+
+    /** Until when (tick) the other hero fights the player: he was hit by him. */
+    private var provokedUntil = 0
     private var blowIndex = 0
 
     /** The other hero can be switched to (he is there). */
@@ -314,7 +317,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         val dy = lead.renderY - a.renderY // on stairs it keeps the height of the player
         if (dy != 0) a.moveYBy(dy)
         val anims = playerAnims ?: MoveAnims(player?.w?.anim ?: -1, -1, -1, -1, -1, -1, -1)
-        val threat = nearestThreat(a, lead)
+        val threat = if (time < provokedUntil) player else nearestThreat(a, lead)
         if (threat != null) {
             sideTarget = null
             fight(c, a, threat, anims)
@@ -411,8 +414,12 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     }
 
     /** A monster hit the other hero. When his health is gone he dissolves in bubbles as the monsters do, and is gone (the game goes on). */
-    private fun hurtCompanion(force: Int) {
+    private fun hurtCompanion(force: Int, by: GameObject? = null) {
         helperHp -= force.coerceAtLeast(1)
+        // hit by the player he fights back, as long as the blows go on (and for a while after)
+        if (by != null && by === player) provokedUntil = time + PROVOKED_TICKS
+        // the hit effect where the blow lands
+        companion?.actor?.let { a -> by?.actor?.let { b -> effects.add(Effect(1, a.renderX, a.renderY - (a.zv[3] - a.zv[2]) / 2, a.renderZ, time, null, 0, (-b.beta) and 0x3FF, 0)) } }
         if (helperHp <= 0) killCompanion()
     }
 
@@ -1275,7 +1282,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                 val r = g.actionRange
                 for (other in objects) {
                     if (other === g || !other.w.active) continue
-                    if (ours && !isMonster(other)) continue // the other hero fights monsters only (not the player, not the furniture)
+                    // the other hero fights monsters, and the player when he was hit by him (not the furniture)
+                    if (ours && !isMonster(other) && !(other === player && time < provokedUntil)) continue
                     val zv = other.actor?.zv ?: continue
                     if (!(zv[0] < x + r && x - r < zv[1] && zv[2] < y + r && y - r < zv[3] && zv[4] < z + r && z - r < zv[5])) continue
                     w.hit = other.w.index
@@ -1290,9 +1298,9 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                 // a monster's blow can hit the other hero as well
                 val cmp = companion
                 val cz = cmp?.actor?.zv
-                if (!ours && cmp != null && cz != null && isMonster(g) &&
+                if (!ours && cmp != null && cz != null && (isMonster(g) || g === player) &&
                     cz[0] < x + r && x - r < cz[1] && cz[2] < y + r && y - r < cz[3] && cz[4] < z + r && z - r < cz[5]) {
-                    hurtCompanion(g.actionForce)
+                    hurtCompanion(g.actionForce, g)
                     g.actionType = 0
                     return
                 }
@@ -1349,6 +1357,13 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             z += dz
             if (x > 20000 || x < -20000 || z > 20000 || z < -20000) { impact(prevX, prevZ); return }
             if (roomView.hardcols.any { h -> h.x1 < x + p && x - p < h.x2 && h.y1 < y + p && y - p < h.y2 && h.z1 < z + p && z - p < h.z2 }) { impact(prevX, prevZ); return } // a wall stops the shot
+            val cmp = companion
+            val cbox = cmp?.actor?.zv
+            if (cmp != null && cbox != null && g === player && cbox[0] < x + p && x - p < cbox[1] && cbox[2] < y + p && y - p < cbox[3] && cbox[4] < z + p && z - p < cbox[5]) {
+                impact(prevX, prevZ)
+                hurtCompanion(g.actionForce, g)
+                return
+            }
             for (other in objects) {
                 if (other === g || !other.w.active || other.w.flags and AF_SPECIAL != 0) continue // (effects cannot be hit)
                 val zv = other.actor?.zv ?: continue
@@ -1910,6 +1925,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         private const val SIDESTEP_TICKS = 100
         private const val FIGHT_REACH = 950f
         private const val BLOW_PAUSE = 50
+        private const val PROVOKED_TICKS = 900
         private val FIST_ANIMS = intArrayOf(37, 39, 40, 41)
         private const val FIST_NEXT = 38
         private const val FIST_FRAME = 1
