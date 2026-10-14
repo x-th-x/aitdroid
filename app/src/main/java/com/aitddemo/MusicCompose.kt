@@ -29,11 +29,11 @@ object MusicCompose {
 
     /** One voice that is being written: the notes go to [line] at the given ticks; every note is released a little before the next one. */
     private class Voice(val line: Line) {
-        fun setup(instrument: Int, attenuation: Int) {
+        fun setup(instrument: Int, attenuation: Int, pitch: Int = 0) {
             line.events.add(Ev(0, NOTE, 0x80))
             line.events.add(Ev(0, INSTRUMENT, instrument))
             line.events.add(Ev(0, ATTENUATION, attenuation))
-            line.events.add(Ev(0, PITCH, 0))
+            line.events.add(Ev(0, PITCH, pitch))
         }
 
         fun play(tick: Int, length: Int, name: String, gate: Float = 0.9f) {
@@ -61,10 +61,10 @@ object MusicCompose {
 
     private class Section(val chords: List<String>, val melody: List<Pair<String, Float>>?, val arp: Boolean, val offbeat: Boolean, val bell: Boolean, val echo: Boolean, val fade: Boolean = false)
 
-    private fun build(source: Song, beat: Int, plan: Plan, instruments: IntArray, drive: Boolean, extra: List<ByteArray> = emptyList(), leadGate: Float = 0.9f, leadAttenuation: Int = 1): ByteArray {
+    private fun build(source: Song, beat: Int, plan: Plan, instruments: IntArray, drive: Boolean, extra: List<ByteArray> = emptyList(), leadGate: Float = 0.9f, leadAttenuation: Int = 1, doubleLead: Boolean = false): ByteArray {
         // the voices: 0 melody, 1 arpeggio, 2 off-beat arpeggio, 3 and 4 pads, 5 bass, 6 bell
         val lines = Array<Line?>(11) { null }
-        val v = Array(7) { Voice(Line(ArrayList(), 0)).also { vo -> lines[it] = vo.line } }
+        val v = Array(if (doubleLead) 8 else 7) { Voice(Line(ArrayList(), 0)).also { vo -> lines[it] = vo.line } }
         v[0].setup(instruments[0], leadAttenuation)
         v[1].setup(instruments[1], 5)
         v[2].setup(instruments[2], 15)
@@ -72,6 +72,7 @@ object MusicCompose {
         v[4].setup(instruments[4], 17)
         v[5].setup(instruments[5], 5)
         v[6].setup(instruments[6], 13)
+        if (doubleLead) v[7].setup(instruments[0], leadAttenuation + 5, 3) // a second player, a little out of tune: the section of the strings
         val bar = beat * 4
         var t = 0
         for (section in plan.sections) {
@@ -108,6 +109,7 @@ object MusicCompose {
                     val ticks = (len * beat).toInt()
                     if (n != "R") {
                         v[0].play(at, ticks, n, leadGate)
+                        if (doubleLead) v[7].play(at, ticks, n, leadGate)
                         if (section.echo) v[6].play(at + beat, ticks, up(n), 0.9f)
                     }
                     at += ticks
@@ -121,7 +123,10 @@ object MusicCompose {
         if (last.fade) {
             // the last bars fade out: every voice gets quieter bar by bar
             val start = t - last.chords.size * bar
-            for ((i, base) in intArrayOf(leadAttenuation, 5, 15, 15, 17, 5, 13).withIndex()) for (b in 0 until last.chords.size) v[i].volume(start + b * bar, base + (b + 1) * 8)
+            for ((i, base) in intArrayOf(leadAttenuation, 5, 15, 15, 17, 5, 13, leadAttenuation + 5).withIndex()) {
+                if (i >= v.size) break
+                for (b in 0 until last.chords.size) v[i].volume(start + b * bar, base + (b + 1) * 8)
+            }
         }
         val song = Song(source.header.copyOf(), source.instruments.map { it.copyOf() }.toMutableList().also { list -> extra.forEach { list.add(it.copyOf()) } }, lines)
         return MusicRemix.write(song)
@@ -137,11 +142,21 @@ object MusicCompose {
         0x2A, 0x22, 0x00, 0x00, 0xA0, 0x04, // operator 2: the same, multiplier 2 (an octave up)
     ).map { it.toByte() }.toByteArray()
 
+    /**
+     * A violin for the chip: FM with a moderate modulation (a bowed edge), vibrato on both operators, sustained, a slow attack like the bow that takes hold of the string and a
+     * soft release.
+     */
+    private val VIOLIN = intArrayOf(
+        0x41,
+        0x22, 0x61, 0x06, 0x00, 0x62, 0x24, // operator 1: level (how strongly it modulates), vibrato + sustain + multiplier 1, feedback 3 (FM), sine, slow attack, sustain/release
+        0x3F, 0x61, 0x00, 0x00, 0x72, 0x15, // operator 2: the same at the pitch of the note
+    ).map { it.toByte() }.toByteArray()
+
     /** The same note an octave higher. */
     private fun up(n: String): String = n.dropLast(1) + (n.last() - '0' + 1)
 
     /** Slow and sad: A minor, 84 beats per minute, intro, a melody, a higher one, the first again with an echo, a bridge, the end with a fade. About 2 minutes. */
-    private fun nocturne(source: Song): ByteArray {
+    private fun nocturne(source: Song, strings: Boolean): ByteArray {
         val a = melody("A4:1.5 C5:.5 E5:2  F5:1.5 E5:.5 C5:2  D5:1 F5:1 E5:1 D5:1  B4:1 G#4:1 E5:2  A4:1.5 C5:.5 E5:1 A5:1  G5:1.5 F5:.5 E5:1 C5:1  D5:1 E5:1 F5:1 D5:1  E5:1.5 D5:.5 B4:1 G#4:1")
         val b = melody("A5:1.5 G5:.5 F5:2  D5:1 G5:1 B5:2  C6:1.5 B5:.5 A5:2  G#5:1 B5:1 E6:2  C6:1 A5:1 F5:2  D6:1 B5:1 G5:2  E6:1.5 C6:.5 A5:1 E5:1  B5:2 G#5:1 E5:1")
         val bridge = melody("D5:4 R:4 E5:3 G5:1 F5:2 E5:1 D5:1")
@@ -157,8 +172,12 @@ object MusicCompose {
                 Section(listOf("Am", "F", "Am", "Am"), end, arp = false, offbeat = false, bell = true, echo = false, fade = true),
             ),
         )
-        // instruments of the original track: the arpeggios, the pads, the bass, the bell; the melody is played by an organ (a new instrument at the end of the table)
-        return build(source, 44, plan, intArrayOf(source.instruments.size, 0, 8, 6, 7, 2, 4), drive = false, extra = listOf(ORGAN), leadGate = 0.96f, leadAttenuation = 7)
+        // instruments of the original track: the arpeggios, the pads, the bass, the bell; the melody is played by an organ or by violins (a new instrument at the end of the table)
+        return if (strings) {
+            build(source, 44, plan, intArrayOf(source.instruments.size, 0, 8, 6, 7, 2, 4), drive = false, extra = listOf(VIOLIN), leadGate = 0.97f, leadAttenuation = 9, doubleLead = true)
+        } else {
+            build(source, 44, plan, intArrayOf(source.instruments.size, 0, 8, 6, 7, 2, 4), drive = false, extra = listOf(ORGAN), leadGate = 0.96f, leadAttenuation = 7)
+        }
     }
 
     /** Tense and driving: E minor, 100 beats per minute, a pulsing bass of eighths under a sharp melody. About 1 minute 20. */
@@ -181,6 +200,6 @@ object MusicCompose {
     /** The composed tracks, made with the instruments of [source] (an original ADLM track, for instance the music of the attic). */
     fun compose(source: ByteArray): List<MusicRemix.NewTrack> {
         val song = MusicRemix.parse(source)
-        return listOf(MusicRemix.NewTrack("Nocturne", nocturne(song)), MusicRemix.NewTrack("Pursuit", pursuit(song)))
+        return listOf(MusicRemix.NewTrack("Nocturne", nocturne(song, strings = false)), MusicRemix.NewTrack("Nocturne Violin", nocturne(song, strings = true)), MusicRemix.NewTrack("Pursuit", pursuit(song)))
     }
 }
