@@ -1,280 +1,366 @@
 package com.aitddemo
 
-import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
-import kotlin.math.floor
+import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.sqrt
 
 /*
- * "Lost Place" (NOT in the original game; a prototype on this branch): the attic as an abandoned place of today - cold desaturated colours, dust, peeling plaster, damp stains, rubble,
- * footprints in the dust, graffiti, a broken window with daylight that falls into the room. The pictures of the cameras are changed at runtime by code (nothing of the user's pictures
- * is stored): the colours are graded, things are painted over them, and the result is taken back to the colours of the game's palette. Only the first picture of the attic (camera 0) has
- * its own details so far; the other pictures get the colour grade and the dust.
+ * "Lost Place" (NOT in the original game; a prototype on this branch): the attic as an abandoned place of today. The pictures of the cameras are changed at runtime by code (nothing of the
+ * user's pictures is stored). Nothing is pasted over the picture: the whole picture gets one light (the daylight through the broken window falls on the floor as a patch with the shadow
+ * of the window cross, a haze of dust in the air, a glow round the window), the surfaces are changed in their own material (damp stains, dirt in the joints, dust, rot), and the few
+ * things that lie about (boards, heaps of plaster, footprints, a puddle) are placed on the floor in world coordinates, so they have the size and the foreshortening of the room's own
+ * perspective. The result is taken back to the colours of the game's palette. Only the first picture of the attic (camera 0) has its own light and things so far; the other pictures get
+ * the grade, the dust and the dirt.
  */
 object LostPlace {
     private val W = WindowView.W
     private val H = WindowView.H
 
-    /** The picture [photo] (320 x 200 ARGB of the game) of camera [camera] of the attic as a lost place, in the colours of [palette]. */
-    fun paint(photo: IntArray, palette: IntArray, camera: Int): IntArray {
+    /** The picture [photo] (320 x 200 ARGB of the game) of camera [camera] of the attic as a lost place, in the colours of [palette]. [cam] is the camera of the picture. */
+    fun paint(photo: IntArray, palette: IntArray, camera: Int, cam: AtticCameraDef? = null): IntArray {
         val c = WindowView.Canvas()
         for (i in photo.indices) { c.r[i] = ((photo[i] shr 16) and 0xFF).toFloat(); c.g[i] = ((photo[i] shr 8) and 0xFF).toFloat(); c.b[i] = (photo[i] and 0xFF).toFloat() }
-        grade(c)
-        if (camera == 0) details(c)
+        if (camera == 0 && cam != null) {
+            val floor = Floor(cam)
+            surfaces(c, floor)
+            light(c, floor, photo)
+            things(c, floor, cam)
+        } else {
+            surfaces(c, null)
+        }
+        finish(c)
         return c.quantize(palette)
     }
 
-    /** What the figures and things of the room look like: the colours of the bodies are taken towards grey and dust. */
+    /** What the figures and things of the room look like: the colours of the bodies are taken towards grey, cooler and darker, like the pictures. */
     fun gradeColor(c: Int): Int {
         val r = ((c shr 16) and 0xFF).toFloat(); val g = ((c shr 8) and 0xFF).toFloat(); val b = (c and 0xFF).toFloat()
         val lum = 0.3f * r + 0.59f * g + 0.11f * b
-        val nr = ((lum + (r - lum) * 0.5f) * 0.9f + 14f).toInt().coerceIn(0, 255)
-        val ng = ((lum + (g - lum) * 0.5f) * 0.92f + 15f).toInt().coerceIn(0, 255)
-        val nb = ((lum + (b - lum) * 0.5f) * 0.95f + 17f).toInt().coerceIn(0, 255)
+        val nr = ((lum + (r - lum) * 0.45f) * 0.80f + 10f).toInt().coerceIn(0, 255)
+        val ng = ((lum + (g - lum) * 0.45f) * 0.83f + 13f).toInt().coerceIn(0, 255)
+        val nb = ((lum + (b - lum) * 0.45f) * 0.86f + 15f).toInt().coerceIn(0, 255)
         return (c and 0xFF000000.toInt()) or (nr shl 16) or (ng shl 8) or nb
     }
 
-    // ------------------------------------------------------------------------------------------------------------------ colour grade
+    // ------------------------------------------------------------------------------------------------------------------ the floor in world coordinates
 
-    private fun grade(c: WindowView.Canvas) {
+    /** For every pixel of the picture that shows the floor of the room: the place on the floor (x, z in engine units); NaN elsewhere. */
+    private class Floor(cam: AtticCameraDef) {
+        val x = FloatArray(W * H) { Float.NaN }
+        val z = FloatArray(W * H) { Float.NaN }
+
+        init {
+            val proj = AtticProjector(cam)
+            val o = FloatArray(3)
+            val step = 160
+            val xs = (-7800..7800 step step).toList()
+            val zs = (-5000..5000 step step).toList()
+            val px = Array(xs.size) { FloatArray(zs.size) }
+            val py = Array(xs.size) { FloatArray(zs.size) }
+            val ok = Array(xs.size) { BooleanArray(zs.size) }
+            for (i in xs.indices) for (j in zs.indices) {
+                ok[i][j] = proj.project(xs[i].toFloat(), 0f, zs[j].toFloat(), o)
+                px[i][j] = o[0]; py[i][j] = o[1]
+            }
+            val canvas = WindowView.Canvas()
+            for (i in 0 until xs.size - 1) for (j in 0 until zs.size - 1) {
+                if (!ok[i][j] || !ok[i + 1][j] || !ok[i + 1][j + 1] || !ok[i][j + 1]) continue
+                val cx = (xs[i] + xs[i + 1]) / 2f; val cz = (zs[j] + zs[j + 1]) / 2f
+                canvas.poly(floatArrayOf(px[i][j], px[i + 1][j], px[i + 1][j + 1], px[i][j + 1]), floatArrayOf(py[i][j], py[i + 1][j], py[i + 1][j + 1], py[i][j + 1])) { sx, sy ->
+                    x[sy * W + sx] = cx; z[sy * W + sx] = cz
+                }
+            }
+        }
+
+        fun has(i: Int) = !x[i].isNaN()
+    }
+
+    // ------------------------------------------------------------------------------------------------------------------ the material of the surfaces
+
+    private fun surfaces(c: WindowView.Canvas, floor: Floor?) {
         for (y in 0 until H) for (x in 0 until W) {
             val i = y * W + x
-            val lum = 0.3f * c.r[i] + 0.59f * c.g[i] + 0.11f * c.b[i]
-            // colours drain out: only about half is left, and what is left leans to a cold grey-green
-            var r = lum + (c.r[i] - lum) * 0.42f
-            var g = lum + (c.g[i] - lum) * 0.42f
-            var b = lum + (c.b[i] - lum) * 0.42f
-            r *= 0.9f; g *= 0.94f; b *= 0.98f
-            // the blacks are lifted by the dust in the air
-            r = r * 0.88f + 16f; g = g * 0.88f + 17f; b = b * 0.88f + 18f
-            // dirt on everything: a slow noise of lighter and darker
-            val dirt = 0.9f + 0.2f * WindowView.fbm(x / 23f, y / 17f, 401)
-            r *= dirt; g *= dirt; b *= dirt
-            // the edges of the picture are darker
-            val dx = (x - 160f) / 160f; val dy = (y - 100f) / 100f
-            val vig = 1f - 0.4f * (dx * dx * 0.7f + dy * dy * 0.6f)
-            c.r[i] = r * vig; c.g[i] = g * vig; c.b[i] = b * vig
-        }
-        // dust that lies on the floor of the room: a pale veil that gets thicker towards the corners where nobody walks
-        for (y in 62 until H) for (x in 0 until W) {
-            val dust = (0.1f + 0.14f * WindowView.fbm(x / 31f, y / 14f, 402)) * (0.5f + 0.5f * abs(x - 160f) / 160f)
-            c.blend(x, y, 128f, 126f, 118f, dust)
+            var r = c.r[i]; var g = c.g[i]; var b = c.b[i]
+            // the colours are drained: a little warmth is left in the wood
+            val lum = 0.3f * r + 0.59f * g + 0.11f * b
+            r = lum + (r - lum) * 0.42f; g = lum + (g - lum) * 0.42f; b = lum + (b - lum) * 0.42f
+            // the room is dim: the only light is the daylight that comes in through the window, cool and soft
+            r *= 0.9f; g *= 0.95f; b *= 1.02f
+            if (floor != null && floor.has(i)) {
+                val fx = floor.x[i]; val fz = floor.z[i]
+                // damp stains on the boards: large soft shapes that are darker, with a pale tide mark at the edge where the water dried
+                val s = WindowView.fbm(fx / 1300f, fz / 1000f, 501)
+                val stain = smooth(0.5f, 0.62f, s)
+                val rim = smooth(0.48f, 0.52f, s) * (1f - smooth(0.52f, 0.58f, s))
+                val k = 1f - 0.36f * stain + 0.12f * rim
+                r *= k; g *= k; b *= k
+                // the dirt in the joints and the wear of the planks: a fine noise along the boards
+                val grain = 0.88f + 0.24f * WindowView.fbm(fx / 80f, fz / 900f, 502)
+                r *= grain; g *= grain; b *= grain
+                // dust: a matte veil over the boards that is thicker where nobody has walked (the walls, the corners)
+                val edge = smooth(2800f, 5200f, abs(fx)) * 0.5f + smooth(2500f, 4800f, fz) * 0.5f
+                val dust = 0.10f + 0.16f * edge + 0.08f * WindowView.fbm(fx / 400f, fz / 400f, 503)
+                r += (126f - r) * dust; g += (124f - g) * dust; b += (116f - b) * dust
+            } else if (y < 64) {
+                // the wall of boards and the roof: the damp comes from above - dark where the water ran down, mould at the bottom, the grime of the beams
+                val above = 1f - (y / 64f)
+                val streak = WindowView.fbm(x / 14f, y / 60f, 511) // long vertical streaks
+                val blot = smooth(0.52f, 0.64f, WindowView.fbm(x / 33f, y / 14f, 512))
+                val k = 1f - (0.18f * above + 0.28f * smooth(0.45f, 0.7f, streak) + 0.3f * blot)
+                r *= k; g *= k; b *= k
+                if (y in 46..64) { // mould and salts at the foot of the wall
+                    val m = smooth(0.5f, 0.7f, WindowView.fbm(x / 9f, y / 5f, 513)) * ((y - 46f) / 18f)
+                    r += (50f - r) * 0.4f * m; g += (66f - g) * 0.4f * m; b += (48f - b) * 0.4f * m
+                }
+            } else {
+                // what stands in the room (the posts, the table, the chair): a layer of dust on top of it
+                val dust = 0.08f + 0.1f * WindowView.fbm(x / 20f, y / 20f, 521)
+                r += (118f - r) * dust; g += (116f - g) * dust; b += (108f - b) * dust
+            }
+            c.r[i] = r; c.g[i] = g; c.b[i] = b
         }
     }
 
-    // ------------------------------------------------------------------------------------------------------------------ the details of the first picture
+    private fun smooth(a: Float, b: Float, v: Float): Float {
+        val t = ((v - a) / (b - a)).coerceIn(0f, 1f)
+        return t * t * (3f - 2f * t)
+    }
 
-    private fun details(c: WindowView.Canvas) {
-        wallDecay(c)
-        piano(c)
-        barrels(c)
-        tablecloth(c)
-        rubble(c)
-        puddle(c)
-        footprints(c)
-        graffiti(c)
-        cobwebs(c)
+    // ------------------------------------------------------------------------------------------------------------------ the light
+
+    // the daylight comes in through the window in the back wall (z = 5000), x in -750..750, y (up is negative) -2000..-800, falling into the room and down
+    private const val SUN_X = 0.2f
+    private const val SUN_Y = 0.25f
+    private const val SUN_Z = -0.9f
+
+    /** How much of the daylight reaches the floor at (x, z): 0 = shade, 1 = the full patch of sun; the window cross throws its shadow into the patch. */
+    private fun sunAt(fx: Float, fz: Float): Float {
+        val t = (fz - 5000f) / SUN_Z // how far along the ray from the window plane to the floor (a negative step in z)
+        val xw = fx - SUN_X * t
+        val yw = -SUN_Y * t
+        val inX = smooth(-760f, -700f, xw) * (1f - smooth(700f, 760f, xw))
+        val inY = smooth(-2010f, -1950f, yw) * (1f - smooth(-850f, -790f, yw))
+        var s = inX * inY
+        // the cross of the frame: a vertical and a horizontal bar, 60 units wide
+        val bar = max(1f - smooth(30f, 90f, abs(xw)), 1f - smooth(30f, 90f, abs(yw + 1400f)))
+        s *= 1f - 0.85f * bar
+        // the broken glass and the rot of the frame: the edge of the patch is not clean
+        s *= 0.82f + 0.18f * WindowView.fbm(fx / 140f, fz / 140f, 531)
+        return s
+    }
+
+    private fun light(c: WindowView.Canvas, floor: Floor, photo: IntArray) {
+        for (y in 0 until H) for (x in 0 until W) {
+            val i = y * W + x
+            if (!floor.has(i)) continue
+            // things that stand on the floor (the chair, the table) are not boards: the patch of sun is not drawn over them (they are the light, warm, saturated parts of the picture)
+            val pr = (photo[i] shr 16) and 0xFF; val pg = (photo[i] shr 8) and 0xFF; val pb = photo[i] and 0xFF
+            if ((0.3f * pr + 0.59f * pg + 0.11f * pb) > 104f || pr - pb > 62 || pg > pr + 6) continue
+            val s = sunAt(floor.x[i], floor.z[i])
+            if (s <= 0.01f) continue
+            // sunlit boards: much brighter, warmer than the shade
+            c.r[i] = c.r[i] * (1f + 1.3f * s) + 24f * s
+            c.g[i] = c.g[i] * (1f + 1.3f * s) + 27f * s
+            c.b[i] = c.b[i] * (1f + 1.2f * s) + 26f * s
+        }
+        // a shaft of light in the dusty air: from the window to the patch, a pale haze with streaks
+        val wx = 155f; val wy = 41f // the window in the picture
+        val centre = patchCentre(floor)
+        val tx = centre[0]; val ty = centre[1]
+        val dx = tx - wx; val dy = ty - wy
+        val len = sqrt(dx * dx + dy * dy).coerceAtLeast(1f)
+        for (y in 20 until 150) for (x in 60 until 280) {
+            // distance of the pixel from the line window - patch, and how far along the line it is
+            val px = x - wx; val py = y - wy
+            val along = (px * dx + py * dy) / (len * len)
+            if (along < 0f || along > 1.05f) continue
+            val across = abs(px * dy - py * dx) / len
+            val width = 5f + 34f * along
+            if (across > width) continue
+            val k = (1f - across / width) * (1f - 0.6f * along) * (0.7f + 0.6f * WindowView.fbm(x / 11f + along * 6f, y / 6f, 541))
+            val i = y * W + x
+            c.r[i] += 30f * k; c.g[i] += 32f * k; c.b[i] += 30f * k
+        }
+        // the glow round the window: the light is stronger than the picture can show
+        for (y in 12 until 72) for (x in 118 until 196) {
+            val ddx = (x - wx) / 22f; val ddy = (y - wy) / 14f
+            val d = sqrt(ddx * ddx + ddy * ddy)
+            if (d > 1.9f) continue
+            val k = exp(-d * d * 1.3f)
+            val i = y * W + x
+            c.r[i] += 70f * k; c.g[i] += 74f * k; c.b[i] += 74f * k
+        }
         window(c)
     }
 
-    /** The planks of the back wall: plaster has come off in patches, the bare laths show, damp stains run down from the roof. */
-    private fun wallDecay(c: WindowView.Canvas) {
-        for (y in 23 until 65) for (x in 0 until W) {
-            if (x in 140..171 && y in 28..54) continue // the window
-            val m = WindowView.fbm(x / 10f, y / 7f, 301)
-            if (m > 0.6f) {
-                val n = WindowView.fbm(x / 3f, y / 3f, 302)
-                val edge = ((m - 0.6f) / 0.04f).coerceIn(0f, 1f)
-                if (m > 0.74f) { // bare laths: dark brown strips
-                    val strip = if ((y / 3) % 2 == 0) 1f else 0.7f
-                    c.blend(x, y, 52f * strip, 46f * strip, 40f * strip, 0.85f * edge)
-                } else { // plaster that has not fallen yet: pale and flaky
-                    c.blend(x, y, 168f + 24f * n, 160f + 22f * n, 142f + 18f * n, 0.7f * edge)
-                }
-            }
-        }
-        // damp: dark streaks that run down from the roof beam, and mould where they end
-        for (k in 0 until 26) {
-            val x0 = (WindowView.hash(k * 7 + 1) * 320f).toInt()
-            val len = 8 + (WindowView.hash(k * 11 + 3) * 28f).toInt()
-            val w = 1 + (WindowView.hash(k * 13 + 5) * 3f).toInt()
-            for (yy in 0 until len) {
-                val f = 1f - yy / len.toFloat()
-                for (xx in 0 until w) c.blend(x0 + xx, 23 + yy, 18f, 26f, 20f, 0.35f * f)
-            }
-            if (len > 18) for (dy in 0..3) for (dx in -2..w + 2) if (WindowView.hash2(x0 + dx, dy + k, 9) > 0.35f) c.blend(x0 + dx, 23 + len + dy, 52f, 74f, 44f, 0.4f)
-        }
-    }
-
-    /** The piano under a dust sheet: a pale cloth with folds. */
-    private fun piano(c: WindowView.Canvas) {
-        val xs = floatArrayOf(38f, 66f, 71f, 35f)
-        val ys = floatArrayOf(36f, 35f, 62f, 63f)
-        c.poly(xs, ys) { x, y ->
-            val fold = WindowView.fbm(x / 4f, y / 9f, 311)
-            val v = 104f + 40f * fold - 0.4f * (y - 36f)
-            c.blend(x, y, v, v - 1f, v - 8f, 0.8f)
-        }
-        for (x in 38..70 step 5) for (y in 40..62) c.blend(x, y, 70f, 70f, 66f, 0.12f) // the folds hang down
-    }
-
-    /** Moss on the barrels that stand in the damp, and the rings of the staves that have rotted. */
-    private fun barrels(c: WindowView.Canvas) {
-        for (x in 172..212) for (y in 54..62) {
-            val m = WindowView.fbm(x / 2.5f, y / 2.5f, 321)
-            if (m > 0.5f) c.blend(x, y, 66f, 92f, 52f, 0.45f * ((m - 0.5f) * 3f).coerceAtMost(1f))
-        }
-    }
-
-    /** The green cloth over the table: faded, stained, with holes where the moths were. */
-    private fun tablecloth(c: WindowView.Canvas) {
-        for (y in 128 until H) for (x in 0..148) {
+    /** The middle of the patch of sun on the floor, in pixels of the picture. */
+    private fun patchCentre(floor: Floor): FloatArray {
+        var sx = 0f; var sy = 0f; var sw = 0f
+        for (y in 62 until H step 2) for (x in 0 until W step 2) {
             val i = y * W + x
-            if (c.g[i] < c.r[i] * 1.05f) continue // only the cloth (it is the greenish thing)
-            val m = WindowView.fbm(x / 7f, y / 5f, 331)
-            if (m > 0.64f) c.blend(x, y, 30f, 34f, 28f, 0.55f) // a stain
-            if (WindowView.fbm(x / 3f, y / 3f, 332) > 0.86f) c.blend(x, y, 12f, 12f, 12f, 0.8f) // a hole
-            c.blend(x, y, 130f, 135f, 125f, 0.1f * (0.5f + m))
+            if (!floor.has(i)) continue
+            val s = sunAt(floor.x[i], floor.z[i])
+            sx += x * s; sy += y * s; sw += s
         }
+        return if (sw > 0f) floatArrayOf(sx / sw, sy / sw) else floatArrayOf(160f, 110f)
     }
 
-    /** Plaster and tiles that fell from the roof: chunks over the floor, a heap beside the post, a plank that fell from the beams. */
-    private fun rubble(c: WindowView.Canvas) {
-        fun chunk(cx: Float, cy: Float, s: Float, seed: Int) {
-            val xs = FloatArray(5); val ys = FloatArray(5)
-            for (k in 0 until 5) { val a = k * 2f * PI.toFloat() / 5f; val r = s * (0.6f + 0.5f * WindowView.hash(seed * 5 + k)); xs[k] = cx + cos(a) * r * 1.4f; ys[k] = cy + sin(a) * r * 0.8f }
-            val light = 92f + 46f * WindowView.hash(seed * 3)
-            c.poly(floatArrayOf(xs[0] + 1f, xs[1] + 1f, xs[2] + 1f, xs[3] + 1f, xs[4] + 1f), floatArrayOf(ys[0] + 1f, ys[1] + 1f, ys[2] + 1f, ys[3] + 1f, ys[4] + 1f)) { x, y -> c.blend(x, y, 20f, 20f, 18f, 0.5f) } // the shadow
-            c.poly(xs, ys) { x, y -> c.set(x, y, light, light - 3f, light - 12f) }
-        }
-        for (i in 0 until 24) {
-            val y = 80f + 112f * WindowView.hash(i * 3 + 1) * WindowView.hash(i * 3 + 1)
-            val x = 4f + 312f * WindowView.hash(i * 5 + 2)
-            if (x in 0f..150f && y > 130f) continue // not on the table cloth
-            chunk(x, y, 0.7f + 2.2f * (y / 200f), i)
-        }
-        // the heap beside the post on the right
-        for (i in 0 until 16) chunk(238f + 26f * WindowView.hash(i * 7 + 90), 74f + 12f * WindowView.hash(i * 11 + 91), 2.2f + 2f * WindowView.hash(i + 95), 100 + i)
-        // the plank that fell down
-        c.poly(floatArrayOf(188f, 248f, 249f, 189f), floatArrayOf(176f, 166f, 171f, 183f)) { x, y -> val g = WindowView.fbm(x / 9f, y / 1.5f, 341); c.set(x, y, 66f + 36f * g, 61f + 32f * g, 55f + 28f * g) }
-        c.poly(floatArrayOf(188f, 248f, 248f, 189f), floatArrayOf(176f, 166f, 167f, 177f)) { x, y -> c.blend(x, y, 150f, 140f, 120f, 0.35f) } // the lit edge
-    }
-
-    /** A puddle under the leak in the roof: it shows the light of the window. */
-    private fun puddle(c: WindowView.Canvas) {
-        c.ellipse(178f, 128f, 22f, 5.5f) { x, y, dx, dy ->
-            val k = 1f - (dx * dx + dy * dy)
-            val sky = 0.6f + 0.4f * (-dy)
-            c.blend(x, y, 150f * sky + 40f, 168f * sky + 40f, 182f * sky + 40f, 0.55f + 0.35f * k)
-        }
-        // the leaves and dirt that the water has brought
-        for (i in 0 until 14) {
-            val a = WindowView.hash(i * 3 + 7) * 2f * PI.toFloat()
-            c.ellipse(178f + cos(a) * 24f, 128f + sin(a) * 6.5f, 1.4f, 0.9f) { x, y, _, _ -> c.set(x, y, 58f, 52f, 30f) }
-        }
-    }
-
-    /** Footprints in the dust: someone has come in from the front of the room and gone to the piano. */
-    private fun footprints(c: WindowView.Canvas) {
-        val n = 22
-        for (i in 0 until n) {
-            val t = i / (n - 1f)
-            // from the bottom of the picture (150, 197) to the piano (62, 66), a little bent
-            val x = 150f + (62f - 150f) * t + 9f * sin(t * 5f)
-            val y = 197f + (66f - 197f) * t
-            val s = 0.5f + 1.5f * (y - 60f) / 140f
-            val side = if (i % 2 == 0) -1f else 1f
-            c.ellipse(x + side * 3.4f * s, y, 1.9f * s, 3.2f * s * 0.62f) { px, py, _, _ -> c.blend(px, py, 28f, 26f, 24f, 0.68f) }
-        }
-    }
-
-    /** A tag on the wall right of the window: a ring with a cross, an arrow, drips of paint. */
-    private fun graffiti(c: WindowView.Canvas) {
-        val cx = 242f; val cy = 42f
-        c.ellipse(cx, cy, 11f, 11f) { x, y, dx, dy ->
-            val d = sqrt(dx * dx + dy * dy)
-            if (d > 0.72f) c.blend(x, y, 196f, 52f, 46f, 0.8f * (1f - abs(d - 0.86f) / 0.2f).coerceIn(0f, 1f))
-        }
-        for (t in -9..9) {
-            c.blend((cx + t * 0.8f).toInt(), (cy + t * 0.8f).toInt(), 196f, 52f, 46f, 0.8f)
-            c.blend((cx + t * 0.8f).toInt() + 1, (cy + t * 0.8f).toInt(), 196f, 52f, 46f, 0.6f)
-            c.blend((cx + t * 0.8f).toInt(), (cy - t * 0.8f).toInt(), 196f, 52f, 46f, 0.8f)
-        }
-        for (d in intArrayOf(-7, -1, 6)) { // drips
-            val len = 6 + (WindowView.hash(d + 50) * 7f).toInt()
-            for (yy in 0 until len) c.blend((cx + d).toInt(), (cy + 8f).toInt() + yy, 190f, 50f, 44f, 0.7f * (1f - yy / len.toFloat()))
-        }
-        // an arrow below it that points at the window
-        for (t in 0..16) c.blend((cx - 2f - t).toInt(), 58, 232f, 232f, 226f, 0.7f)
-        for (t in 0..4) { c.blend((cx - 19f + t).toInt(), 58 - t, 232f, 232f, 226f, 0.7f); c.blend((cx - 19f + t).toInt(), 58 + t, 232f, 232f, 226f, 0.7f) }
-    }
-
-    /** Cobwebs in the corners between the roof beams. */
-    private fun cobwebs(c: WindowView.Canvas) {
-        fun web(cx: Float, cy: Float, dirx: Float, diry: Float, size: Float) {
-            for (k in 0..6) {
-                val a = k / 6f * (PI.toFloat() / 2f)
-                val ex = cx + dirx * cos(a) * size
-                val ey = cy + diry * sin(a) * size
-                val n = (size * 2).toInt()
-                for (s in 0..n) c.blend((cx + (ex - cx) * s / n).toInt(), (cy + (ey - cy) * s / n).toInt(), 205f, 205f, 200f, 0.3f)
-            }
-            for (ring in 1..4) {
-                val r = size * ring / 4f
-                var prevX = 0f; var prevY = 0f
-                for (k in 0..6) {
-                    val a = k / 6f * (PI.toFloat() / 2f)
-                    val px = cx + dirx * cos(a) * r; val py = cy + diry * sin(a) * r * (1f + 0.1f * sin(k * 2f + ring))
-                    if (k > 0) { val n = 8; for (s in 0..n) c.blend((prevX + (px - prevX) * s / n).toInt(), (prevY + (py - prevY) * s / n).toInt(), 205f, 205f, 200f, 0.22f) }
-                    prevX = px; prevY = py
-                }
-            }
-        }
-        web(0f, 23f, 1f, 1f, 26f)
-        web(138f, 23f, -1f, 1f, 18f)
-        web(268f, 23f, 1f, 1f, 22f)
-        web(316f, 23f, -1f, 1f, 16f)
-    }
-
-    /** The window: the glass is broken out, the daylight is pale and bright, a few teeth of glass stand in the frame. */
+    /** The window itself: the glass is gone, there is pale sky in the frame, a bare branch, the frame is dark and rotten, teeth of glass stand in the corners. */
     private fun window(c: WindowView.Canvas) {
         for (y in 30..51) for (x in 143..168) {
+            val i = y * W + x
             val f = (y - 30f) / 22f
-            c.set(x, y, 214f - 22f * f, 222f - 20f * f, 228f - 16f * f)
+            var r = 206f - 26f * f; var g = 214f - 24f * f; var b = 218f - 20f * f
+            // a bare branch against the sky
+            val branch = abs(y - (38f + 0.5f * (x - 143f) + 3f * sin(x * 0.5f))) < 0.8f
+            if (branch) { r = 46f; g = 44f; b = 40f }
+            c.r[i] = r; c.g[i] = g; c.b[i] = b
         }
-        // the cross of the frame, rotten and dark
-        for (y in 30..51) for (x in 154..157) c.blend(x, y, 40f, 32f, 26f, 0.9f)
-        for (x in 143..168) for (y in 40..42) c.blend(x, y, 40f, 32f, 26f, 0.9f)
-        // teeth of glass
-        for (k in 0 until 7) {
-            val x0 = 143f + 25f * WindowView.hash(k * 3 + 200)
-            val len = 3 + (WindowView.hash(k * 5 + 201) * 6f).toInt()
-            for (s in 0 until len) c.blend((x0 + s * 0.3f).toInt(), 30 + s, 150f, 168f, 176f, 0.9f * (1f - s / len.toFloat()))
+        for (y in 30..51) for (x in 154..157) c.blend(x, y, 38f, 32f, 28f, 0.92f)
+        for (x in 143..168) for (y in 40..42) c.blend(x, y, 38f, 32f, 28f, 0.92f)
+        for (k in 0 until 6) {
+            val x0 = 144f + 23f * WindowView.hash(k * 3 + 200)
+            val len = 2 + (WindowView.hash(k * 5 + 201) * 5f).toInt()
+            for (s in 0 until len) c.blend((x0 + s * 0.2f).toInt(), 30 + s, 120f, 134f, 140f, 0.85f * (1f - s / len.toFloat()))
         }
-        // a glow round the window: the light is stronger than the picture can show
-        for (y in 22..62) for (x in 130..182) {
-            val dx = (x - 155.5f) / 26f; val dy = (y - 41f) / 21f
-            val d = sqrt(dx * dx + dy * dy)
-            if (d > 1f && d < 1.7f) { val k = (1.7f - d) / 0.7f; c.add(x, y, 28f * k * k, 31f * k * k, 32f * k * k) }
+        // the frame of the window: dark wood all round
+        for (x in 141..170) { c.blend(x, 29, 34f, 28f, 24f, 0.9f); c.blend(x, 52, 34f, 28f, 24f, 0.9f) }
+        for (y in 29..52) { c.blend(141, y, 34f, 28f, 24f, 0.9f); c.blend(170, y, 34f, 28f, 24f, 0.9f) }
+    }
+
+    // ------------------------------------------------------------------------------------------------------------------ the things on the floor
+
+    private fun things(c: WindowView.Canvas, floor: Floor, cam: AtticCameraDef) {
+        val proj = AtticProjector(cam)
+        val o = FloatArray(3)
+        fun at(x: Float, y: Float, z: Float): FloatArray? = if (proj.project(x, y, z, o)) floatArrayOf(o[0], o[1]) else null
+        // the shade of an object on the dusty floor: a soft dark ellipse under it (in world coordinates, so it has the right foreshortening)
+        fun shadow(cx: Float, cz: Float, rx: Float, rz: Float, k: Float) {
+            for (y in 62 until H) for (x in 0 until W) {
+                val i = y * W + x
+                if (!floor.has(i)) continue
+                val dx = (floor.x[i] - cx) / rx; val dz = (floor.z[i] - cz) / rz
+                val d = dx * dx + dz * dz
+                if (d < 1f) { val m = 1f - k * (1f - d); c.r[i] *= m; c.g[i] *= m; c.b[i] *= m }
+            }
+        }
+        // a board that fell from the roof: a long thin box on the floor
+        fun plank(cx: Float, cz: Float, length: Float, angle: Float, shade: Float) {
+            val hx = cos(angle) * length / 2f; val hz = sin(angle) * length / 2f
+            val wx = -sin(angle) * 80f; val wz = cos(angle) * 80f
+            shadow(cx + 30f, cz + 40f, length * 0.58f, 190f, 0.5f)
+            val a = at(cx - hx - wx, 0f, cz - hz - wz) ?: return
+            val b = at(cx + hx - wx, 0f, cz + hz - wz) ?: return
+            val d = at(cx - hx + wx, 0f, cz - hz + wz) ?: return
+            val e = at(cx + hx + wx, 0f, cz + hz + wz) ?: return
+            val a2 = at(cx - hx - wx, -90f, cz - hz - wz) ?: return
+            val b2 = at(cx + hx - wx, -90f, cz + hz - wz) ?: return
+            val d2 = at(cx - hx + wx, -90f, cz - hz + wz) ?: return
+            val e2 = at(cx + hx + wx, -90f, cz + hz + wz) ?: return
+            val front = if (a[1] > d[1]) listOf(a, b, b2, a2) else listOf(d, e, e2, d2) // the long side that faces the camera
+            c.poly(front.map { it[0] }.toFloatArray(), front.map { it[1] }.toFloatArray()) { x, y ->
+                val g = WindowView.fbm(x / 6f, y / 1.5f, 551)
+                c.set(x, y, (46f + 22f * g) * shade, (40f + 20f * g) * shade, (34f + 16f * g) * shade)
+            }
+            c.poly(floatArrayOf(a2[0], b2[0], e2[0], d2[0]), floatArrayOf(a2[1], b2[1], e2[1], d2[1])) { x, y ->
+                val g = WindowView.fbm(x / 6f, y / 1.5f, 552)
+                c.set(x, y, (84f + 28f * g) * shade, (76f + 26f * g) * shade, (66f + 22f * g) * shade)
+            }
+        }
+        // a heap of plaster and rubble: a low mound of grey crumbs, lit from the window side
+        fun heap(cx: Float, cz: Float, radius: Float, seed: Int) {
+            shadow(cx + 40f, cz + 50f, radius * 1.25f, radius * 0.9f, 0.45f)
+            val centre = at(cx, 0f, cz) ?: return
+            val edge = at(cx + radius, 0f, cz) ?: return
+            val front = at(cx, 0f, cz - radius) ?: return
+            val rx = abs(edge[0] - centre[0]).coerceAtLeast(1.5f)
+            val ry = abs(front[1] - centre[1]).coerceAtLeast(1f)
+            c.ellipse(centre[0], centre[1] - ry * 0.6f, rx, ry * 1.3f) { x, y, dx, dy ->
+                val crumb = WindowView.hash2(x, y, seed)
+                val lit = (0.5f - dx * 0.35f - dy * 0.4f).coerceIn(0f, 1f)
+                val v = 52f + 44f * lit + 22f * crumb
+                c.blend(x, y, v, v - 1f, v - 6f, 0.92f * (1f - (dx * dx + dy * dy) * 0.4f))
+            }
+        }
+        plank(2100f, -300f, 2200f, 0.5f, 1f)
+        plank(-3200f, -3000f, 1500f, -0.35f, 0.9f)
+        plank(900f, 2600f, 1800f, 0.15f, 0.95f)
+        heap(-500f, -900f, 330f, 1)
+        heap(2900f, 3300f, 520f, 2)
+        heap(3100f, 1500f, 260f, 3)
+        heap(-2500f, 900f, 300f, 4)
+        heap(-1500f, -3200f, 380f, 5)
+        // a puddle under a leak: it shows the light of the window
+        val pc = at(-700f, 0f, 1500f)
+        val pe = at(-700f + 600f, 0f, 1500f)
+        if (pc != null && pe != null) {
+            val rx = abs(pe[0] - pc[0]); val ry = rx * 0.3f
+            c.ellipse(pc[0], pc[1], rx, ry) { x, y, dx, dy ->
+                val k = 1f - (dx * dx + dy * dy)
+                val sky = 0.55f + 0.45f * (-dy)
+                c.blend(x, y, 92f * sky + 30f, 104f * sky + 32f, 112f * sky + 34f, 0.38f + 0.4f * k)
+            }
+        }
+        // footprints in the dust, from the front of the room to the piano: in the plane of the floor, with the perspective of the room
+        val pts = ArrayList<FloatArray>()
+        val n = 18
+        for (k in 0 until n) {
+            val t = k / (n - 1f)
+            pts.add(floatArrayOf(1700f + (-2900f - 1700f) * t + 500f * sin(t * 5f), -4700f + (3300f + 4700f) * t))
+        }
+        for (i in pts.indices) {
+            val p = pts[i]
+            val q = pts[min(i + 1, pts.size - 1)]
+            val ang = Math.atan2((q[1] - p[1]).toDouble(), (q[0] - p[0]).toDouble()).toFloat()
+            val side = if (i % 2 == 0) -1f else 1f
+            val fx0 = p[0] + (-sin(ang)) * 170f * side
+            val fz0 = p[1] + cos(ang) * 170f * side
+            for (y in 62 until H) for (x in 0 until W) {
+                val j = y * W + x
+                if (!floor.has(j)) continue
+                // the foot in its own frame: long along the way, narrow across it
+                val dx = floor.x[j] - fx0; val dz = floor.z[j] - fz0
+                val along = (dx * cos(ang) + dz * sin(ang)) / 280f
+                val across = (-dx * sin(ang) + dz * cos(ang)) / 120f
+                val d = along * along + across * across
+                if (d < 1f) { val m = 1f - 0.34f * (1f - d); c.r[j] *= m; c.g[j] *= m; c.b[j] *= m }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------------------------ the film
+
+    /** The last step: a soft vignette, the shadows go teal and the lights go warm, a fine grain like a photograph of low light. */
+    private fun finish(c: WindowView.Canvas) {
+        for (y in 0 until H) for (x in 0 until W) {
+            val i = y * W + x
+            var r = c.r[i]; var g = c.g[i]; var b = c.b[i]
+            val lum = (0.3f * r + 0.59f * g + 0.11f * b) / 255f
+            // split toning: cool in the shadows, warm in the lights
+            val shade = (1f - lum * 2.2f).coerceIn(0f, 1f)
+            val light = ((lum - 0.45f) * 2f).coerceIn(0f, 1f)
+            r += -4f * shade + 10f * light; g += 3f * shade + 4f * light; b += 8f * shade - 6f * light
+            val dx = (x - 160f) / 160f; val dy = (y - 104f) / 104f
+            val vig = 1f - 0.28f * (dx * dx * 0.8f + dy * dy * 0.7f)
+            val grain = (WindowView.hash2(x, y, 99) - 0.5f) * 9f
+            c.r[i] = r * vig + grain; c.g[i] = g * vig + grain; c.b[i] = b * vig + grain
         }
     }
 
     // ------------------------------------------------------------------------------------------------------------------ the moving light
 
-    /** The moving things of the first picture: the daylight in the window that clouds dim and brighten, the shaft of light with the dust in it, the drop that falls into the puddle. */
+    /** The moving things of the first picture: the daylight that clouds dim and brighten, the dust that floats in the shaft of light. */
     fun fx(camera: Int): FxSet? = when (camera) {
         0 -> FxSet(
             listOf(
-                FxLight(FxShape.Rect(143f, 30f, 168f, 52f), 225, 232, 240, 0.6f, FxWave.OVERCAST),
-                FxLight(FxShape.Quad(floatArrayOf(143f, 168f, 238f, 92f), floatArrayOf(52f, 52f, 142f, 142f)), 205, 214, 198, 0.17f, FxWave.OVERCAST),
-                FxLight(FxShape.Circle(174f, 112f, 52f), 200, 208, 190, 0.18f, FxWave.OVERCAST),
+                FxLight(FxShape.Rect(143f, 30f, 168f, 52f), 235, 240, 245, 0.45f, FxWave.OVERCAST),
+                FxLight(FxShape.Circle(172f, 108f, 46f), 150, 156, 146, 0.16f, FxWave.OVERCAST),
             ),
-            listOf(FxDust(100f, 54f, 240f, 138f, 30, 1f)),
-            drips = listOf(FxDrip(178f, 24f, 126f)),
+            listOf(FxDust(96f, 54f, 236f, 134f, 36, 0.9f)),
         )
         else -> null
     }

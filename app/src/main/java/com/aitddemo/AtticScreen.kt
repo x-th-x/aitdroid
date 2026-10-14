@@ -261,7 +261,7 @@ private fun flashActor(e: Effect, data: com.aitddemo.game.GameData): AtticActor 
 
 /** The photo of each camera of [view], scaled once to the renderer's resolution (nearest neighbour keeps the pixel look). */
 private fun scaledPhotos(view: RoomView, palette: IntArray? = null, lostPlace: Boolean = false): List<android.graphics.Bitmap> = view.photos.mapIndexed { index, original ->
-    val argb = if (lostPlace && palette != null && view.stage == 0 && view.room == 0) LostPlace.paint(original, palette, index) else original
+    val argb = if (lostPlace && palette != null && view.stage == 0 && view.room == 0) LostPlace.paint(original, palette, index, view.cameras.getOrNull(index)) else original
     val bmp = android.graphics.Bitmap.createBitmap(argb, 320, 200, android.graphics.Bitmap.Config.ARGB_8888)
     android.graphics.Bitmap.createScaledBitmap(bmp, AtticSceneRenderer.W, AtticSceneRenderer.H, false)
 }
