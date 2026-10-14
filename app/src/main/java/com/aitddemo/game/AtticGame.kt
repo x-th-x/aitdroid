@@ -210,6 +210,18 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         return g
     }
 
+    /** The companion gets another body of the other hero's list (the hero of the intro has a small body outdoors and a larger one in the house), keeping place, heading and animation. */
+    private fun refitCompanion(g: GameObject, bodyNumber: Int) {
+        val asset = data.companionBody(bodyNumber) ?: return
+        val old = g.actor ?: return
+        g.asset = asset
+        g.w.body = bodyNumber
+        val groups = asset.groupCount.coerceAtLeast(1)
+        val rig = ActorRig(groups, Array(groups) { GroupState() }, asset.zv)
+        val anim = if (data.companionAnim(old.currentAnim) != null) old.currentAnim else -1
+        g.actor = Actor(rig, { n -> data.companionAnim(n) ?: data.anim(n) ?: error("animation $n") }, old.renderX, old.renderY, old.renderZ, old.beta and 0x3FF, anim, time, roomView.hardcols, g.w.typeZv)
+    }
+
     private fun makeCompanion(bodyNumber: Int, x: Int, y: Int, z: Int, beta: Int, anim: Int): Partner? = makeFigure(bodyNumber, false, x, y, z, beta, anim)?.let { Partner(it) }
 
     /** The game starts: the other hero stands next to the player. */
@@ -286,6 +298,10 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     var driverSeatObject: GameObject? = null
         private set
 
+    /** The two heroes sit in the car right now (the screen draws them together with the car, so the car's body hides what it should hide of them). */
+    var figuresSeated = false
+        private set
+
     /** Which of the places beside the walker the companion walks at (it changes when a wall is in the way). */
     private var walkSide = 0
 
@@ -320,9 +336,12 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         val wa = walker?.actor
         val car = objects.getOrNull(INTRO_CAR)?.takeIf { it.w.active }
         val carActor = car?.actor
+        figuresSeated = wa == null && carActor != null
         if (wa != null) {
             driver?.w?.active = false
             c.obj.w.active = true
+            if (c.obj.w.body != walker.w.body && walker.w.body >= 0) refitCompanion(c.obj, walker.w.body)
+            val ca = c.actor ?: return
             ca.wallCollision = false
             ca.colliders = emptyList()
             // beside and behind the hero (x across, z back in his own frame), the other side or straight behind when a wall is there
@@ -331,9 +350,9 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             for (k in 0 until WALK_PLACES.size) {
                 val place = WALK_PLACES[(walkSide + k) % WALK_PLACES.size]
                 val (ox, _, oz) = rotatePoint(place[0].toFloat(), 0f, place[1].toFloat(), rot)
-                val box = ca.zv.copyOf()
-                val sx = wa.renderX + ox.toInt() - ca.renderX; val sz = wa.renderZ + oz.toInt() - ca.renderZ; val sy = wa.renderY - ca.renderY
-                box[0] += sx; box[1] += sx; box[2] += sy; box[3] += sy; box[4] += sz; box[5] += sz
+                // only the feet are tested (a slim box above the floor): the boxes of door lintels and the like reach down to the height of the body and are not in the way of a step
+                val px = wa.renderX + ox.toInt(); val pz = wa.renderZ + oz.toInt()
+                val box = intArrayOf(px - 22, px + 22, wa.renderY - 40, wa.renderY - 5, pz - 22, pz + 22)
                 if (wallFree(box)) { chosen = (walkSide + k) % WALK_PLACES.size; break }
             }
             if (chosen < 0) chosen = WALK_PLACES.size - 1
@@ -1602,7 +1621,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         const val INTRO_WALKER = 288
 
         /** Together mode, the intro: the places beside the walker (across, back) in his own frame, in order of liking: beside and a little behind on one side, the other side, straight behind. */
-        private val WALK_PLACES = arrayOf(intArrayOf(75, 40), intArrayOf(-75, 40), intArrayOf(0, 120))
+        private val WALK_PLACES = arrayOf(intArrayOf(75, 40), intArrayOf(-75, 40), intArrayOf(65, 110), intArrayOf(-65, 110), intArrayOf(0, 130))
 
         /** Together mode, the intro: where the two figures sit in the car body (x across, y up is negative, z back; the car looks along -z): the driver's head, the passenger's. */
         private val CAR_DRIVER = floatArrayOf(20f, -85f, 30f)

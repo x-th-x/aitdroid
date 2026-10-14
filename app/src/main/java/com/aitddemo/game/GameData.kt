@@ -99,7 +99,7 @@ class GameData(
 
     /** Life script [n] as 16 bit words. */
     fun script(n: Int): ShortArray? = scripts.getOrPut(n) {
-        lifePak.get(n + 1)?.let { d -> ShortArray(d.size / 2) { ((d[it * 2].toInt() and 0xFF) or (d[it * 2 + 1].toInt() shl 8)).toShort() } }
+        lifePak.get(n + 1)?.let { d -> ShortArray(d.size / 2) { ((d[it * 2].toInt() and 0xFF) or (d[it * 2 + 1].toInt() shl 8)).toShort() } }?.let { if (hasCompanion) TogetherIntro.patchScript(n, it) else it }
     }
 
     /** Body [n] (entry n + 1 of LISTBODY.PAK) or null. */
@@ -149,7 +149,7 @@ class GameData(
 
     /** Movement path [n] (entry n + 1 of LISTTRAK.PAK) as 16 bit words, or null. */
     fun track(n: Int): ShortArray? = tracks.getOrPut(n) {
-        trackPak?.get(n + 1)?.let { d -> ShortArray(d.size / 2) { ((d[it * 2].toInt() and 0xFF) or (d[it * 2 + 1].toInt() shl 8)).toShort() } }
+        trackPak?.get(n + 1)?.let { d -> ShortArray(d.size / 2) { ((d[it * 2].toInt() and 0xFF) or (d[it * 2 + 1].toInt() shl 8)).toShort() } }?.let { if (hasCompanion) TogetherIntro.patchTrack(n, it) else it }
     }
 
     /** A full screen picture of ITD_RESS.PAK (entry index + 1: 64000 pixels, with their own colours when 770 bytes of header come first), 320 x 200 ARGB, or null. */

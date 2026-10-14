@@ -201,6 +201,31 @@ private fun GameObject.toActor(): AtticActor? {
     return actor
 }
 
+/**
+ * The same actor with the parts of other actors drawn in it: the heroes seated in the car are sorted together with the triangles of the car by depth (they are inside its box,
+ * which the order of whole actors cannot show), so the car's body covers what it should cover of them.
+ */
+private fun AtticActor.withFigures(figures: List<AtticActor>): AtticActor {
+    if (figures.isEmpty()) return this
+    var vertexCount = worldVertices.size / 3
+    val vertices = ArrayList<Float>(worldVertices.toList())
+    val tris = ArrayList<Int>(triangles.toList())
+    val lineList = ArrayList<Int>(lines.toList())
+    val sphereList = ArrayList<Int>(spheres.toList())
+    for (f in figures) {
+        val base = vertexCount
+        f.worldVertices.forEach { vertices.add(it) }
+        for (i in 0 until f.triangles.size / 4) { tris.add(f.triangles[i * 4] + base); tris.add(f.triangles[i * 4 + 1] + base); tris.add(f.triangles[i * 4 + 2] + base); tris.add(f.triangles[i * 4 + 3]) }
+        for (i in 0 until f.lines.size / 3) { lineList.add(f.lines[i * 3] + base); lineList.add(f.lines[i * 3 + 1] + base); lineList.add(f.lines[i * 3 + 2]) }
+        for (i in 0 until f.spheres.size / 3) { sphereList.add(f.spheres[i * 3] + base); sphereList.add(f.spheres[i * 3 + 1]); sphereList.add(f.spheres[i * 3 + 2]) }
+        vertexCount += f.worldVertices.size / 3
+    }
+    val merged = AtticActor(vertices.toFloatArray(), tris.toIntArray(), originX, originY, originZ, zvX1, zvX2, zvZ1, zvZ2, lineList.toIntArray(), sphereList.toIntArray())
+    merged.sortBox = sortBox
+    merged.clipBox = clipBox
+    return merged
+}
+
 /** The box an effect has in the draw order: the box of the creature for the evaporation, else a small box around its place. */
 private fun Effect.sortBox(): IntArray = box?.copyOf(6) ?: intArrayOf(x - 50, x + 50, y - 50, y + 50, z - 50, z + 50)
 
@@ -574,20 +599,21 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     // one frame of the room: photo, objects and player through the camera matrix, masks over them (AtticSceneRenderer)
     val roomImage = run {
         frameTick // the poses change every frame
+        // the heroes of the Together mode (the other hero, and in the intro the one who plays, seated in the car) are in the room of the scene
+        val figures = listOfNotNull(game.companionObject, game.driverSeatObject).mapNotNull { f ->
+            f.toActor()?.also {
+                it.waterLimit = game.waterLimit.toFloat()
+                it.maskRoom = view.room
+            }
+        }
         val actors = game.objects.filter { it.w.room == view.room || camera.viewedRooms.isEmpty() || it.w.room in camera.viewedRooms }.mapNotNull { o ->
-            o.toActor()?.also {
+            o.toActor()?.let { a -> if (game.figuresSeated && o.w.index == AtticGame.INTRO_CAR) a.withFigures(figures) else a }?.also {
                 it.waterLimit = game.waterLimit.toFloat()
                 it.maskRoom = o.w.room
                 // an object of another room is covered by the masks of that room, which are in the coordinates of that room
                 if (o.w.room != view.room) game.roomShift(o.w.room)?.let { d -> it.maskShiftX = d[0] / 10; it.maskShiftZ = -d[2] / 10 }
             }
-        } + listOfNotNull(game.companionObject, game.driverSeatObject).mapNotNull { f ->
-            // the heroes of the Together mode (the other hero, and in the intro the one who plays, seated in the car) are in the room of the scene
-            f.toActor()?.also {
-                it.waterLimit = game.waterLimit.toFloat()
-                it.maskRoom = view.room
-            }
-        } + game.effects.map { e -> effectActor(e, game.time, world.game.palette, world.game).also { it.sortBox = e.sortBox() } }
+        } + (if (game.figuresSeated) emptyList() else figures) + game.effects.map { e -> effectActor(e, game.time, world.game.palette, world.game).also { it.sortBox = e.sortBox() } }
         val dark = game.lightOff
         renderer.render(camera, if (showBackground && !dark) backgrounds[camera.index.coerceIn(0, backgrounds.size - 1)] else blackBackground, actors, if (dark) emptyMap() else view.maskViews.getOrNull(camera.index) ?: emptyMap(), view.room)
         renderer.bitmap.asImageBitmap()
