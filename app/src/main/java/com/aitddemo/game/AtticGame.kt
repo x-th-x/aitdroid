@@ -434,12 +434,15 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         changeRoom(0, BalconyRoom.NUMBER, null)
         player?.actor?.teleport(x.coerceIn(-500, 500), 0, BalconyRoom.OUT_Z, 512)
         balconyArrival = time
+        musicBefore = vm.currentMusic
+        ui.music(MUSIC_BALCONY, true) // the violins of the new music
     }
 
     /** The player comes back through the window into the attic. */
     private fun stepBackIn() {
         changeRoom(0, 0, null)
         player?.actor?.teleport(0, 0, BalconyRoom.IN_Z, 0)
+        ui.music(if (musicBefore >= 0 && musicBefore != MUSIC_BALCONY) musicBefore else 0, true) // the music of the attic again
     }
 
     /** On the balcony: the player who walks into the opening of the window goes back into the attic. */
@@ -473,6 +476,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     // ------------------------------------------------------------------------------------------------------------------ the balcony (not in the original game)
 
     private var doorOpenTime = -1
+    private var musicBefore = -1
     private var balconyArrival = -1
     private var climbStart = -1
     private var stormSent = false
@@ -1531,6 +1535,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         const val CVAR_SAMPLE_CHOC = 9
         const val CVAR_REVERSE_OBJECT = 11
         const val CVAR_BODY_FLAMME = 1
+        const val MUSIC_BALCONY = 100 // not a track of the file: "Nocturne Violin", composed at runtime (MusicCompose)
         const val WINDOW_OBJECT = 7 // the window of the attic (the glass door on this branch)
         const val WINDOW_CREATURE = 21 // the second creature of the attic, which comes through the window in the original
         const val DOOR_VAR = 500 // 1 = the door of the balcony is open

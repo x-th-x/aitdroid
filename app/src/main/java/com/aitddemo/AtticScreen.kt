@@ -110,7 +110,7 @@ private class AtticUi(private val world: AtticOriginal, private val sounds: Intr
         music = number
         if (number < 0) return
         val data = world.musicTrack(number) ?: return
-        GameMusic.setLooping(false, number, data)
+        GameMusic.setLooping(number == AtticGame.MUSIC_BALCONY, number, data) // the music of the game plays once, the new music of the balcony goes on
         GameMusic.start(number, data)
     }
 

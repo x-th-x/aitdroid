@@ -90,7 +90,9 @@ object AtticOriginalReader {
         )
         game.rooms.room(STAGE, ROOM) // the first room must be readable now (it is cached for the start)
         val music = musicPak.get(ATTIC_MUSIC + 1) ?: throw OriginalFilesException("${MusicOriginalReader.FILE}: Musik $ATTIC_MUSIC fehlt")
-        return AtticOriginal(music, game) { n -> musicPak.get(n + 1) }
+        // the music of the balcony is composed from the music of the attic (the instruments of the game) and is made when it is first needed
+        val balconyTrack: ByteArray? by lazy { MusicCompose.compose(music).firstOrNull { it.name == "Nocturne Violin" }?.data }
+        return AtticOriginal(music, game) { n -> if (n == com.aitddemo.game.AtticGame.MUSIC_BALCONY) balconyTrack else musicPak.get(n + 1) }
     }
 
     private fun readPalette(d: ByteArray): IntArray {
