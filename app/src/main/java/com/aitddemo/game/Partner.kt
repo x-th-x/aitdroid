@@ -141,3 +141,21 @@ object SeatedPose {
         }
     }
 }
+
+/** Where a point of the room lies on the 320 x 200 picture of a camera (the same maths as the projector of the screen), or null when it is too close to or behind the camera. */
+object Plate {
+    private fun rc(a: Int) = Math.cos((a and 0x3FF) * 2.0 * Math.PI / 1024.0).toFloat()
+    private fun rs(a: Int) = Math.sin((a and 0x3FF) * 2.0 * Math.PI / 1024.0).toFloat()
+
+    fun project(cam: com.aitddemo.AtticCameraDef, wx: Float, wy: Float, wz: Float): FloatArray? {
+        var x = wx - (cam.posX - cam.roomX) * 10f
+        var y = wy - (cam.roomY - cam.posY) * 10f
+        var z = wz - (cam.roomZ - cam.posZ) * 10f
+        if (cam.angleBeta and 0x3FF != 0) { val nx = x * rc(cam.angleBeta) - z * rs(cam.angleBeta); z = x * rs(cam.angleBeta) + z * rc(cam.angleBeta); x = nx }
+        if (cam.angleAlpha and 0x3FF != 0) { val ny = y * rc(cam.angleAlpha) - z * rs(cam.angleAlpha); z = y * rs(cam.angleAlpha) + z * rc(cam.angleAlpha); y = ny }
+        if (cam.angleGamma and 0x3FF != 0) { val nx = x * rc(cam.angleGamma) - y * rs(cam.angleGamma); y = x * rs(cam.angleGamma) + y * rc(cam.angleGamma); x = nx }
+        z += cam.focal1
+        if (z <= 200f) return null
+        return floatArrayOf(x * cam.focal2 / z + 160f, y * cam.focal3 / z + 100f)
+    }
+}

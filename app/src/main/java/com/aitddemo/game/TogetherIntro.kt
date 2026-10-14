@@ -61,6 +61,16 @@ object TogetherIntro {
             }
             // the walker: from the car to the door (the marks keep their order, the script reacts to them)
             25 -> return w(4, 1, 4, 2, 4, 3, 4, 4, 1, 0, -1300, 2640, 4, 5, 4, 6, 1, 0, DOOR_X, DOOR_Z, 2)
+            // the hero inside the house: the doors of the hall are closed behind him when he has reached the first place (mark 1), and he turns to the door at the next (mark 3):
+            // both places are further in, so the second hero, who follows at some distance, is through the door when it closes
+            26 -> {
+                val out = words.copyOf()
+                if (out.size > 12 && out[0].toInt() == 1 && out[1].toInt() == 1 && out[2].toInt() == 500 && out[8].toInt() == 1 && out[10].toInt() == -1000) {
+                    out[2] = (-800).toShort()
+                    out[10] = (-1400).toShort()
+                }
+                return out
+            }
         }
         return words
     }

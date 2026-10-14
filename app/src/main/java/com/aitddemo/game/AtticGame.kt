@@ -310,6 +310,11 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     var figuresSeated = false
         private set
 
+    /** How long the place of the second hero may be bad (a wall, out of the picture) before he takes another one, in ticks. */
+    private var walkBadTicks = 0
+    private var walkRoomKey = -1
+    private var partnerBeta = 0
+
     /** Which of the places beside the walker the companion walks at (it changes when a wall is in the way). */
     private var walkSide = 0
 
@@ -363,30 +368,62 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             val unit = if (roomView.stage == INTRO_OUTDOORS_STAGE) 1 else 10
             var chosen = -1
             val places = if (roomView.stage == INTRO_OUTDOORS_STAGE) WALK_PLACES else WALK_PLACES_INDOORS
-            for (k in 0 until places.size) {
-                val place = places[(walkSide + k) % places.size]
-                val (ox, _, oz) = rotatePoint(place[0].toFloat() * unit, 0f, place[1].toFloat() * unit, rot)
-                // only the feet are tested (a slim box above the floor): the boxes of door lintels and the like reach down to the height of the body and are not in the way of a step
-                val px = wa.renderX + ox.toInt(); val pz = wa.renderZ + oz.toInt()
-                val box = intArrayOf(px - 22 * unit, px + 22 * unit, wa.renderY - 40 * unit, wa.renderY - 5 * unit, pz - 22 * unit, pz + 22 * unit)
-                if (wallFree(box)) { chosen = (walkSide + k) % places.size; break }
+            // the place must be free of walls and in the picture (the camera looks from the front: a place behind the hero can lie below the lower edge, and the hero would be cut off or gone)
+            val camera = roomView.cameras.getOrNull(currentCamera)
+            val bodyTop = (c.obj.asset?.zv?.get(2) ?: -177).toFloat()
+            fun inPicture(px: Int, pz: Int): Boolean {
+                if (camera == null) return true
+                val feet = Plate.project(camera, px.toFloat(), wa.renderY.toFloat(), pz.toFloat()) ?: return false
+                val head = Plate.project(camera, px.toFloat(), wa.renderY + bodyTop, pz.toFloat()) ?: return false
+                return feet[0] in 20f..300f && feet[1] <= 186f && head[1] >= 8f
             }
-            if (chosen < 0) chosen = places.size - 1
-            walkSide = chosen
-            val place = places[walkSide]
-            val (ox, _, oz) = rotatePoint(place[0].toFloat() * unit, 0f, place[1].toFloat() * unit, rot)
-            val tx = wa.renderX + ox.toInt(); val tz = wa.renderZ + oz.toInt()
-            // it glides to the place (a jump from one side to the other would be seen), and snaps when it is far away
-            val gap = Math.abs(tx - ca.renderX) + Math.abs(tz - ca.renderZ)
-            val nx = if (gap > 150 * unit) tx else ca.renderX + (tx - ca.renderX) * 35 / 100
-            val nz = if (gap > 150 * unit) tz else ca.renderZ + (tz - ca.renderZ) * 35 / 100
+            fun placeAt(index: Int): IntArray {
+                val place = places[index]
+                val (ox, _, oz) = rotatePoint(place[0].toFloat() * unit, 0f, place[1].toFloat() * unit, rot)
+                return intArrayOf(wa.renderX + ox.toInt(), wa.renderZ + oz.toInt())
+            }
+            fun usable(index: Int): Boolean {
+                val at = placeAt(index)
+                // only the feet are tested (a slim box above the floor): the boxes of door lintels and the like reach down to the height of the body and are not in the way of a step
+                val box = intArrayOf(at[0] - 22 * unit, at[0] + 22 * unit, wa.renderY - 40 * unit, wa.renderY - 5 * unit, at[1] - 22 * unit, at[1] + 22 * unit)
+                return wallFree(box) && inPicture(at[0], at[1])
+            }
+            // the second hero keeps his place as long as it is good (no flipping from one side to the other); when it has been bad for some time, the first good place is taken
+            val roomKey = roomView.stage * 100 + roomView.room
+            val roomChanged = roomKey != walkRoomKey
+            walkRoomKey = roomKey
+            if (usable(walkSide)) {
+                walkBadTicks = 0
+            } else {
+                walkBadTicks++
+                if (walkBadTicks >= WALK_PLACE_PATIENCE || roomChanged) {
+                    for (k in 1 until places.size) {
+                        val index = (walkSide + k) % places.size
+                        if (usable(index)) { walkSide = index; walkBadTicks = 0; break }
+                    }
+                }
+            }
+            val target = placeAt(walkSide)
+            // he walks to his place at a limited speed (a jump would be seen), and is put there when the scene changes or he is far away
+            val dx = target[0] - ca.renderX; val dz = target[1] - ca.renderZ
+            val dist = Math.sqrt((dx.toDouble() * dx + dz.toDouble() * dz)).toInt()
+            val maxStep = 3 * unit
+            val snap = roomChanged || dist > 2500 * unit
+            val nx = if (snap || dist <= maxStep) target[0] else ca.renderX + (dx.toLong() * maxStep / dist).toInt()
+            val nz = if (snap || dist <= maxStep) target[1] else ca.renderZ + (dz.toLong() * maxStep / dist).toInt()
+            // he turns to the heading of the first hero at a limited rate as well
+            val want = wa.beta and 0x3FF
+            if (snap) partnerBeta = want else {
+                val diff = ((want - partnerBeta + 512) and 1023) - 512
+                partnerBeta = (partnerBeta + diff.coerceIn(-12, 12)) and 1023
+            }
             // the same animation as the leader, but half a cycle later and at a slightly different tempo (see [partnerClock]): the steps are not taken together
             val anim = wa.currentAnim
             var started = false
             if (anim != ca.currentAnim && data.companionAnim(anim) != null) started = ca.playAnim(anim, 1, -1)
             ca.update(partnerClock(time))
             if (started) data.companionAnim(anim)?.let { d -> ca.seekFrame(d.frames.size / 2, partnerClock(time)) }
-            putFigure(c.obj, nx, wa.renderY, nz, wa.beta and 0x3FF)
+            putFigure(c.obj, nx, wa.renderY, nz, partnerBeta)
         } else if (carActor != null) {
             // seated in the car, turned as the car is, at the places of the two heads of the car body
             val rot = initRot(0, carActor.beta and 0x3FF, 0)
@@ -1645,10 +1682,11 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         private val WALK_PLACES = arrayOf(intArrayOf(75, 40), intArrayOf(-75, 40), intArrayOf(65, 110), intArrayOf(-65, 110), intArrayOf(0, 130))
 
         /** Inside the house the second hero keeps a good distance behind the first (more than two metres, in the outdoor scale of the places), well to one side so he is not hidden by him. */
-        private val WALK_PLACES_INDOORS = arrayOf(intArrayOf(90, 230), intArrayOf(-90, 230), intArrayOf(65, 190), intArrayOf(-65, 190), intArrayOf(0, 260), intArrayOf(0, 180))
+        private val WALK_PLACES_INDOORS = arrayOf(intArrayOf(90, 230), intArrayOf(-90, 230), intArrayOf(65, 190), intArrayOf(-65, 190), intArrayOf(0, 260), intArrayOf(0, 180), intArrayOf(90, 120), intArrayOf(-90, 120), intArrayOf(80, 40), intArrayOf(-80, 40))
 
         /** The floor of the intro that lies outdoors. */
         private const val INTRO_OUTDOORS_STAGE = 7
+        private const val WALK_PLACE_PATIENCE = 25
 
         /** The heroes in the car are drawn this much larger than the body of the film (the car's own occupants were drawn larger than life as well). */
         private const val SEAT_SCALE = 1.6f
