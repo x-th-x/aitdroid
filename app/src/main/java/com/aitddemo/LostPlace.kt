@@ -32,6 +32,7 @@ object LostPlace {
             val wall = wallMask(photo)
             slits(c, cam, wall)
             objects(c, photo, camera)
+            furniture(c, photo, camera)
             if (camera == 0) cloth(c, photo)
             light(c, floor, photo, cam)
             mould(c, floor, board)
@@ -512,6 +513,143 @@ object LostPlace {
                 if (s > 0.55f) c.blend(x, y, 70f, 84f, 62f, 0.55f * ((s - 0.55f) * 4f).coerceAtMost(1f))
                 if (WindowView.fbm(x / 3f, y / 3f, 605) > 0.78f) c.blend(x, y, 40f, 52f, 36f, 0.8f)
             }
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------------------------ the furniture of the pictures
+
+    /**
+     * The furniture that is part of the original pictures, hurt where it stands (places found by looking at the pictures): the bookshelves have lost books and are mouldy, the piano has
+     * broken keys, a split lid and cracks, the cabinets have lost their veneer and a panel, the crates are broken, the rug is eaten by moths and mould, the edge of the trap door is splintered.
+     */
+    private fun furniture(c: WindowView.Canvas, photo: IntArray, camera: Int) {
+        when (camera) {
+            0 -> { piano(c, 38, 36, 70, 62, 1); rug(c, photo, 80, 98, 250, 152) }
+            1 -> {
+                books(c, photo, 265, 88, 312, 122, 5, 11)
+                wreck(c, 160, 70, 242, 136, 21, 1f)
+                wreck(c, 230, 60, 262, 126, 22, 0.8f)
+            }
+            2 -> { piano(c, 0, 48, 92, 150, 2); keys(c, 2) }
+            3 -> {
+                books(c, photo, 160, 49, 188, 68, 3, 12)
+                wreck(c, 143, 52, 161, 69, 23, 1f)
+                wreck(c, 187, 56, 212, 77, 24, 1.2f)
+                wreck(c, 212, 54, 242, 77, 25, 1f)
+            }
+        }
+    }
+
+    /** Books on a shelf: spines every few pixels; some are gone (the shelf shows dark), the rest are faded, dusty and mouldy. */
+    private fun books(c: WindowView.Canvas, photo: IntArray, x1: Int, y1: Int, x2: Int, y2: Int, spine: Int, seed: Int) {
+        for (x in x1..x2) {
+            val col = (x - x1) / spine
+            val gone = WindowView.hash(col * 17 + seed) < 0.26
+            for (y in y1..y2) {
+                val i = y * W + x
+                val p = photo[i]
+                val r = (p shr 16) and 0xFF; val g = (p shr 8) and 0xFF; val b = p and 0xFF
+                val lum = 0.3f * r + 0.59f * g + 0.11f * b
+                // only the books (bright or coloured), not the dark of the shelf
+                if (lum < 55f && abs(r - g) < 40) continue
+                if (gone) { c.set(x, y, 34f + 6f * WindowView.hash2(x, y, 3), 26f, 26f); continue }
+                // faded: the colour of the book is drained, the cloth dull
+                val l = lum * 0.85f
+                c.blend(x, y, l * 1.04f, l, l * 0.94f, 0.6f)
+                if (WindowView.fbm(x / 3f, y / 3f, 610 + seed) > 0.58f) c.blend(x, y, 72f, 92f, 66f, 0.6f) // mould
+            }
+        }
+        // a book that has slipped and leans: a bright slanted strip on the shelf
+        val bx = x1 + 4 + (WindowView.hash(seed * 5) * (x2 - x1 - 12)).toInt()
+        for (t in 0..(y2 - y1) / 2) c.blend(bx + t / 3, y2 - t, 150f, 118f, 90f, 0.8f)
+    }
+
+    /** The keys of the piano in the close picture: a number of them are missing (black gaps), some are crooked. */
+    private fun keys(c: WindowView.Canvas, seed: Int) {
+        // the band of the keys runs from (0, 108)-(0, 129) at the left edge to (87, 79)-(84, 90) on the right
+        for (k in 0 until 40) {
+            val t = k / 39f
+            if (WindowView.hash(k * 7 + seed) > 0.4f) continue
+            val xx = (t * 84f).toInt()
+            val yTop = 108f - 29f * t; val yBot = 129f - 39f * t
+            for (dx in 0..1) for (y in yTop.toInt()..yBot.toInt()) c.set(xx + dx, y, 8f, 8f, 10f)
+        }
+    }
+
+    /** A piano: cracks across the dark wood, the veneer chipped away in light patches, a corner of the lid broken off. */
+    private fun piano(c: WindowView.Canvas, x1: Int, y1: Int, x2: Int, y2: Int, seed: Int) {
+        for (y in y1..y2) for (x in x1..x2) {
+            val i = y * W + x
+            val lum = 0.3f * c.r[i] + 0.59f * c.g[i] + 0.11f * c.b[i]
+            if (lum > 85f || c.r[i] - c.g[i] > 40f) continue // keys, the gold of the fittings, the red beams and the wall stay
+            val chip = WindowView.fbm(x / 3f, y / 3f, 620 + seed)
+            if (chip > 0.72f) c.blend(x, y, 128f, 104f, 86f, 0.55f) // the veneer has come off
+            val stain = WindowView.fbm(x / 9f, y / 6f, 625 + seed)
+            if (stain > 0.55f) c.blend(x, y, 20f, 18f, 18f, 0.4f * ((stain - 0.55f) * 4f).coerceAtMost(1f))
+        }
+        // cracks: thin dark lines that run down and across
+        for (k in 0 until 4) {
+            var x = x1 + (x2 - x1) * WindowView.hash(k * 3 + seed * 11)
+            var y = y1 + 2f + (y2 - y1) * 0.3f * WindowView.hash(k * 5 + seed)
+            for (s in 0 until (y2 - y1) / 2) {
+                c.blend(x.toInt(), y.toInt(), 8f, 6f, 6f, 0.85f)
+                x += (WindowView.hash2(s, k, seed) - 0.4f) * 1.6f; y += 1f
+            }
+        }
+    }
+
+    /** A cabinet or a crate: the veneer peeled in grey patches, a dark damp stain, a panel broken out, cracks along the wood. */
+    private fun wreck(c: WindowView.Canvas, x1: Int, y1: Int, x2: Int, y2: Int, seed: Int, strength: Float) {
+        for (y in y1..y2) for (x in x1..x2) {
+            val i = y * W + x
+            val peel = WindowView.fbm(x / 6f, y / 4f, 630 + seed)
+            if (peel > 0.66f) c.blend(x, y, 118f, 100f, 90f, 0.55f * strength)
+            val stain = WindowView.fbm(x / 14f, y / 8f, 635 + seed)
+            if (stain > 0.55f) c.blend(x, y, 24f, 22f, 20f, 0.38f * strength * ((stain - 0.55f) * 4f).coerceAtMost(1f))
+        }
+        // a broken-out panel: a dark jagged hole
+        val cx = x1 + (x2 - x1) * (0.35f + 0.3f * WindowView.hash(seed))
+        val cy = y1 + (y2 - y1) * (0.45f + 0.3f * WindowView.hash(seed * 7))
+        val rx = (x2 - x1) * 0.12f * strength; val ry = (y2 - y1) * 0.14f * strength
+        c.ellipse(cx, cy, rx, ry) { x, y, dx, dy ->
+            val edge = 1f + 0.3f * (WindowView.hash2(x, y, 9) - 0.5f)
+            if (dx * dx + dy * dy < edge * edge) c.set(x, y, 14f, 11f, 11f)
+        }
+    }
+
+    /** The rug: moth-eaten holes where the boards show through, mould, a frayed edge. */
+    private fun rug(c: WindowView.Canvas, photo: IntArray, x1: Int, y1: Int, x2: Int, y2: Int) {
+        for (y in y1..y2) for (x in x1..x2) {
+            val p = photo[y * W + x]
+            val r = (p shr 16) and 0xFF; val g = (p shr 8) and 0xFF; val b = p and 0xFF
+            val lum = 0.3f * r + 0.59f * g + 0.11f * b
+            // the rug: its pinkish pattern and its teal border (the floor is darker and browner)
+            val isRug = lum > 88f && ((b >= g * 0.86f && r > g * 1.1f) || (g >= r * 0.95f && b >= r * 0.9f))
+            if (!isRug) continue
+            val hole = WindowView.fbm(x / 5f, y / 4f, 640)
+            if (hole > 0.7f) { c.set(x, y, 50f + 14f * WindowView.hash2(x, y, 2), 38f, 31f); continue }
+            val mould = WindowView.fbm(x / 8f, y / 6f, 641)
+            if (mould > 0.56f) c.blend(x, y, 66f, 84f, 60f, 0.5f * ((mould - 0.56f) * 4f).coerceAtMost(1f))
+        }
+    }
+
+    /** The edge of the trap door: the boards round the opening are splintered and broken, pale where the wood has split. */
+    private fun trapdoor(c: WindowView.Canvas, photo: IntArray, x1: Int, y1: Int, x2: Int, y2: Int) {
+        fun hole(x: Int, y: Int): Boolean {
+            if (x !in 0 until W || y !in 0 until H) return false
+            val p = photo[y * W + x]
+            val r = (p shr 16) and 0xFF; val g = (p shr 8) and 0xFF; val b = p and 0xFF
+            val lum = 0.3f * r + 0.59f * g + 0.11f * b
+            return lum in 55f..135f && g >= r * 0.97f && b >= r * 0.88f
+        }
+        for (y in y1..y2) for (x in x1..x2) {
+            if (hole(x, y)) continue
+            var near = false
+            for (d in 1..3) if (hole(x - d, y) || hole(x + d, y) || hole(x, y - d) || hole(x, y + d)) { near = true; break }
+            if (!near) continue
+            val h = WindowView.hash2(x, y, 31)
+            if (h > 0.55f) c.blend(x, y, 176f, 148f, 110f, 0.8f) // a pale splinter
+            else if (h < 0.15f) c.blend(x, y, 14f, 10f, 10f, 0.8f)
         }
     }
 
