@@ -59,6 +59,7 @@ class MainActivity : ComponentActivity() {
         val devPos = intent?.getStringExtra("devPos")?.split(",")?.mapNotNull { it.trim().toIntOrNull() }?.takeIf { it.size == 3 }
         // `--es devVars 19=1,20=0` sets script variables when the attic starts (for testing; 19=1 starts the second creature)
         DevOptions.vars = intent?.getStringExtra("devVars")?.split(",")?.mapNotNull { e -> e.split("=").takeIf { it.size == 2 }?.let { p -> p[0].trim().toIntOrNull()?.let { i -> p[1].trim().toIntOrNull()?.let { v -> i to v } } } } ?: emptyList()
+        DevOptions.lostPlace = intent?.getBooleanExtra("devLostPlace", false) ?: false
         DevOptions.floor = intent?.getStringExtra("devFloor")?.split(",")?.mapNotNull { it.trim().toIntOrNull() }?.takeIf { it.size == 2 }
         setContent { StartGate(devAutoAttic, devAutoIntro, devAutoMusic, devControlMode, devItems, devPos) }
     }
@@ -311,6 +312,9 @@ private fun LoadScreen(onBack: () -> Unit, onPick: (Int) -> Unit) {
 /** Settings for testing that come in as intent extras. */
 object DevOptions {
     var vars: List<Pair<Int, Int>> = emptyList()
+
+    /** `--ez devLostPlace true` (with devAutoAttic): the attic as a lost place (a prototype, for testing). */
+    var lostPlace = false
 
     /** `--es devFloor 1,4` (with devAutoAttic): start on that floor and in that room, as the floor selection does (for testing). */
     var floor: List<Int>? = null

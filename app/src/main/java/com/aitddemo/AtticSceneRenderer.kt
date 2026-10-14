@@ -74,7 +74,11 @@ class AtticSceneRenderer {
     /** The flash of lightning that lights the figures now (0 = none): their colours get a cool bright addition. Not in the original game. */
     var flash = 0f
 
-    private fun lit(c: Int): Int {
+    /** The attic as a lost place (not in the original game): the colours of the things are drained and dusty. */
+    var lostPlace = false
+
+    private fun lit(c0: Int): Int {
+        val c = if (lostPlace) LostPlace.gradeColor(c0) else c0
         if (flash <= 0.02f) return c
         val a = c ushr 24
         val rr = minOf(255, ((c shr 16) and 0xFF) + (28 * flash).toInt())

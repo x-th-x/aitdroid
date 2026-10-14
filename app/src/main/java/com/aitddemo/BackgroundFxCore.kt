@@ -22,7 +22,7 @@ sealed class FxShape {
 }
 
 /** How the strength of a light changes with the time. */
-enum class FxWave { MOON, CANDLE, STORM, CLOUD, DRAFT }
+enum class FxWave { MOON, CANDLE, STORM, CLOUD, DRAFT, OVERCAST }
 
 /** A light of one colour (r, g, b added at full strength) on a [shape]; [strength] 1 = the colour is added fully. */
 class FxLight(val shape: FxShape, val r: Int, val g: Int, val b: Int, val strength: Float, val wave: FxWave, val seed: Int = 0, val lampOnly: Boolean = false)
@@ -174,6 +174,7 @@ object BackgroundFxCore {
         FxWave.MOON -> 0.30f + 0.12f * sin(t * 2f * PI.toFloat() / 7f) + 0.10f * sin(t * 2f * PI.toFloat() / 2.3f) + storm(t) * 1.0f
         FxWave.CANDLE -> (0.55f + 0.25f * noise(t * 9f, seed) + 0.15f * noise(t * 23f, seed + 7) + gust(t) * (noise(t * 31f, seed + 3) - 0.75f) * 1.1f).coerceIn(0.05f, 1f)
         FxWave.STORM -> storm(t)
+        FxWave.OVERCAST -> (0.55f + 0.25f * sin(t * 0.21f) + 0.12f * sin(t * 0.07f + 1f) + 0.08f * sin(t * 0.9f + 2f)).coerceIn(0.1f, 1f) // daylight under a changing overcast sky: no lightning
         FxWave.DRAFT -> ((0.35f + 0.35f * sin(t * 1.7f + seed) + 0.3f * sin(t * 0.63f + seed * 2f)).coerceAtLeast(0f) * (0.6f + gust(t) * 0.8f)) + storm(t) * 0.5f
         FxWave.CLOUD -> (0.22f + 0.2f * sin(t * 2f * PI.toFloat() / 31f) + 0.14f * sin(t * 2f * PI.toFloat() / 11.3f)).coerceAtLeast(0.03f) + storm(t)
     }

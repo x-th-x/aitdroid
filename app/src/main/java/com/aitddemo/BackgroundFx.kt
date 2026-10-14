@@ -6,9 +6,9 @@ import android.graphics.Bitmap
  * The moving lights of the pictures of one room (see [BackgroundFxCore]; not in the original game): holds a copy of each picture that has lights, redraws the places of the
  * lights about 14 times per second and gives the picture that the renderer draws (the original picture when the camera has no lights).
  */
-class BackgroundFx(stage: Int, room: Int, private val photos: List<Bitmap>, pictureIds: List<Int> = emptyList(), cameras: List<AtticCameraDef> = emptyList()) {
+class BackgroundFx(stage: Int, room: Int, private val photos: List<Bitmap>, pictureIds: List<Int> = emptyList(), cameras: List<AtticCameraDef> = emptyList(), lostPlace: Boolean = false) {
     private val sets: List<FxSet?> = photos.indices.map {
-        if (stage == 0 && room == 0) BackgroundFxCore.attic(it) else if (stage == 0 && room == BalconyRoom.NUMBER) BackgroundFxCore.balcony() else if (stage == 1) pictureIds.getOrNull(it)?.let { id -> BackgroundFxCore.floor1(id) } else null
+        if (stage == 0 && room == 0 && lostPlace) LostPlace.fx(it) else if (stage == 0 && room == 0) BackgroundFxCore.attic(it) else if (stage == 0 && room == BalconyRoom.NUMBER) BackgroundFxCore.balcony() else if (stage == 1) pictureIds.getOrNull(it)?.let { id -> BackgroundFxCore.floor1(id) } else null
     }
 
     init {

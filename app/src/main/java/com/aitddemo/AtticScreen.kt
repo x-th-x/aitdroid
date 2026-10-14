@@ -260,7 +260,8 @@ private fun flashActor(e: Effect, data: com.aitddemo.game.GameData): AtticActor 
 }
 
 /** The photo of each camera of [view], scaled once to the renderer's resolution (nearest neighbour keeps the pixel look). */
-private fun scaledPhotos(view: RoomView): List<android.graphics.Bitmap> = view.photos.map { argb ->
+private fun scaledPhotos(view: RoomView, palette: IntArray? = null, lostPlace: Boolean = false): List<android.graphics.Bitmap> = view.photos.mapIndexed { index, original ->
+    val argb = if (lostPlace && palette != null && view.stage == 0 && view.room == 0) LostPlace.paint(original, palette, index) else original
     val bmp = android.graphics.Bitmap.createBitmap(argb, 320, 200, android.graphics.Bitmap.Config.ARGB_8888)
     android.graphics.Bitmap.createScaledBitmap(bmp, AtticSceneRenderer.W, AtticSceneRenderer.H, false)
 }
@@ -377,9 +378,10 @@ private fun effectActor(e: Effect, now: Int, palette: IntArray, data: com.aitdde
 /** Entry point: reads the room from the original game files, shows an error message when that is not possible. */
 @Composable
 fun AtticScreen(onExit: () -> Unit, controlMode: ControlMode = ControlMode.STEERING, developerMode: Boolean = false, devItems: List<Int> = emptyList(), devPos: List<Int>? = null, loadSlot: Int? = null, floorStart: FloorStart? = null, intro: Boolean = false, emily: Boolean = false) {
+    val lostPlace = (floorStart?.lostPlace == true || DevOptions.lostPlace) && !intro
     val loader = rememberOriginalFiles(if (emily) AtticOriginalReader::missingFilesEmily else AtticOriginalReader::missingFiles, cacheKey = if (emily) "attic-emily" else "attic") { files -> AtticOriginalReader.read(files, emily) }
     when (val state = loader.state) {
-        is OriginalState.Ready -> AtticRoom(state.data, onExit, controlMode, developerMode, devItems, devPos, loadSlot, floorStart, intro, emily)
+        is OriginalState.Ready -> AtticRoom(state.data, onExit, controlMode, developerMode, devItems, devPos, loadSlot, floorStart, intro, emily, lostPlace)
         is OriginalState.Failed -> OriginalFilesErrorScreen(state.message, onChooseFolder = loader.chooseFolder, onExit = onExit)
         OriginalState.Loading -> Box(Modifier.fillMaxSize().background(Color.Black)) {
             BitmapText(text = "Lade Originaldateien...", scale = 2f, color = Color(0xFFF2E4B8), modifier = Modifier.align(Alignment.Center))
@@ -389,7 +391,7 @@ fun AtticScreen(onExit: () -> Unit, controlMode: ControlMode = ControlMode.STEER
 }
 
 @Composable
-private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: ControlMode, developerMode: Boolean, devItems: List<Int>, devPos: List<Int>?, loadSlot: Int?, floorStart: FloorStart?, intro: Boolean, emily: Boolean) {
+private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: ControlMode, developerMode: Boolean, devItems: List<Int>, devPos: List<Int>?, loadSlot: Int?, floorStart: FloorStart?, intro: Boolean, emily: Boolean, lostPlace: Boolean) {
     BackHandler { onExit() }
     // the attic plays the first track of LISTMUS.PAK in a loop (the intro music stops); leaving the attic stops it
     DisposableEffect(world) {
@@ -531,12 +533,12 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
                     val bathroom = fxStage == 1 && game.roomView.pictureIds.any { it == 11 || it == 12 }
                     for (e in BackgroundFxCore.events(fxLastT, nowT)) when (e.kind) {
                         // on the floor below the storm is heard through the walls
-                        Ambient.THUNDER -> StartAssets.playThunder((0.35f + 0.5f * e.strength) * (if (attic || outdoors) 1f else 0.55f))
+                        Ambient.THUNDER -> if (!lostPlace) StartAssets.playThunder((0.35f + 0.5f * e.strength) * (if (attic || outdoors) 1f else 0.55f))
                         Ambient.CREAK -> if (attic) ambient.play(4, 0.55f, volume = 0.18f + 0.2f * e.strength)
                         Ambient.DRIP -> if (attic || bathroom) ambient.play(-1, 1f, volume = 0.35f)
                         Ambient.VANISH -> if (fxStage == 1 && game.roomView.pictureIds.contains(7)) ambient.play(if (e.strength > 0.5f) -3 else -4, 1f, volume = 0.6f)
                         Ambient.WIND -> ambient.play(-2, 1f, volume = if (attic || outdoors) 0.5f else 0.22f)
-                        Ambient.RAT -> if (attic) fxScope.launch {
+                        Ambient.RAT -> if (attic && !lostPlace) fxScope.launch {
                             // the patter of the feet, and the squeaks (samples 47 and 72 of LISTSAMP.PAK: no script of the game plays them, they are quiet and high)
                             repeat(9) {
                                 ambient.play(31 + it % 3, 2.3f, volume = 0.16f)
@@ -544,7 +546,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
                                 delay(330)
                             }
                         }
-                        Ambient.HORSE -> if (attic) {
+                        Ambient.HORSE -> if (attic && !lostPlace) {
                             game.objects.getOrNull(6)?.actor?.playAnim(9, 0, -1) // the animation of the horse that it plays when it is touched
                             ambient.play(4, 0.8f, volume = 0.12f)
                         }
@@ -594,11 +596,12 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
 
     val view = game.roomView
     val camera = view.cameras.getOrNull(cameraIndex) ?: view.cameras[0]
-    val backgrounds = roomCache.getOrPut(view) { scaledPhotos(view) }
+    val backgrounds = roomCache.getOrPut(view) { scaledPhotos(view, world.game.palette, lostPlace) }
     // moving light on the pictures (an addition, not in the original): moonlight at the windows, candle flames, dust in the moonlight
-    val fxLayer = remember(backgrounds) { BackgroundFx(view.stage, view.room, backgrounds, view.pictureIds, view.cameras) }
+    val fxLayer = remember(backgrounds) { BackgroundFx(view.stage, view.room, backgrounds, view.pictureIds, view.cameras, lostPlace) }
     val fxMs = (System.nanoTime() - fxEpoch) / 1_000_000L
-    renderer.flash = if (!intro && (view.stage == 0 || (view.stage == 1 && fxLayer.hasWindow(cameraIndex)))) BackgroundFxCore.flash(fxMs / 1000f) else 0f
+    renderer.lostPlace = lostPlace
+    renderer.flash = if (!lostPlace && !intro && (view.stage == 0 || (view.stage == 1 && fxLayer.hasWindow(cameraIndex)))) BackgroundFxCore.flash(fxMs / 1000f) else 0f
     // the intro walks through rooms of four floors: they are read and their pictures scaled in the background while the car drives
     if (intro) LaunchedEffect(world) {
         withContext(Dispatchers.Default) {

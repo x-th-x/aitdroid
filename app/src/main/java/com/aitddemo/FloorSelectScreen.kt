@@ -17,7 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 
 /** Where the game starts when it is begun from the floor selection of the main menu (for testing); null = the normal start in the attic. */
-class FloorStart(val stage: Int, val room: Int, val items: List<Int>, val skipWaits: Boolean, val emily: Boolean = false)
+class FloorStart(val stage: Int, val room: Int, val items: List<Int>, val skipWaits: Boolean, val emily: Boolean = false, val lostPlace: Boolean = false)
 
 /** The things a start from the floor selection can carry (world objects of OBJETS.ITD). */
 private val PRESETS = listOf(
@@ -41,9 +41,11 @@ fun FloorSelectScreen(onStart: (FloorStart) -> Unit, onBack: () -> Unit) {
     var preset by remember { mutableIntStateOf(3) }
     var skipWaits by remember { mutableIntStateOf(1) }
     var emily by remember { mutableIntStateOf(0) }
+    var lostPlace by remember { mutableIntStateOf(0) }
 
     val lines = listOf(
         "Character: ${if (emily == 1) "Emily" else "Carnby"}",
+        "Style: ${if (lostPlace == 1) "Lost Place (test)" else "Original"}",
         "Floor: ${floorName(stage)}",
         "Room: $room",
         "Items: ${PRESETS[preset].first}",
@@ -52,20 +54,21 @@ fun FloorSelectScreen(onStart: (FloorStart) -> Unit, onBack: () -> Unit) {
     )
     val actions = listOf<() -> Unit>(
         { emily = 1 - emily },
+        { lostPlace = 1 - lostPlace },
         { stage = (stage + 1) % ROOM_COUNTS.size; room = 0 },
         { room = (room + 1) % ROOM_COUNTS[stage] },
         { preset = (preset + 1) % PRESETS.size },
         { skipWaits = 1 - skipWaits },
-        { onStart(FloorStart(stage, room, PRESETS[preset].second, skipWaits == 1, emily == 1)) },
+        { onStart(FloorStart(stage, room, PRESETS[preset].second, skipWaits == 1, emily == 1, lostPlace == 1)) },
     )
 
     Box(Modifier.fillMaxSize().background(Color(0xFF14080A))) {
         StartPictureImage(StartPicture.MENU)
         GameCanvas(Modifier.fillMaxSize()) {
-            Box(Modifier.offset(x = gx(0), y = gy(60)).size(gx(320), gy(112)).background(Color.Black.copy(alpha = 0.5f)).border(unit * 1.5f, Color(0xFF8A6D3B)))
+            Box(Modifier.offset(x = gx(0), y = gy(56)).size(gx(320), gy(124)).background(Color.Black.copy(alpha = 0.5f)).border(unit * 1.5f, Color(0xFF8A6D3B)))
             lines.forEachIndexed { i, label ->
                 val last = i == lines.lastIndex
-                Box(Modifier.offset(x = gx(40), y = gy(66 + i * 15)).size(gx(240), gy(15)).clickable { actions[i]() }) {
+                Box(Modifier.offset(x = gx(40), y = gy(62 + i * 14)).size(gx(240), gy(14)).clickable { actions[i]() }) {
                     Box(Modifier.offset(x = unit * (120 - bitmapTextWidth(label) / 2))) {
                         BitmapText(text = label, scale = unit.value, color = if (last) Color(0xFFF2E4B8) else Color(0xFF9C8B6E))
                     }
