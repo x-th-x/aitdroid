@@ -63,13 +63,13 @@ object LostPlaceModels {
         val r = ((c shr 16) and 0xFF).toFloat(); val g = ((c shr 8) and 0xFF).toFloat(); val b = (c and 0xFF).toFloat()
         val lum = 0.3f * r + 0.59f * g + 0.11f * b
         val h = hash(seed)
-        var nr = lum + (r - lum) * 0.3f
-        var ng = lum + (g - lum) * 0.3f
-        var nb = lum + (b - lum) * 0.3f
-        val dark = 0.5f + 0.34f * hash(seed * 7 + 3)
+        var nr = lum + (r - lum) * 0.78f
+        var ng = lum + (g - lum) * 0.78f
+        var nb = lum + (b - lum) * 0.78f
+        val dark = 0.74f + 0.24f * hash(seed * 7 + 3)
         nr *= dark; ng *= dark; nb *= dark
         if (h > 0.78f) { nr *= 0.8f; ng *= 1.05f; nb *= 0.78f } // mould
-        else if (h < 0.18f) { nr *= 0.7f; ng *= 0.68f; nb *= 0.66f } // water damage, almost black
+        else if (h < 0.18f) { nr *= 0.82f; ng *= 0.8f; nb *= 0.78f } // water damage, darker
         return (c and 0xFF000000.toInt()) or (nr.toInt().coerceIn(0, 255) shl 16) or (ng.toInt().coerceIn(0, 255) shl 8) or nb.toInt().coerceIn(0, 255)
     }
 

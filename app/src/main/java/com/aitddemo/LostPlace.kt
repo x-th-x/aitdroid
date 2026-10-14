@@ -44,9 +44,9 @@ object LostPlace {
     fun gradeColor(c: Int): Int {
         val r = ((c shr 16) and 0xFF).toFloat(); val g = ((c shr 8) and 0xFF).toFloat(); val b = (c and 0xFF).toFloat()
         val lum = 0.3f * r + 0.59f * g + 0.11f * b
-        val nr = ((lum + (r - lum) * 0.45f) * 0.80f + 10f).toInt().coerceIn(0, 255)
-        val ng = ((lum + (g - lum) * 0.45f) * 0.83f + 13f).toInt().coerceIn(0, 255)
-        val nb = ((lum + (b - lum) * 0.45f) * 0.86f + 15f).toInt().coerceIn(0, 255)
+        val nr = ((lum + (r - lum) * 0.88f) * 0.96f + 3f).toInt().coerceIn(0, 255)
+        val ng = ((lum + (g - lum) * 0.88f) * 0.97f + 3f).toInt().coerceIn(0, 255)
+        val nb = ((lum + (b - lum) * 0.88f) * 0.98f + 4f).toInt().coerceIn(0, 255)
         return (c and 0xFF000000.toInt()) or (nr shl 16) or (ng shl 8) or nb
     }
 
@@ -91,30 +91,30 @@ object LostPlace {
             var r = c.r[i]; var g = c.g[i]; var b = c.b[i]
             // the colours are drained: a little warmth is left in the wood
             val lum = 0.3f * r + 0.59f * g + 0.11f * b
-            r = lum + (r - lum) * 0.42f; g = lum + (g - lum) * 0.42f; b = lum + (b - lum) * 0.42f
+            r = lum + (r - lum) * 0.84f; g = lum + (g - lum) * 0.84f; b = lum + (b - lum) * 0.84f
             // the room is dim: the only light is the daylight that comes in through the window, cool and soft
-            r *= 0.9f; g *= 0.95f; b *= 1.02f
+            r *= 1.0f; g *= 1.0f; b *= 1.0f
             if (floor != null && floor.has(i)) {
                 val fx = floor.x[i]; val fz = floor.z[i]
                 // damp stains on the boards: large soft shapes that are darker, with a pale tide mark at the edge where the water dried
                 val s = WindowView.fbm(fx / 1300f, fz / 1000f, 501)
                 val stain = smooth(0.5f, 0.62f, s)
                 val rim = smooth(0.48f, 0.52f, s) * (1f - smooth(0.52f, 0.58f, s))
-                val k = 1f - 0.52f * stain + 0.14f * rim
+                val k = 1f - 0.30f * stain + 0.10f * rim
                 r *= k; g *= k; b *= k
                 // the dirt in the joints and the wear of the planks: a fine noise along the boards
-                val grain = 0.8f + 0.4f * WindowView.fbm(fx / 80f, fz / 900f, 502)
+                val grain = 0.9f + 0.2f * WindowView.fbm(fx / 80f, fz / 900f, 502)
                 r *= grain; g *= grain; b *= grain
                 // dust: a matte veil over the boards that is thicker where nobody has walked (the walls, the corners)
                 val edge = smooth(2800f, 5200f, abs(fx)) * 0.5f + smooth(2500f, 4800f, fz) * 0.5f
-                val dust = 0.10f + 0.16f * edge + 0.08f * WindowView.fbm(fx / 400f, fz / 400f, 503)
+                val dust = 0.03f + 0.07f * edge + 0.03f * WindowView.fbm(fx / 400f, fz / 400f, 503)
                 r += (126f - r) * dust; g += (124f - g) * dust; b += (116f - b) * dust
             } else if (y < 64) {
                 // the wall of boards and the roof: the damp comes from above - dark where the water ran down, mould at the bottom, the grime of the beams
                 val above = 1f - (y / 64f)
                 val streak = WindowView.fbm(x / 14f, y / 60f, 511) // long vertical streaks
                 val blot = smooth(0.52f, 0.64f, WindowView.fbm(x / 33f, y / 14f, 512))
-                val k = 1f - (0.18f * above + 0.28f * smooth(0.45f, 0.7f, streak) + 0.3f * blot)
+                val k = 1f - (0.08f * above + 0.15f * smooth(0.45f, 0.7f, streak) + 0.18f * blot)
                 r *= k; g *= k; b *= k
                 if (y in 46..64) { // mould and salts at the foot of the wall
                     val m = smooth(0.5f, 0.7f, WindowView.fbm(x / 9f, y / 5f, 513)) * ((y - 46f) / 18f)
@@ -122,7 +122,7 @@ object LostPlace {
                 }
             } else {
                 // what stands in the room (the posts, the table, the chair): a layer of dust on top of it
-                val dust = 0.08f + 0.1f * WindowView.fbm(x / 20f, y / 20f, 521)
+                val dust = 0.02f + 0.03f * WindowView.fbm(x / 20f, y / 20f, 521)
                 r += (118f - r) * dust; g += (116f - g) * dust; b += (108f - b) * dust
             }
             c.r[i] = r; c.g[i] = g; c.b[i] = b
@@ -278,7 +278,8 @@ object LostPlace {
             }
         }
         // a heap of plaster and rubble: a low mound of grey crumbs, lit from the window side
-        fun heap(cx: Float, cz: Float, radius: Float, seed: Int) {
+        fun heap(cx: Float, cz: Float, radius0: Float, seed: Int) {
+            val radius = radius0 * 0.55f
             shadow(cx + 40f, cz + 50f, radius * 1.25f, radius * 0.9f, 0.45f)
             val centre = at(cx, 0f, cz) ?: return
             val edge = at(cx + radius, 0f, cz) ?: return
@@ -288,8 +289,8 @@ object LostPlace {
             c.ellipse(centre[0], centre[1] - ry * 0.6f, rx, ry * 1.3f) { x, y, dx, dy ->
                 val crumb = WindowView.hash2(x, y, seed)
                 val lit = (0.5f - dx * 0.35f - dy * 0.4f).coerceIn(0f, 1f)
-                val v = 52f + 44f * lit + 22f * crumb
-                c.blend(x, y, v, v - 1f, v - 6f, 0.92f * (1f - (dx * dx + dy * dy) * 0.4f))
+                val v = 40f + 40f * lit + 34f * crumb
+                c.blend(x, y, v * 1.06f, v * 0.96f, v * 0.84f, 0.88f * (1f - (dx * dx + dy * dy) * 0.5f))
             }
         }
         plank(2100f, -300f, 2200f, 0.5f, 1f)
@@ -389,7 +390,7 @@ object LostPlace {
             val m = smooth(0.58f, 0.7f, WindowView.fbm(floor.x[i] / 750f, floor.z[i] / 620f, 571))
             if (m <= 0f) continue
             val speck = 0.65f + 0.35f * WindowView.hash2(x, y, 12)
-            c.blend(x, y, 40f, 54f, 40f, 0.62f * m * speck)
+            c.blend(x, y, 40f, 58f, 38f, 0.42f * m * speck)
         }
     }
 
@@ -423,9 +424,9 @@ object LostPlace {
             val pr = (photo[i] shr 16) and 0xFF; val pg = (photo[i] shr 8) and 0xFF
             if (pg <= pr * 1.05f) continue
             val m = WindowView.fbm(x / 8f, y / 6f, 581)
-            if (m > 0.7f) { c.set(x, y, 10f, 12f, 11f) }
-            else if (m > 0.56f) c.blend(x, y, 86f, 96f, 82f, 0.55f)
-            if (WindowView.fbm(x / 3f, y / 2f, 582) > 0.76f) c.blend(x, y, 20f, 22f, 20f, 0.8f)
+            if (m > 0.78f) { c.set(x, y, 10f, 12f, 11f) }
+            else if (m > 0.62f) c.blend(x, y, 70f, 90f, 74f, 0.4f)
+            if (WindowView.fbm(x / 3f, y / 2f, 582) > 0.82f) c.blend(x, y, 20f, 22f, 20f, 0.8f)
         }
     }
 
@@ -440,10 +441,10 @@ object LostPlace {
             // split toning: cool in the shadows, warm in the lights
             val shade = (1f - lum * 2.2f).coerceIn(0f, 1f)
             val light = ((lum - 0.45f) * 2f).coerceIn(0f, 1f)
-            r += -4f * shade + 10f * light; g += 3f * shade + 4f * light; b += 8f * shade - 6f * light
+            r += -1f * shade + 4f * light; g += 1f * shade + 2f * light; b += 3f * shade - 2f * light
             val dx = (x - 160f) / 160f; val dy = (y - 104f) / 104f
-            val vig = 1f - 0.28f * (dx * dx * 0.8f + dy * dy * 0.7f)
-            val grain = (WindowView.hash2(x, y, 99) - 0.5f) * 9f
+            val vig = 1f - 0.14f * (dx * dx * 0.8f + dy * dy * 0.7f)
+            val grain = (WindowView.hash2(x, y, 99) - 0.5f) * 4f
             c.r[i] = r * vig + grain; c.g[i] = g * vig + grain; c.b[i] = b * vig + grain
         }
     }
