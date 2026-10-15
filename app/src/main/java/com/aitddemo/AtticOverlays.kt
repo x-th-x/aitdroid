@@ -31,6 +31,10 @@ private val GOLD = Color(0xFF8A6D3B)
 private val TEXT = Color(0xFFF2E4B8)
 private val DIM = Color(0xFF9C8B6E)
 
+/** The object "Actions" of the game: its window shows the character, with his life points. The life points are the variable 21 of the game (20 at the start). */
+private const val ACTIONS_ITEM = 2
+private const val VAR_LIFE_POINTS = 21
+
 /** Text centred on the 320x200 grid at height [y]. */
 @Composable
 private fun GameCanvasScope.CenteredText(text: String, y: Int, color: Color = TEXT, centerX: Int = 160) {
@@ -153,6 +157,12 @@ fun InventoryOverlay(game: AtticGame, onClose: () -> Unit, onUse: (Int, Int) -> 
             CenteredText(name, 14)
             Box(Modifier.offset(x = gx(105), y = gy(34)).size(gx(110), gy(100)).background(Color(0xFF0C0608)).border(unit, GOLD).clickable(enabled = asset != null) { zoomed = true }) {
                 if (asset != null) ModelSpinner(vertices = asset.vertices, triangles = asset.triangles, rotationSpeed = 0.35f, modifier = Modifier.fillMaxSize())
+            }
+            // the window of the character (the item "Actions") shows his life points, as the original does (a number at the top left of the window, manual: "the character with Life Points")
+            if (item == ACTIONS_ITEM) {
+                Box(Modifier.offset(x = gx(108), y = gy(37))) {
+                    BitmapText(text = game.vm.vars[VAR_LIFE_POINTS].toInt().coerceAtLeast(0).toString(), scale = unit.value, color = TEXT)
+                }
             }
             if (items.size > 1) {
                 Choice("<", 125, 142, false) { selected = (sel + items.size - 1) % items.size }
