@@ -629,14 +629,17 @@ class Actor(
 
     /** InitAnim des Originals: true, wenn die Animation neu angefordert wurde; false, wenn sie schon läuft (dann ändern sich nur Art und Folgeanimation) oder gesperrt ist. */
     private fun initAnim(num: Int, type: Int, info: Int): Boolean {
-        stopPending = false
-        if (num == anim) {
+        if (num == anim) { // (a stop that is waiting stays: the same animation requested again does not cancel it)
             animType = type
             animInfo = info
             return false
         }
-        // AITD1: eine nicht unterbrechbare Animation (ANIM_ALL_ONCE) lässt jede neue Anforderung verfallen
+        // AITD1 (InitAnim, 0x764C): läuft eine Animation (oder ist eine angenommen), lässt eine nicht unterbrechbare (ANIM_ALL_ONCE, Art Bit 2) jede neue Anforderung verfallen;
+        // eine beendete Animation (StopAnim löscht das Bit "animiert") nimmt jede an, auch wenn ihre Art noch Bit 2 trägt
+        val running = animData != null || newAnim != -1
+        if (running && animType and 2 != 0) return false
         if (newAnimType and 2 != 0) return false
+        stopPending = false // a new animation takes the place of the stop that was waiting
         newAnim = num
         newAnimType = type
         newAnimInfo = info
@@ -660,7 +663,7 @@ class Actor(
             stopPending = false
             playAnim(-1, 0, -1)
         }
-        if (newAnim != -1 && animType and 2 == 0) {
+        if (newAnim != -1) {
             if (newAnimType and 4 == 0) {
                 if (!endFrame) { // Schritt der unterbrochenen Keyframe festschreiben
                     worldX += stepX
@@ -756,9 +759,9 @@ class Actor(
                 endAnimTick = true
                 flagEndAnim = true
                 frame = 0
-                if (animType and 1 == 0) {
+                if (animType and 1 == 0 && newAnim == -1) {
                     animType = animType and 2.inv()
-                    if (newAnim == -1) { if (animInfo == -1) stopPending = true else initAnim(animInfo, 1, -1) }
+                    if (animInfo == -1) stopPending = true else initAnim(animInfo, 1, -1)
                 }
             }
             worldX += stepX
