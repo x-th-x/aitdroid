@@ -1415,6 +1415,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         /** The smoke of a cigar (mode 4) lasts 660 ticks of the 60 per second timer. */
         const val SMOKE_TICKS = 660
         /** Positions in the CVars (DEFINES.ITD): the sound of an impact, the weight limit, the object that sends a thrown item back. */
+        const val CVAR_CHOOSE_PERSON = 8
         const val CVAR_SAMPLE_CHOC = 9
         const val CVAR_REVERSE_OBJECT = 11
         const val CVAR_BODY_FLAMME = 1
