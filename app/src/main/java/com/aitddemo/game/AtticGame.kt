@@ -403,13 +403,13 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         }
     }
 
-    /** A blow of the other hero: the same data as the player's fist (HIT 37 1 18 200 force 38 of the item script). */
+    /** A blow of the other hero: the same data as the player's fists (see [FIST_ANIMS]). */
     private fun startBlow(g: GameObject, anim: Int): Boolean {
         val a = g.actor ?: return false
         if (data.companionAnim(anim) == null) return false
         if (!a.playAnim(anim, 0, FIST_NEXT)) return false
         g.actionType = 1
-        g.actionAnim = anim; g.actionFrame = FIST_FRAME; g.actionGroup = FIST_GROUP; g.actionRange = FIST_SIZE; g.actionForce = FIST_FORCE
+        g.actionAnim = anim; g.actionFrame = FIST_FRAME; g.actionGroup = FIST_GROUPS[FIST_ANIMS.indexOf(anim).coerceAtLeast(0)]; g.actionRange = FIST_SIZE; g.actionForce = FIST_FORCE
         return true
     }
 
@@ -1926,12 +1926,13 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         private const val FIGHT_REACH = 950f
         private const val BLOW_PAUSE = 50
         private const val PROVOKED_TICKS = 900
-        private val FIST_ANIMS = intArrayOf(37, 39, 40, 41)
-        private const val FIST_NEXT = 38
+        /** The blows of the bare fists: the left hand, the right hand and the foot (script 560 of the Fight action: HIT 265 1 10 200 1 264, HIT 263 1 13 200 1 264, HIT 262 1 16 200 1 264). */
+        private val FIST_ANIMS = intArrayOf(265, 263, 262)
+        private val FIST_GROUPS = intArrayOf(10, 13, 16)
+        private const val FIST_NEXT = 264
         private const val FIST_FRAME = 1
-        private const val FIST_GROUP = 18
-        private const val FIST_SIZE = 220
-        private const val FIST_FORCE = 3
+        private const val FIST_SIZE = 200
+        private const val FIST_FORCE = 1
 
         /** The sound of a monster that dissolves (SAMPLE 6 of its script). */
         private const val DEATH_SAMPLE = 6
