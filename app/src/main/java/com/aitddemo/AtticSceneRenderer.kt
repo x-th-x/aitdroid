@@ -127,6 +127,12 @@ class AtticSceneRenderer {
     /** One thing to draw: a triangle (kind 0), a line (kind 1, from a to b) or a filled circle (kind 2, centre a, radius in [bx]); sorted by depth with the others. */
     private class Tri(val depth: Float, val ax: Float, val ay: Float, val bx: Float, val by: Float, val cx: Float, val cy: Float, val color: Int, val kind: Int = 0, val pts: FloatArray? = null)
 
+    /** One body alone on a transparent picture (the item windows of the interface): [actor]'s vertices are in the camera's world, drawn through [camera]. */
+    fun renderBody(camera: AtticCameraDef, actor: AtticActor) {
+        bitmap.eraseColor(0)
+        drawActor(AtticProjector(camera), actor)
+    }
+
     /** A plain picture without actors (for example a full-screen picture of the game). */
     fun renderPicture(picture: Bitmap) {
         canvas.drawBitmap(picture, 0f, 0f, null)
