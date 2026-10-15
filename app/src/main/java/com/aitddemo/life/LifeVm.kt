@@ -77,6 +77,10 @@ interface LifeHost {
 
     // ---- appearance and movement
     fun body(obj: Int) {}
+    /**
+     * Start an animation (ANIM_ONCE, ANIM_ALL_ONCE, ANIM_REPEAT). The variable ANIM of the object does not change here: it shows the animation that really plays and changes
+     * when the new one has begun (a script that waits for "the animation X has ended" must not see the end of the one before, nor an animation that was refused).
+     */
     fun anim(obj: Int, anim: Int, type: Int, info: Int) {}
     fun doMove(obj: Int) {}
     /** GET_HARD_CLIP: the object remembers the wall box it touches (its spheres inside that box are not drawn). */
@@ -351,18 +355,18 @@ class LifeVm(
                     "ANIM_ONCE" -> {
                         val a = s16()
                         val info = s16()
-                        t.anim = a; t.animType = 0; t.animInfo = info
+                        t.animType = 0; t.animInfo = info
                         host.anim(target, a, 0, info)
                     }
                     "ANIM_ALL_ONCE" -> {
                         val a = s16()
                         val info = s16()
-                        t.anim = a; t.animType = 2; t.animInfo = info
+                        t.animType = 2; t.animInfo = info
                         host.anim(target, a, 2, info)
                     }
                     "ANIM_REPEAT" -> {
                         val a = s16()
-                        t.anim = a; t.animType = 1; t.animInfo = -1
+                        t.animType = 1; t.animInfo = -1
                         host.anim(target, a, 1, -1)
                     }
                     "ANIM_SAMPLE" -> {

@@ -636,7 +636,6 @@ class Actor(
             return false
         }
         // AITD1: eine nicht unterbrechbare Animation (ANIM_ALL_ONCE) lässt jede neue Anforderung verfallen
-        if (animType and 2 != 0) return false
         if (newAnimType and 2 != 0) return false
         newAnim = num
         newAnimType = type
@@ -661,7 +660,7 @@ class Actor(
             stopPending = false
             playAnim(-1, 0, -1)
         }
-        if (newAnim != -1) {
+        if (newAnim != -1 && animType and 2 == 0) {
             if (newAnimType and 4 == 0) {
                 if (!endFrame) { // Schritt der unterbrochenen Keyframe festschreiben
                     worldX += stepX
@@ -757,9 +756,9 @@ class Actor(
                 endAnimTick = true
                 flagEndAnim = true
                 frame = 0
-                if (animType and 1 == 0 && newAnim == -1) {
+                if (animType and 1 == 0) {
                     animType = animType and 2.inv()
-                    if (animInfo == -1) stopPending = true else initAnim(animInfo, 1, -1)
+                    if (newAnim == -1) { if (animInfo == -1) stopPending = true else initAnim(animInfo, 1, -1) }
                 }
             }
             worldX += stepX

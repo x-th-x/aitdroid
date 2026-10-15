@@ -711,7 +711,9 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     }
 
     override fun anim(obj: Int, anim: Int, type: Int, info: Int) {
-        val a = objects.getOrNull(obj)?.actor ?: return
+        val g = objects.getOrNull(obj) ?: return
+        val a = g.actor
+        if (a == null) { g.w.anim = anim; return } // an object without a body keeps what the script says
         a.playAnim(anim, type, info)
     }
 
