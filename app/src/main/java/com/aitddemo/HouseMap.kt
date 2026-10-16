@@ -88,18 +88,11 @@ private val INK_LIGHT = Color(0xFF6B5136)
 private val WASH_SEEN = Color(0x55A8763C)
 private val WASH_HERE = Color(0x88C04A33)
 private val RED = Color(0xFFB02A20)
-// the tones of the hands and sleeves are those of the bodies of the game (Carnby: skin 8b6b53 / 97775f / af8b73, jacket 273b2f / 2b4333 / 37574f)
-private val CARNBY_SKIN = HeldHands.Tones(0xFF8B6B53.toInt(), 0xFF97775F.toInt(), 0xFFAF8B73.toInt())
-private val CARNBY_SLEEVE = HeldHands.Tones(0xFF1D2D23.toInt(), 0xFF273B2F.toInt(), 0xFF37574F.toInt())
-private val EMILY_SKIN = HeldHands.Tones(0xFF8F5B3F.toInt(), 0xFF9F674B.toInt(), 0xFFB57F63.toInt())
-private val EMILY_SLEEVE = HeldHands.Tones(0xFF1F3B46.toInt(), 0xFF2B4F5C.toInt(), 0xFF3F6B78.toInt())
-private val SHIRT_CUFF = HeldHands.Tones(0xFF9C968A.toInt(), 0xFFC4BEB0.toInt(), 0xFFE2DCCE.toInt())
-
 /** The area of the sheet (in the 320 x 200 picture of the letter page) that the plan may use. */
 private const val PLAN_X = 58f
-private const val PLAN_Y = 26f
+private const val PLAN_Y = 33f
 private const val PLAN_W = 188f
-private const val PLAN_H = 130f
+private const val PLAN_H = 108f
 
 @Composable
 fun HouseMapOverlay(game: AtticGame, onClose: () -> Unit) {
@@ -115,16 +108,15 @@ fun HouseMapOverlay(game: AtticGame, onClose: () -> Unit) {
     // the breathing of the hands: a new picture every frame
     var time by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(Unit) { while (true) withFrameNanos { time = it / 1_000_000_000f } }
-    val hands = remember { HeldHands() }
+    val hands = remember { game.data.body(12)?.let { HeldHands(it, game.data.anim(HeldHands.ANIMATION)) } }
     val paper = remember { game.data.bookPicture(0)?.let { StartAssets.picture(it) } }
-    val emily = game.vm.cvars[AtticGame.CVAR_CHOOSE_PERSON].toInt() == 1
     val frame = fit(outlines, PLAN_W, PLAN_H)
 
     Box(Modifier.fillMaxSize().background(Color.Black).clickable(enabled = false) {}) {
         GameCanvas(Modifier.fillMaxSize()) {
             if (paper != null) Image(bitmap = paper, contentDescription = null, contentScale = ContentScale.FillBounds, modifier = Modifier.fillMaxSize())
             // the sheet: the title, the plan
-            Ink(HouseNames.floor(shown), 8, 1.25f, INK)
+            Ink(HouseNames.floor(shown), 5, 1.25f, INK)
             Canvas(
                 Modifier.offset(x = unit * PLAN_X, y = unit * PLAN_Y).size(unit * PLAN_W, unit * PLAN_H).pointerInput(outlines) {
                     detectTapGestures { p ->
@@ -176,11 +168,11 @@ fun HouseMapOverlay(game: AtticGame, onClose: () -> Unit) {
             // the name of the room that was tapped, or where the character is
             val caption = if (picked >= 0) HouseNames.room(shown, picked) + (if (shown * 100 + picked !in visited) " (not seen yet)" else "")
             else if (shown == here) "You are here: " + HouseNames.room(here, game.roomView.room) else ""
-            if (caption.isNotEmpty()) Ink(caption, 162, 0.55f, INK)
+            if (caption.isNotEmpty()) Ink(caption, 22, 0.5f, INK)
             // the hands that hold the sheet
             Canvas(Modifier.fillMaxSize()) {
-                hands.render(time, if (emily) EMILY_SLEEVE else CARNBY_SLEEVE, if (emily) EMILY_SKIN else CARNBY_SKIN, SHIRT_CUFF)
-                drawImage(hands.bitmap.asImageBitmap(), dstSize = IntSize(size.width.toInt(), size.height.toInt()), filterQuality = FilterQuality.None)
+                hands?.render(time)
+                if (hands != null) drawImage(hands.bitmap.asImageBitmap(), dstSize = IntSize(size.width.toInt(), size.height.toInt()), filterQuality = FilterQuality.None)
             }
         }
         Box(Modifier.align(Alignment.BottomStart).padding(12.dp).background(Color.Black.copy(alpha = 0.5f)).clickable(onClick = onClose).padding(horizontal = 10.dp, vertical = 6.dp)) {
