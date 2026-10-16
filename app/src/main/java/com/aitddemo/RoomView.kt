@@ -32,7 +32,7 @@ class RoomView(
 }
 
 /** A room as the map of the house draws it: its place in the world of its floor (x to the east, z to the south, in game units), and its doors. */
-class RoomOutline(val room: Int, val x1: Int, val x2: Int, val z1: Int, val z2: Int, val originX: Int, val originZ: Int, val doors: List<Door>) {
+class RoomOutline(val room: Int, val x1: Int, val x2: Int, val z1: Int, val z2: Int, val originX: Int, val originZ: Int, val doors: List<Door>, val stairs: List<IntArray> = emptyList()) {
     /** A door (room-change zone) to room [target] at world place (x, z). */
     class Door(val target: Int, val x: Int, val z: Int)
 }
@@ -76,11 +76,13 @@ class RoomLoader(private val files: GameFiles, private val palette: IntArray) {
             }
             val ox = r.worldX * 10; val oz = -r.worldZ * 10
             val doors = ArrayList<RoomOutline.Door>()
+            val stairs = ArrayList<IntArray>() // zones of type 10 (the floor scripts: stairs and trap doors), as places (x, z) in the world
             for (i in 0 until r.zones.size / AtticData.HARDCOL_STRIDE) {
                 val o = i * AtticData.HARDCOL_STRIDE
+                if (r.zones[o + 7] == 10) stairs.add(intArrayOf(ox + (r.zones[o] + r.zones[o + 1]) / 2, oz + (r.zones[o + 4] + r.zones[o + 5]) / 2))
                 if (r.zones[o + 7] == 0) doors.add(RoomOutline.Door(r.zones[o + 6], ox + (r.zones[o] + r.zones[o + 1]) / 2, oz + (r.zones[o + 4] + r.zones[o + 5]) / 2))
             }
-            RoomOutline(r.index, ox + x1, ox + x2, oz + z1, oz + z2, ox, oz, doors)
+            RoomOutline(r.index, ox + x1, ox + x2, oz + z1, oz + z2, ox, oz, doors, stairs)
         }
     }
 

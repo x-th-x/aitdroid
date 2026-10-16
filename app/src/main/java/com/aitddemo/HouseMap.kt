@@ -2,8 +2,10 @@ package com.aitddemo
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
@@ -22,16 +24,20 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import com.aitddemo.game.AtticGame
 import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * The map of the house (an addition to the original game, which has none): a plan of each floor drawn from the rooms of the original files, where each room lies and where its doors are.
- * The rooms the character has been in are filled and named, the others only show their outline. The character is shown with the way he looks.
+ * The map of the house (an addition to the original game, which has none): the character holds a folded sheet in his hands, and on it a plan of the floor, drawn in ink.
+ * All the floors and all their rooms are on it (tabs at the edge turn to another floor); the rooms he has been in are washed with colour, the others are drawn lighter, and he is
+ * shown where he stands, with the way he looks. A tap on a room shows its name below the plan.
  */
 object HouseNames {
     /** The floors the map shows, from the top of the house to the bottom (the numbers of the floor files). The caves below are left out: they are a surprise. */
@@ -47,12 +53,23 @@ object HouseNames {
         else -> "Floor $stage"
     }
 
+    /** The short name on the tab of a floor. */
+    fun tab(stage: Int): String = when (stage) {
+        0 -> "Attic"
+        1 -> "2nd"
+        2 -> "1st"
+        3 -> "Ground"
+        4 -> "Cellar"
+        5 -> "Tunnels"
+        else -> "$stage"
+    }
+
     /** Names given to the rooms by what their pictures show; a room that is not listed is called "Room n". */
     private val rooms = mapOf(
         0 to mapOf(0 to "Attic"),
         1 to mapOf(0 to "Landing", 1 to "Upper hall", 2 to "East corridor", 3 to "West corridor", 4 to "Bedroom", 5 to "Corridor", 6 to "Attic stairs", 7 to "Stair hall"),
-        2 to mapOf(0 to "Gallery", 1 to "Long hall", 2 to "Passage", 3 to "Pink bedroom", 4 to "Landing", 5 to "Bathroom", 6 to "Green bedroom", 7 to "Bedroom", 8 to "Study"),
-        3 to mapOf(0 to "Entrance corridor", 1 to "Corridor", 2 to "Passage", 3 to "Statue court", 4 to "Conservatory", 5 to "Main hall", 7 to "Kitchen", 8 to "Back passage", 9 to "Dining room", 10 to "Scullery", 11 to "Sitting room", 12 to "Back corridor", 13 to "Corridor"),
+        2 to mapOf(0 to "Gallery", 1 to "Long hall", 2 to "Passage", 3 to "Pink bedroom", 4 to "Landing", 5 to "Bathroom", 6 to "Green bedroom", 7 to "Bedroom", 8 to "Study", 10 to "Passage"),
+        3 to mapOf(0 to "Entrance corridor", 1 to "Corridor", 2 to "Passage", 3 to "Statue court", 4 to "Conservatory", 5 to "Main hall", 6 to "Closet", 7 to "Kitchen", 8 to "Back passage", 9 to "Dining room", 10 to "Scullery", 11 to "Sitting room", 12 to "Back corridor", 13 to "Corridor"),
         4 to mapOf(0 to "Wine cellar", 1 to "Cellar passage"),
         5 to mapOf(5 to "Lake cave", 8 to "Lake cave", 9 to "Stone passage", 10 to "Crypt", 11 to "Altar"),
     )
@@ -60,58 +77,105 @@ object HouseNames {
     fun room(stage: Int, room: Int): String = rooms[stage]?.get(room) ?: if (stage == 5) "Tunnel" else "Room $room"
 }
 
-private val PAPER = Color(0xFF0C0A08)
-private val WALL = Color(0xFF8A6D3B)
-private val SEEN = Color(0xFF2B3A38)
-private val UNSEEN = Color(0xFF1A1A18)
-private val HERE = Color(0xFF5A4A22)
-private val DOOR = Color(0xFFE0A040)
-private val TEXT = Color(0xFFF2E4B8)
-private val DIM = Color(0xFF9C8B6E)
+// the ink and the washes of the sheet
+private val INK = Color(0xFF3B2A18)
+private val INK_LIGHT = Color(0xFF6B5136)
+private val WASH_SEEN = Color(0x55A8763C)
+private val WASH_HERE = Color(0x88C04A33)
+private val RED = Color(0xFFB02A20)
+private val SKIN = Color(0xFFC79672)
+private val SKIN_DARK = Color(0xFF9A6C4E)
+private val SKIN_LIGHT = Color(0xFFE0B592)
+private val NAIL = Color(0xFFE8CDB8)
+private val CUFF = Color(0xFFDCD6C8)
+
+/** The hands lie a little further out and down than the first drawing, so that they do not hide the plan. */
+private const val HAND_SHIFT_X = 16f
+private const val HAND_SHIFT_Y = 8f
+
+/** The area of the sheet (in the 320 x 200 picture of the letter page) that the plan may use. */
+private const val PLAN_X = 58f
+private const val PLAN_Y = 26f
+private const val PLAN_W = 188f
+private const val PLAN_H = 130f
 
 @Composable
 fun HouseMapOverlay(game: AtticGame, onClose: () -> Unit) {
     BackHandler { onClose() }
     val visited = game.visited.toSet()
     val here = game.roomView.stage
-    // the floors the character knows: those with a room he has been in (the current one first)
-    val known = HouseNames.floors.filter { f -> visited.any { it / 100 == f } || f == here }
-    var shown by remember { mutableIntStateOf(if (here in HouseNames.floors) here else known.firstOrNull() ?: 0) }
-    val floor = if (shown in known) shown else known.firstOrNull() ?: 0
-    val outlines by produceState<List<RoomOutline>>(emptyList(), floor) { value = try { game.data.rooms.outlines(floor) } catch (_: Exception) { emptyList() } }
+    var shown by remember { mutableIntStateOf(if (here in HouseNames.floors) here else 0) }
+    var picked by remember { mutableIntStateOf(-1) } // the room whose name is shown below the plan
+    val outlines by produceState<List<RoomOutline>>(emptyList(), shown) { value = try { game.data.rooms.outlines(shown) } catch (_: Exception) { emptyList() } }
     // draws again every half second, so that the character moves on the map while it is open
     var tick by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(500); tick++ } }
+    val paper = remember { game.data.bookPicture(0)?.let { StartAssets.picture(it) } }
+    val emily = game.vm.cvars[AtticGame.CVAR_CHOOSE_PERSON].toInt() == 1
+    val frame = fit(outlines, PLAN_W, PLAN_H)
 
-    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.97f)).clickable(enabled = false) {}) {
+    Box(Modifier.fillMaxSize().background(Color.Black).clickable(enabled = false) {}) {
         GameCanvas(Modifier.fillMaxSize()) {
-            // title and the buttons to go to the floors above and below
-            val index = known.indexOf(floor)
-            CenteredLabel(HouseNames.floor(floor), 4, TEXT)
-            if (index > 0) Arrow("<", 40, 4) { shown = known[index - 1] }
-            if (index < known.lastIndex) Arrow(">", 280, 4) { shown = known[index + 1] }
-            if (known.size > 1) CenteredLabel("${index + 1}/${known.size}", 20, DIM, 0.5f)
-            Canvas(Modifier.offset(x = gx(8), y = gy(32)).size(gx(304), gy(150))) {
+            if (paper != null) Image(bitmap = paper, contentDescription = null, contentScale = ContentScale.FillBounds, modifier = Modifier.fillMaxSize())
+            // the sheet: the title, the plan
+            Ink(HouseNames.floor(shown), 8, 1.25f, INK)
+            Canvas(
+                Modifier.offset(x = unit * PLAN_X, y = unit * PLAN_Y).size(unit * PLAN_W, unit * PLAN_H).pointerInput(outlines) {
+                    detectTapGestures { p ->
+                        if (frame == null) return@detectTapGestures
+                        val ux = size.width / PLAN_W
+                        val wx = frame.worldX(p.x / ux); val wz = frame.worldZ(p.y / ux)
+                        picked = outlines.filter { wx in it.x1..it.x2 && wz in it.z1..it.z2 }.minByOrNull { (it.x2 - it.x1).toLong() * (it.z2 - it.z1) }?.room ?: -1
+                    }
+                },
+            ) {
                 tick // the picture follows the character
-                drawFloor(game, floor, outlines, visited, size)
+                if (frame != null) drawPlan(game, shown, outlines, visited, frame, size.width / PLAN_W, picked)
             }
-            if (floor == here) CenteredLabel("You are here: " + HouseNames.room(here, game.roomView.room), 184, DIM, 0.5f)
-            // the names of the rooms that are known
-            val frame = fit(outlines, 304f, 150f)
             if (frame != null) for (r in outlines) {
-                if ((floor * 100 + r.room) !in visited) continue
-                val name = HouseNames.room(floor, r.room)
-                val cx = 8f + frame.px((r.x1 + r.x2) / 2f)
-                val cy = 32f + frame.pz((r.z1 + r.z2) / 2f)
+                val cx = PLAN_X + frame.px((r.x1 + r.x2) / 2f)
+                val cz = PLAN_Y + frame.pz((r.z1 + r.z2) / 2f)
                 val w = (r.x2 - r.x1) * frame.scale
-                val s = if (bitmapTextWidth(name) * 0.5f <= w - 2f) 0.5f else 0.38f
-                Box(Modifier.offset(x = unit * (cx - bitmapTextWidth(name) * s / 2f), y = unit * (cy - 4f * s * 2f))) {
-                    BitmapText(text = name, scale = unit.value * s, color = if (floor == here && game.roomView.room == r.room) TEXT else DIM)
+                val h = (r.z2 - r.z1) * frame.scale
+                val name = HouseNames.room(shown, r.room)
+                val lit = (shown * 100 + r.room) in visited
+                val color = if (lit) INK else INK_LIGHT
+                // the name as big as the room allows: whole, smaller, on two lines; a very small room gets its number
+                val tw = bitmapTextWidth(name).toFloat()
+                val words = name.split(' ')
+                when {
+                    tw * 0.5f <= w - 2f && h > 9f -> InkAt(name, cx, cz, 0.5f, color)
+                    tw * 0.38f <= w - 2f && h > 8f -> InkAt(name, cx, cz, 0.38f, color)
+                    words.size > 1 && words.maxOf { bitmapTextWidth(it) } * 0.38f <= w - 2f && h > 14f -> {
+                        InkAt(words.first(), cx, cz - 3.3f, 0.38f, color)
+                        InkAt(words.drop(1).joinToString(" "), cx, cz + 3.3f, 0.38f, color)
+                    }
+                    w > 5f && h > 5f -> InkAt("${r.room}", cx, cz, 0.45f, color)
                 }
             }
+            // the floors: tabs at the right edge of the sheet
+            HouseNames.floors.forEachIndexed { i, f ->
+                val y = 20 + i * 16
+                val on = f == shown
+                Box(
+                    Modifier.offset(x = unit * (if (on) 252f else 256f), y = unit * y.toFloat()).size(unit * (if (on) 66f else 62f), unit * 15f)
+                        .background(if (on) Color(0xFFE6CFA0) else Color(0xFFC4A878))
+                        .clickable { shown = f; picked = -1 },
+                ) {
+                    Box(Modifier.offset(x = unit * 4f, y = unit * 2f)) {
+                        BitmapText(text = HouseNames.tab(f), scale = unit.value * 0.5f, color = if (f == here) RED else INK)
+                    }
+                }
+            }
+            // the name of the room that was tapped, or where the character is
+            val caption = if (picked >= 0) HouseNames.room(shown, picked) + (if (shown * 100 + picked !in visited) " (not seen yet)" else "")
+            else if (shown == here) "You are here: " + HouseNames.room(here, game.roomView.room) else ""
+            if (caption.isNotEmpty()) Ink(caption, 162, 0.55f, INK)
+            // the hands that hold the sheet
+            Canvas(Modifier.fillMaxSize()) { drawHands(size.width / 320f, if (emily) Color(0xFF2B4A6F) else Color(0xFF2F4A3A)) }
         }
         Box(Modifier.align(Alignment.BottomStart).padding(12.dp).background(Color.Black.copy(alpha = 0.5f)).clickable(onClick = onClose).padding(horizontal = 10.dp, vertical = 6.dp)) {
-            BitmapText(text = "< Back", scale = 2f, color = TEXT)
+            BitmapText(text = "< Back", scale = 2f, color = Color(0xFFF2E4B8))
         }
     }
 }
@@ -120,6 +184,8 @@ fun HouseMapOverlay(game: AtticGame, onClose: () -> Unit) {
 private class Fit(val minX: Float, val minZ: Float, val scale: Float, val offX: Float, val offZ: Float) {
     fun px(x: Float) = offX + (x - minX) * scale
     fun pz(z: Float) = offZ + (z - minZ) * scale
+    fun worldX(px: Float) = ((px - offX) / scale + minX).toInt()
+    fun worldZ(pz: Float) = ((pz - offZ) / scale + minZ).toInt()
 }
 
 private fun fit(outlines: List<RoomOutline>, w: Float, h: Float): Fit? {
@@ -130,44 +196,90 @@ private fun fit(outlines: List<RoomOutline>, w: Float, h: Float): Fit? {
     return Fit(minX, minZ, scale, (w - (maxX - minX) * scale) / 2f, (h - (maxZ - minZ) * scale) / 2f)
 }
 
-private fun DrawScope.drawFloor(game: AtticGame, floor: Int, outlines: List<RoomOutline>, visited: Set<Int>, box: Size) {
-    val f = fit(outlines, box.width, box.height) ?: return
-    val u = box.width / 304f // one unit of the 320 x 200 picture, in pixels
+/** The plan in ink: [u] pixels for one unit of the 320 x 200 picture. */
+private fun DrawScope.drawPlan(game: AtticGame, floor: Int, outlines: List<RoomOutline>, visited: Set<Int>, f: Fit, u: Float, picked: Int) {
     for (r in outlines) {
         val seen = (floor * 100 + r.room) in visited
         val here = floor == game.roomView.stage && r.room == game.roomView.room
-        val left = f.px(r.x1.toFloat())
-        val top = f.pz(r.z1.toFloat())
-        val size = Size((r.x2 - r.x1) * f.scale, (r.z2 - r.z1) * f.scale)
-        drawRect(if (here) HERE else if (seen) SEEN else UNSEEN, Offset(left, top), size)
-        drawRect(WALL.copy(alpha = if (seen) 1f else 0.45f), Offset(left, top), size, style = Stroke(width = 1.3f * u))
-        if (seen) for (d in r.doors) drawCircle(DOOR, 1.9f * u, Offset(f.px(d.x.toFloat()), f.pz(d.z.toFloat())))
+        val left = f.px(r.x1.toFloat()) * u
+        val top = f.pz(r.z1.toFloat()) * u
+        val size = Size((r.x2 - r.x1) * f.scale * u, (r.z2 - r.z1) * f.scale * u)
+        if (here) drawRect(WASH_HERE, Offset(left, top), size) else if (seen) drawRect(WASH_SEEN, Offset(left, top), size)
+        if (r.room == picked) drawRect(RED.copy(alpha = 0.18f), Offset(left, top), size)
+        drawRect(if (seen) INK else INK_LIGHT.copy(alpha = 0.75f), Offset(left, top), size, style = Stroke(width = (if (seen) 1.5f else 1f) * u))
+        // doors: a dot in the ink (only where the zone lies inside the room)
+        for (d in r.doors) {
+            if (d.x !in r.x1..r.x2 || d.z !in r.z1..r.z2) continue
+            drawCircle(INK, 1.1f * u, Offset(f.px(d.x.toFloat()) * u, f.pz(d.z.toFloat()) * u))
+        }
+        // stairs: three short steps in the upper right corner of the room (the name stays free)
+        if (r.stairs.isNotEmpty()) {
+            val x = f.px(r.x2.toFloat()) * u - 5f * u; val z = f.pz(r.z1.toFloat()) * u + 4f * u
+            if (size.width > 12f * u && size.height > 9f * u) for (k in -1..1) drawLine(INK, Offset(x - 2.6f * u, z + k * 1.4f * u), Offset(x + 2.6f * u, z + k * 1.4f * u), strokeWidth = 0.8f * u)
+        }
     }
-    // the character
+    // the character: a red arrow, with the way he looks
     if (floor == game.roomView.stage) {
         val o = outlines.firstOrNull { it.room == game.roomView.room } ?: return
         val a = game.player?.actor ?: return
-        val x = f.px((o.originX + a.renderX).toFloat()); val z = f.pz((o.originZ + a.renderZ).toFloat())
+        val x = f.px((o.originX + a.renderX).toFloat()) * u; val z = f.pz((o.originZ + a.renderZ).toFloat()) * u
         val ang = (a.beta and 0x3FF) * 2.0 * Math.PI / 1024.0
         val dx = sin(ang).toFloat(); val dz = -cos(ang).toFloat() // beta 0 looks to the north (up on the plan), 256 to the east
         val m = 5.5f * u
-        val tip = Offset(x + dx * m, z + dz * m)
-        val left = Offset(x - dz * 0.55f * m - dx * 0.5f * m, z + dx * 0.55f * m - dz * 0.5f * m)
-        val right = Offset(x + dz * 0.55f * m - dx * 0.5f * m, z - dx * 0.55f * m - dz * 0.5f * m)
-        val path = Path().apply { moveTo(tip.x, tip.y); lineTo(left.x, left.y); lineTo(right.x, right.y); close() }
-        drawPath(path, Color(0xFFE23B2E))
-        drawPath(path, Color.White, style = Stroke(width = 0.8f * u))
+        val path = Path().apply {
+            moveTo(x + dx * m, z + dz * m)
+            lineTo(x - dz * 0.55f * m - dx * 0.5f * m, z + dx * 0.55f * m - dz * 0.5f * m)
+            lineTo(x + dz * 0.55f * m - dx * 0.5f * m, z - dx * 0.55f * m - dz * 0.5f * m)
+            close()
+        }
+        drawPath(path, RED)
+        drawPath(path, Color(0xFFF4E6C4), style = Stroke(width = 0.8f * u))
+    }
+}
+
+/** The two hands that hold the sheet at its lower corners: sleeve, cuff, the back of the hand, the fingers over the edge and the thumb along the side. */
+private fun DrawScope.drawHands(u: Float, sleeve: Color) {
+    for (side in 0..1) {
+        // the right hand is the left one turned over (mirror image)
+        fun hp(vararg p: Float): Path = Path().apply {
+            for (i in 0 until p.size / 2) {
+                val x = if (side == 0) p[i * 2] - HAND_SHIFT_X else 320f - p[i * 2] + HAND_SHIFT_X
+                val y = p[i * 2 + 1] + HAND_SHIFT_Y
+                if (i == 0) moveTo(x * u, y * u) else lineTo(x * u, y * u)
+            }
+            close()
+        }
+        fun pt(x: Float, y: Float) = Offset((if (side == 0) x - HAND_SHIFT_X else 320f - x + HAND_SHIFT_X) * u, (y + HAND_SHIFT_Y) * u)
+        // the sleeve and the cuff
+        drawPath(hp(0f, 201f, 0f, 174f, 24f, 160f, 44f, 188f, 36f, 201f), sleeve)
+        drawPath(hp(0f, 201f, 0f, 186f, 10f, 181f, 18f, 201f), Color.Black.copy(alpha = 0.25f))
+        drawPath(hp(24f, 160f, 44f, 188f, 52f, 183f, 32f, 155f), CUFF)
+        drawPath(hp(32f, 155f, 52f, 183f, 54f, 181f, 35f, 153f), Color.Black.copy(alpha = 0.18f))
+        // the back of the hand
+        drawPath(hp(33f, 154f, 52f, 183f, 64f, 178f, 70f, 160f, 60f, 144f, 44f, 146f), SKIN)
+        drawPath(hp(33f, 154f, 40f, 164f, 52f, 160f, 44f, 146f), SKIN_DARK)
+        drawPath(hp(52f, 160f, 64f, 150f, 60f, 144f, 48f, 148f), SKIN_LIGHT.copy(alpha = 0.7f))
+        // the thumb, up along the side of the sheet
+        drawPath(hp(44f, 146f, 60f, 144f, 58f, 126f, 52f, 120f, 45f, 124f, 41f, 134f), SKIN)
+        drawPath(hp(41f, 134f, 45f, 124f, 52f, 120f, 49f, 132f), SKIN_DARK)
+        drawCircle(NAIL, 2.3f * u, pt(53f, 123f))
+        // the four fingers lie over the lower corner of the sheet
+        val tips = listOf(pt(88f, 176f) to pt(64f, 180f), pt(90f, 167f) to pt(65f, 172f), pt(89f, 158f) to pt(65f, 164f), pt(85f, 149f) to pt(63f, 156f))
+        for ((tip, root) in tips) {
+            drawLine(SKIN_DARK, root, tip, strokeWidth = 8.2f * u, cap = StrokeCap.Round)
+            drawLine(SKIN, Offset(root.x, root.y - 0.6f * u), Offset(tip.x, tip.y - 0.6f * u), strokeWidth = 6.6f * u, cap = StrokeCap.Round)
+            drawCircle(NAIL, 1.6f * u, Offset(tip.x + (if (side == 0) -1.2f else 1.2f) * u, tip.y - 0.4f * u))
+        }
     }
 }
 
 @Composable
-private fun GameCanvasScope.CenteredLabel(text: String, y: Int, color: Color, scale: Float = 1f) {
+private fun GameCanvasScope.Ink(text: String, y: Int, scale: Float, color: Color) {
     Box(Modifier.offset(x = unit * (160 - bitmapTextWidth(text) * scale / 2f), y = gy(y))) { BitmapText(text = text, scale = unit.value * scale, color = color) }
 }
 
+/** Ink text centred on (cx, cz) of the 320 x 200 picture. */
 @Composable
-private fun GameCanvasScope.Arrow(text: String, centerX: Int, y: Int, onClick: () -> Unit) {
-    Box(Modifier.offset(x = unit * (centerX - 14), y = gy(y - 2)).size(gx(28), gy(22)).clickable(onClick = onClick)) {
-        Box(Modifier.offset(x = unit * (14 - bitmapTextWidth(text) / 2f), y = gy(2))) { BitmapText(text = text, scale = unit.value, color = TEXT) }
-    }
+private fun GameCanvasScope.InkAt(text: String, cx: Float, cz: Float, scale: Float, color: Color) {
+    Box(Modifier.offset(x = unit * (cx - bitmapTextWidth(text) * scale / 2f), y = unit * (cz - 8f * scale))) { BitmapText(text = text, scale = unit.value * scale, color = color) }
 }
