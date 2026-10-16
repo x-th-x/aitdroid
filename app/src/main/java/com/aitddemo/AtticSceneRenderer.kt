@@ -238,8 +238,10 @@ class AtticSceneRenderer {
             for (q in 0 until m) {
                 proj.screen(poly[q * 3], poly[q * 3 + 1], poly[q * 3 + 2], p0)
                 pts[q * 2] = p0[0] * S; pts[q * 2 + 1] = p0[1] * S
-                l = min(l, pts[q * 2]); r = max(r, pts[q * 2]); t = min(t, pts[q * 2 + 1]); b = max(b, pts[q * 2 + 1])
             }
+            // like the original: a polygon that turns its back to the camera is not drawn ((p1 - p0) x (p2 - p0) < 0 in the screen, y down)
+            if (CULL_BACK_FACES && (pts[2] - pts[0]) * (pts[5] - pts[1]) - (pts[3] - pts[1]) * (pts[4] - pts[0]) < 0f) continue
+            for (q in 0 until m) { l = min(l, pts[q * 2]); r = max(r, pts[q * 2]); t = min(t, pts[q * 2 + 1]); b = max(b, pts[q * 2 + 1]) }
             tris.add(Tri(farthest, 0f, 0f, 0f, 0f, 0f, 0f, col, 3, pts))
         }
         // lines: cut at the near plane, drawn two pixels wide (one plate pixel)
@@ -423,6 +425,9 @@ class AtticSceneRenderer {
 
     companion object {
         const val S = 2
+
+        /** The original draws only the polygons that face the camera. */
+        const val CULL_BACK_FACES = true
 
         /** Triangles are cut at this camera depth (units); everything nearer is not drawn. */
         const val CLIP = 30f
