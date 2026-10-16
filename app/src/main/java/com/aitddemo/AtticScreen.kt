@@ -452,7 +452,6 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     val blackBackground = remember { android.graphics.Bitmap.createBitmap(AtticSceneRenderer.W, AtticSceneRenderer.H, android.graphics.Bitmap.Config.ARGB_8888).also { it.eraseColor(android.graphics.Color.BLACK) } }
 
     // Toggle: hide the camera photo and show only the 3D actors on black.
-    var showBackground by remember { mutableStateOf(true) }
 
     // Stick mode: the stick gives the screen direction to walk in; the body turns towards it with the engine tank keys.
     val stickDeadzone = 0.15f
@@ -586,7 +585,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
             }
         } + game.effects.map { e -> effectActor(e, game.time, world.game.palette, world.game).also { it.sortBox = e.sortBox() } }
         val dark = game.lightOff
-        renderer.render(camera, if (showBackground && !dark) backgrounds[camera.index.coerceIn(0, backgrounds.size - 1)] else blackBackground, actors, if (dark) emptyMap() else view.maskViews.getOrNull(camera.index) ?: emptyMap(), view.room)
+        renderer.render(camera, if (!dark) backgrounds[camera.index.coerceIn(0, backgrounds.size - 1)] else blackBackground, actors, if (dark) emptyMap() else view.maskViews.getOrNull(camera.index) ?: emptyMap(), view.room)
         renderer.bitmap.asImageBitmap()
     }
 
@@ -666,9 +665,9 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
             }
         }
 
-        // Developer mode: world position and active camera index.
+        // Developer mode: world position and active camera index (in the middle of the top edge, the corners belong to the buttons).
         if (developerMode && !intro) {
-            Box(modifier = Modifier.align(Alignment.TopStart).padding(12.dp).background(Color.Black.copy(alpha = 0.5f)).padding(6.dp)) {
+            Box(modifier = Modifier.align(Alignment.TopCenter).padding(12.dp).background(Color.Black.copy(alpha = 0.5f)).padding(6.dp)) {
                 BitmapText(
                     text = "World: (${playerX.toInt()}, ${playerZ.toInt()}) cam=$cameraIndex",
                     scale = 1.6f,
@@ -687,61 +686,20 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
             )
         }
 
-        // the action key of the original (Enter): held while the finger is down; what it does is chosen in the inventory
-        if (!intro) HoldButton(
-            label = "Action",
-            modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = if (controlMode == ControlMode.DPAD) 24.dp else 40.dp, end = if (controlMode == ControlMode.DPAD) 200.dp else 24.dp),
-            onHeld = { actionHeld = it },
-        )
-
-        BackButton(onClick = onExit)
-
-        if (!intro) Box(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(start = 130.dp, bottom = 12.dp)
-                .background(Color.Black.copy(alpha = 0.5f))
-                .clickable { menuMessage = null; menuOpen = true }
-                .padding(horizontal = 10.dp, vertical = 6.dp)
-        ) {
-            BitmapText(text = "Menu", scale = 2f, color = Color(0xFFF2E4B8))
-        }
-
-        if (!intro && game.allowInventory && game.inventory.isNotEmpty()) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(start = 230.dp, bottom = 12.dp)
-                    .background(Color.Black.copy(alpha = 0.5f))
-                    .clickable { inventoryOpen = true }
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
-            ) {
-                BitmapText(text = "Inventory", scale = 2f, color = Color(0xFFF2E4B8))
+        // the buttons are pictures: Menu and Map in the top left corner, Inventory and Action in the bottom left corner (the same with the stick and with the D-pad)
+        if (!intro) {
+            IconButton(GameIcon.MENU, Modifier.align(Alignment.TopStart).padding(start = 12.dp, top = 12.dp)) { menuMessage = null; menuOpen = true }
+            // the map of the house (not in the original game)
+            IconButton(GameIcon.MAP, Modifier.align(Alignment.TopStart).padding(start = 72.dp, top = 12.dp)) { mapOpen = true }
+            if (game.allowInventory && game.inventory.isNotEmpty()) {
+                IconButton(GameIcon.INVENTORY, Modifier.align(Alignment.BottomStart).padding(start = 72.dp, bottom = 12.dp)) { inventoryOpen = true }
             }
-        }
-
-        // the map of the house (not in the original game): next to the inventory
-        if (!intro) Box(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(start = 420.dp, bottom = 12.dp)
-                .background(Color.Black.copy(alpha = 0.5f))
-                .clickable { mapOpen = true }
-                .padding(horizontal = 10.dp, vertical = 6.dp)
-        ) {
-            BitmapText(text = "Map", scale = 2f, color = Color(0xFFF2E4B8))
-        }
-
-        // Same visual style as BackButton, opposite corner (top-right).
-        if (!intro) Box(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(12.dp)
-                .background(Color.Black.copy(alpha = 0.5f))
-                .clickable { showBackground = !showBackground }
-                .padding(horizontal = 10.dp, vertical = 6.dp)
-        ) {
-            BitmapText(text = if (showBackground) "Hintergrund: an" else "Hintergrund: aus", scale = 1.6f, color = Color(0xFFF2E4B8))
+            // the action key of the original (Enter): held while the finger is down; what it does is chosen in the inventory
+            HoldButton(
+                icon = GameIcon.ACTION,
+                modifier = Modifier.align(Alignment.BottomStart).padding(start = 12.dp, bottom = 12.dp),
+                onHeld = { actionHeld = it },
+            )
         }
 
         frameTick // the messages fade every frame

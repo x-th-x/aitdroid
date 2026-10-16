@@ -55,10 +55,10 @@ private fun GameCanvasScope.Choice(text: String, centerX: Int, y: Int, selected:
 
 /** Press-and-hold button; [onHeld] gets true while the finger is down. */
 @Composable
-fun HoldButton(label: String, modifier: Modifier = Modifier, onHeld: (Boolean) -> Unit) {
+fun HoldButton(icon: GameIcon, modifier: Modifier = Modifier, onHeld: (Boolean) -> Unit) {
     Box(
         modifier = modifier
-            .size(width = 96.dp, height = 56.dp)
+            .size(52.dp)
             .background(Color.Black.copy(alpha = 0.5f))
             .border(2.dp, GOLD)
             .pointerInput(Unit) {
@@ -71,7 +71,7 @@ fun HoldButton(label: String, modifier: Modifier = Modifier, onHeld: (Boolean) -
             },
         contentAlignment = Alignment.Center,
     ) {
-        BitmapText(text = label, scale = 2f, color = TEXT)
+        IconGlyph(icon)
     }
 }
 
