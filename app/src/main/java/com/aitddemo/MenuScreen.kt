@@ -17,11 +17,15 @@ import androidx.compose.ui.graphics.Color
 
 // Menu layout on the 320x200 grid: framed box, lines from y=76 in steps of 16, centered at x=160,
 // highlighted entry gets a background bar and a shadow.
-private val MENU_ITEMS = listOf("Begin a new game", "Resume a saved game", "Options", "Floor selection", "Model Viewer", "Music Viewer", "Return to Homescreen")
+private val MENU_ITEMS = listOf("Begin a new game", "Resume a saved game", "Options", "Floor selection", "Model Viewer", "Music Viewer", "Exit")
+// the entries only shown in Developer Mode (indexes in MENU_ITEMS)
+private val DEVELOPER_ITEMS = setOf(3, 4, 5)
 
 @Composable
-fun MenuScreen(onSelect: (Int) -> Unit) {
-    var selected by remember { mutableIntStateOf(0) }
+fun MenuScreen(developerMode: Boolean, onSelect: (Int) -> Unit) {
+    var selected by remember(developerMode) { mutableIntStateOf(0) }
+    // the entries on show with their index in MENU_ITEMS (onSelect gets that index)
+    val items = MENU_ITEMS.withIndex().filter { developerMode || it.index !in DEVELOPER_ITEMS }
 
     Box(modifier = Modifier.fillMaxSize().background(Color(0xFF14080A))) {
         StartPictureImage(StartPicture.MENU)
@@ -34,7 +38,7 @@ fun MenuScreen(onSelect: (Int) -> Unit) {
                     .border(unit * 1.5f, Color(0xFF8A6D3B))
             )
 
-            MENU_ITEMS.forEachIndexed { i, label ->
+            items.forEachIndexed { i, (itemIndex, label) ->
                 val y = 70 + i * 15
                 val isSelected = selected == i
                 val textWidthUnits = bitmapTextWidth(label)
@@ -54,7 +58,7 @@ fun MenuScreen(onSelect: (Int) -> Unit) {
                         .offset(x = unit * textX, y = gy(y))
                         .clickable {
                             selected = i
-                            onSelect(i)
+                            onSelect(itemIndex)
                         }
                 ) {
                     if (isSelected) {
