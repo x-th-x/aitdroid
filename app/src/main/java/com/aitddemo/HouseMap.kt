@@ -14,10 +14,15 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -83,15 +88,12 @@ private val INK_LIGHT = Color(0xFF6B5136)
 private val WASH_SEEN = Color(0x55A8763C)
 private val WASH_HERE = Color(0x88C04A33)
 private val RED = Color(0xFFB02A20)
-private val SKIN = Color(0xFFC79672)
-private val SKIN_DARK = Color(0xFF9A6C4E)
-private val SKIN_LIGHT = Color(0xFFE0B592)
-private val NAIL = Color(0xFFE8CDB8)
-private val CUFF = Color(0xFFDCD6C8)
-
-/** The hands lie a little further out and down than the first drawing, so that they do not hide the plan. */
-private const val HAND_SHIFT_X = 16f
-private const val HAND_SHIFT_Y = 8f
+// the tones of the hands and sleeves are those of the bodies of the game (Carnby: skin 8b6b53 / 97775f / af8b73, jacket 273b2f / 2b4333 / 37574f)
+private val CARNBY_SKIN = HeldHands.Tones(0xFF8B6B53.toInt(), 0xFF97775F.toInt(), 0xFFAF8B73.toInt())
+private val CARNBY_SLEEVE = HeldHands.Tones(0xFF1D2D23.toInt(), 0xFF273B2F.toInt(), 0xFF37574F.toInt())
+private val EMILY_SKIN = HeldHands.Tones(0xFF8F5B3F.toInt(), 0xFF9F674B.toInt(), 0xFFB57F63.toInt())
+private val EMILY_SLEEVE = HeldHands.Tones(0xFF1F3B46.toInt(), 0xFF2B4F5C.toInt(), 0xFF3F6B78.toInt())
+private val SHIRT_CUFF = HeldHands.Tones(0xFF9C968A.toInt(), 0xFFC4BEB0.toInt(), 0xFFE2DCCE.toInt())
 
 /** The area of the sheet (in the 320 x 200 picture of the letter page) that the plan may use. */
 private const val PLAN_X = 58f
@@ -110,6 +112,10 @@ fun HouseMapOverlay(game: AtticGame, onClose: () -> Unit) {
     // draws again every half second, so that the character moves on the map while it is open
     var tick by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(500); tick++ } }
+    // the breathing of the hands: a new picture every frame
+    var time by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(Unit) { while (true) withFrameNanos { time = it / 1_000_000_000f } }
+    val hands = remember { HeldHands() }
     val paper = remember { game.data.bookPicture(0)?.let { StartAssets.picture(it) } }
     val emily = game.vm.cvars[AtticGame.CVAR_CHOOSE_PERSON].toInt() == 1
     val frame = fit(outlines, PLAN_W, PLAN_H)
@@ -172,7 +178,10 @@ fun HouseMapOverlay(game: AtticGame, onClose: () -> Unit) {
             else if (shown == here) "You are here: " + HouseNames.room(here, game.roomView.room) else ""
             if (caption.isNotEmpty()) Ink(caption, 162, 0.55f, INK)
             // the hands that hold the sheet
-            Canvas(Modifier.fillMaxSize()) { drawHands(size.width / 320f, if (emily) Color(0xFF2B4A6F) else Color(0xFF2F4A3A)) }
+            Canvas(Modifier.fillMaxSize()) {
+                hands.render(time, if (emily) EMILY_SLEEVE else CARNBY_SLEEVE, if (emily) EMILY_SKIN else CARNBY_SKIN, SHIRT_CUFF)
+                drawImage(hands.bitmap.asImageBitmap(), dstSize = IntSize(size.width.toInt(), size.height.toInt()), filterQuality = FilterQuality.None)
+            }
         }
         Box(Modifier.align(Alignment.BottomStart).padding(12.dp).background(Color.Black.copy(alpha = 0.5f)).clickable(onClick = onClose).padding(horizontal = 10.dp, vertical = 6.dp)) {
             BitmapText(text = "< Back", scale = 2f, color = Color(0xFFF2E4B8))
@@ -234,42 +243,6 @@ private fun DrawScope.drawPlan(game: AtticGame, floor: Int, outlines: List<RoomO
         }
         drawPath(path, RED)
         drawPath(path, Color(0xFFF4E6C4), style = Stroke(width = 0.8f * u))
-    }
-}
-
-/** The two hands that hold the sheet at its lower corners: sleeve, cuff, the back of the hand, the fingers over the edge and the thumb along the side. */
-private fun DrawScope.drawHands(u: Float, sleeve: Color) {
-    for (side in 0..1) {
-        // the right hand is the left one turned over (mirror image)
-        fun hp(vararg p: Float): Path = Path().apply {
-            for (i in 0 until p.size / 2) {
-                val x = if (side == 0) p[i * 2] - HAND_SHIFT_X else 320f - p[i * 2] + HAND_SHIFT_X
-                val y = p[i * 2 + 1] + HAND_SHIFT_Y
-                if (i == 0) moveTo(x * u, y * u) else lineTo(x * u, y * u)
-            }
-            close()
-        }
-        fun pt(x: Float, y: Float) = Offset((if (side == 0) x - HAND_SHIFT_X else 320f - x + HAND_SHIFT_X) * u, (y + HAND_SHIFT_Y) * u)
-        // the sleeve and the cuff
-        drawPath(hp(0f, 201f, 0f, 174f, 24f, 160f, 44f, 188f, 36f, 201f), sleeve)
-        drawPath(hp(0f, 201f, 0f, 186f, 10f, 181f, 18f, 201f), Color.Black.copy(alpha = 0.25f))
-        drawPath(hp(24f, 160f, 44f, 188f, 52f, 183f, 32f, 155f), CUFF)
-        drawPath(hp(32f, 155f, 52f, 183f, 54f, 181f, 35f, 153f), Color.Black.copy(alpha = 0.18f))
-        // the back of the hand
-        drawPath(hp(33f, 154f, 52f, 183f, 64f, 178f, 70f, 160f, 60f, 144f, 44f, 146f), SKIN)
-        drawPath(hp(33f, 154f, 40f, 164f, 52f, 160f, 44f, 146f), SKIN_DARK)
-        drawPath(hp(52f, 160f, 64f, 150f, 60f, 144f, 48f, 148f), SKIN_LIGHT.copy(alpha = 0.7f))
-        // the thumb, up along the side of the sheet
-        drawPath(hp(44f, 146f, 60f, 144f, 58f, 126f, 52f, 120f, 45f, 124f, 41f, 134f), SKIN)
-        drawPath(hp(41f, 134f, 45f, 124f, 52f, 120f, 49f, 132f), SKIN_DARK)
-        drawCircle(NAIL, 2.3f * u, pt(53f, 123f))
-        // the four fingers lie over the lower corner of the sheet
-        val tips = listOf(pt(88f, 176f) to pt(64f, 180f), pt(90f, 167f) to pt(65f, 172f), pt(89f, 158f) to pt(65f, 164f), pt(85f, 149f) to pt(63f, 156f))
-        for ((tip, root) in tips) {
-            drawLine(SKIN_DARK, root, tip, strokeWidth = 8.2f * u, cap = StrokeCap.Round)
-            drawLine(SKIN, Offset(root.x, root.y - 0.6f * u), Offset(tip.x, tip.y - 0.6f * u), strokeWidth = 6.6f * u, cap = StrokeCap.Round)
-            drawCircle(NAIL, 1.6f * u, Offset(tip.x + (if (side == 0) -1.2f else 1.2f) * u, tip.y - 0.4f * u))
-        }
     }
 }
 
