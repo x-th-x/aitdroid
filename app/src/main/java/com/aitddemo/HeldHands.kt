@@ -41,7 +41,12 @@ class HeldHands(private val body: BodyAsset) {
             var wx = 0f; var wy = Float.MAX_VALUE; var wz = 0f; var n = 0
             for (v in handFrom until handTo) { wx += body.vertices[v * 3]; wz += body.vertices[v * 3 + 2]; wy = minOf(wy, body.vertices[v * 3 + 1]); n++ }
             if (n > 0) { wx /= n; wz /= n }
-            val sleevePolys = all.filter { p -> p.ids.all { it in sleeveFrom until sleeveTo } }
+            var sleevePolys = all.filter { p -> p.ids.all { it in sleeveFrom until sleeveTo } }
+            if (sleevePolys.isEmpty()) {
+                // Emily's sleeve is made of polygons between the shoulder group and the sleeve group (the sleeve group itself has only the end of it)
+                val shoulderFrom = groups[(sleeve - 1) * 12]
+                sleevePolys = all.filter { p -> p.ids.all { it in shoulderFrom until sleeveTo } && p.ids.any { it in sleeveFrom until sleeveTo } }
+            }
             var top = Float.MAX_VALUE
             for (p in sleevePolys) for (id in p.ids) top = minOf(top, body.vertices[id * 3 + 1])
             // the sleeve of the game ends above the wrist (the forearm is missing): the sleeve is put so that its lower end is at the wrist, so the hand grows out of it

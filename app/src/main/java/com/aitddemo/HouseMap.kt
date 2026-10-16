@@ -110,7 +110,6 @@ fun HouseMapOverlay(game: AtticGame, onClose: () -> Unit) {
     LaunchedEffect(Unit) { while (true) withFrameNanos { time = it / 1_000_000_000f } }
     val hands = remember { game.data.body(12)?.let { HeldHands(it) } }
     val paper = remember { game.data.bookPicture(0)?.let { StartAssets.picture(it) } }
-    val emily = game.vm.cvars[AtticGame.CVAR_CHOOSE_PERSON].toInt() == 1
     val frame = fit(outlines, PLAN_W, PLAN_H)
 
     Box(Modifier.fillMaxSize().background(Color.Black).clickable(enabled = false) {}) {
