@@ -90,9 +90,9 @@ private val WASH_HERE = Color(0x88C04A33)
 private val RED = Color(0xFFB02A20)
 /** The area of the sheet (in the 320 x 200 picture of the letter page) that the plan may use. */
 private const val PLAN_X = 58f
-private const val PLAN_Y = 33f
+private const val PLAN_Y = 26f
 private const val PLAN_W = 188f
-private const val PLAN_H = 108f
+private const val PLAN_H = 112f
 
 @Composable
 fun HouseMapOverlay(game: AtticGame, onClose: () -> Unit) {
@@ -108,15 +108,16 @@ fun HouseMapOverlay(game: AtticGame, onClose: () -> Unit) {
     // the breathing of the hands: a new picture every frame
     var time by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(Unit) { while (true) withFrameNanos { time = it / 1_000_000_000f } }
-    val hands = remember { game.data.body(12)?.let { HeldHands(it, game.data.anim(HeldHands.ANIMATION)) } }
+    val hands = remember { game.data.body(12)?.let { HeldHands(it) } }
     val paper = remember { game.data.bookPicture(0)?.let { StartAssets.picture(it) } }
+    val emily = game.vm.cvars[AtticGame.CVAR_CHOOSE_PERSON].toInt() == 1
     val frame = fit(outlines, PLAN_W, PLAN_H)
 
     Box(Modifier.fillMaxSize().background(Color.Black).clickable(enabled = false) {}) {
         GameCanvas(Modifier.fillMaxSize()) {
             if (paper != null) Image(bitmap = paper, contentDescription = null, contentScale = ContentScale.FillBounds, modifier = Modifier.fillMaxSize())
             // the sheet: the title, the plan
-            Ink(HouseNames.floor(shown), 5, 1.25f, INK)
+            Ink(HouseNames.floor(shown), 8, 1.25f, INK)
             Canvas(
                 Modifier.offset(x = unit * PLAN_X, y = unit * PLAN_Y).size(unit * PLAN_W, unit * PLAN_H).pointerInput(outlines) {
                     detectTapGestures { p ->
@@ -168,7 +169,7 @@ fun HouseMapOverlay(game: AtticGame, onClose: () -> Unit) {
             // the name of the room that was tapped, or where the character is
             val caption = if (picked >= 0) HouseNames.room(shown, picked) + (if (shown * 100 + picked !in visited) " (not seen yet)" else "")
             else if (shown == here) "You are here: " + HouseNames.room(here, game.roomView.room) else ""
-            if (caption.isNotEmpty()) Ink(caption, 22, 0.5f, INK)
+            if (caption.isNotEmpty()) Ink(caption, 162, 0.55f, INK)
             // the hands that hold the sheet
             Canvas(Modifier.fillMaxSize()) {
                 hands?.render(time)
