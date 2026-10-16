@@ -431,6 +431,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     // the found window and the inventory stop the game
     var foundItem by remember { mutableIntStateOf(-1) }
     var inventoryOpen by remember { mutableStateOf(false) }
+    var mapOpen by remember { mutableStateOf(false) }
     var actionHeld by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
     var menuMessage by remember { mutableStateOf<String?>(null) }
@@ -465,7 +466,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
         while (true) {
             val nanos = withFrameNanos { it }
             val timer = ((nanos - startNanos) / 16_666_667L).toInt() // engine ticks, 60 per second
-            val paused = foundItem >= 0 || inventoryOpen || menuOpen || ui.gameOverShown || ui.exitShown || ui.endShown || ui.picture != null || game.pendingRead != null
+            val paused = foundItem >= 0 || inventoryOpen || mapOpen || menuOpen || ui.gameOverShown || ui.exitShown || ui.endShown || ui.picture != null || game.pendingRead != null
             if (!paused) gameClock += (timer - lastTimer).coerceAtLeast(0)
             lastTimer = timer
             ui.expire(System.nanoTime())
@@ -719,6 +720,18 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
             }
         }
 
+        // the map of the house (not in the original game): next to the inventory
+        if (!intro) Box(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = 420.dp, bottom = 12.dp)
+                .background(Color.Black.copy(alpha = 0.5f))
+                .clickable { mapOpen = true }
+                .padding(horizontal = 10.dp, vertical = 6.dp)
+        ) {
+            BitmapText(text = "Map", scale = 2f, color = Color(0xFFF2E4B8))
+        }
+
         // Same visual style as BackButton, opposite corner (top-right).
         if (!intro) Box(
             modifier = Modifier
@@ -740,6 +753,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
                 foundItem = -1
             }
         }
+        if (mapOpen) HouseMapOverlay(game) { mapOpen = false }
         if (inventoryOpen) {
             InventoryOverlay(game, onClose = { inventoryOpen = false }) { item, action ->
                 inventoryOpen = false

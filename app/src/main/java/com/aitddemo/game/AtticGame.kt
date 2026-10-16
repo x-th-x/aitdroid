@@ -118,6 +118,9 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     /** Items taken, newest first after the first entry (as the original's inventory list). */
     val inventory = ArrayList<Int>()
 
+    /** The rooms the character has been in (floor * 100 + room), for the map of the house. */
+    val visited = LinkedHashSet<Int>().also { it.add(stage * 100 + room) }
+
     /** May the inventory be opened right now? (ALLOW_INVENTORY of the scripts) */
     var allowInventory = false
         private set
@@ -535,6 +538,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         room = newRoom
         roomView = view
         roomVersion++
+        visited.add(newStage * 100 + newRoom)
         val seen = viewList()
         val dx = (view.worldX - oldView.worldX) * 10
         val dy = (view.worldY - oldView.worldY) * 10
@@ -602,7 +606,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     fun tooHeavy(item: Int): Boolean {
         val weight = inventory.sumOf { vm.objects[it].weight }
         // (the original also refuses when the list, with "Actions", would reach 30 entries)
-        return inventory.size + 1 >= MAX_ITEMS - 0 || vm.objects[item].weight + weight > (vm.cvars.getOrElse(MAX_WEIGHT_CVAR) { 0 }.toInt().takeIf { it > 0 } ?: Int.MAX_VALUE)
+        return inventory.size + 1 >= MAX_ITEMS || vm.objects[item].weight + weight > (vm.cvars.getOrElse(MAX_WEIGHT_CVAR) { 0 }.toInt().takeIf { it > 0 } ?: Int.MAX_VALUE)
     }
 
     private fun takeItem(item: Int) {
@@ -1339,6 +1343,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                 out.writeBoolean(a.wallCollision); out.writeBoolean(a.triggersOn); out.writeInt(a.memoX); out.writeInt(a.memoY); out.writeInt(a.memoZ)
             }
         }
+        // the rooms seen (map of the house); saves from before this have nothing here
+        out.writeInt(visited.size); for (v in visited) out.writeInt(v)
     }
 
     /** Puts the game back into a state written by [saveState]; false when the saved room cannot be read. */
@@ -1365,9 +1371,11 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                 Saved(f, active, null, null)
             }
         }
+        val seenRooms = try { IntArray(inp.readInt()) { inp.readInt() } } catch (_: java.io.IOException) { IntArray(0) }
         // the scene is rebuilt from nothing
         for (g in objects) { g.actor = null; g.asset = null; g.w.active = false; g.actionType = 0; g.fallTicks = -1; g.flightTicks = -1; g.alphaTarget = -1 }
         stage = newStage; room = newRoom; roomView = view; roomVersion++
+        visited.clear(); for (v in seenRooms) visited.add(v); visited.add(newStage * 100 + newRoom)
         for (i in 0 until minOf(varCount, vm.vars.size)) vm.vars[i] = vars[i].toShort()
         for (i in 0 until minOf(cvarCount, vm.cvars.size)) vm.cvars[i] = cvars[i].toShort()
         inventory.clear(); for (i in inv) inventory.add(i)
