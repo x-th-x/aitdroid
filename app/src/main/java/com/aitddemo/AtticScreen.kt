@@ -454,6 +454,8 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
             g.coopProps = { items -> coop.sendProps(items) }
             g.coopCreatureHit = { obj, force -> coop.sendCreatureHit(obj, force) }
             g.coopHurt = { force, by -> coop.sendHurt(force, by) }
+            g.coopEffect = { kind, a, b -> coop.sendEffect(kind, a, b) }
+            g.coopVar = { index, value -> coop.sendWorldVar(index, value) }
             g.coopDied = { coop.sendHeroDied() }
             g.coopObjectMoved = { obj, x, y, z -> coop.sendObjectMoved(obj, x, y, z) }
             var lastMs = System.nanoTime() / 1_000_000.0
@@ -476,9 +478,11 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
         coop?.onCreatureHit = { obj, force -> game.remoteCreatureHit(obj, force) }
         coop?.onHurt = { force, by -> game.remoteHurt(force, by) }
         coop?.onHeroDied = { game.remoteHeroDied() }
+        coop?.onEffect = { kind, a, b -> game.remoteEffect(kind, a, b) }
+        coop?.onWorldVar = { index, value -> game.remoteVar(index, value) }
         coop?.onItemPlaced = { m -> game.remoteItemPlaced(m) }
         coop?.onObjectMoved = { obj, x, y, z -> game.remoteObjectMoved(obj, x, y, z) }
-        onDispose { coop?.onRemoteState = null; coop?.onItemTaken = null; coop?.onProps = null; coop?.onCreatureHit = null; coop?.onHurt = null; coop?.onHeroDied = null; coop?.onItemPlaced = null; coop?.onObjectMoved = null }
+        onDispose { coop?.onRemoteState = null; coop?.onItemTaken = null; coop?.onProps = null; coop?.onCreatureHit = null; coop?.onHurt = null; coop?.onHeroDied = null; coop?.onEffect = null; coop?.onWorldVar = null; coop?.onItemPlaced = null; coop?.onObjectMoved = null }
     }
     // co-op supports the attic only: a save point from another room (the same on both phones) ends the co-op game with a notice
     LaunchedEffect(game) {

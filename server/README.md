@@ -101,6 +101,8 @@ Text frames with one JSON object each, `{"type": ..., ...}`. After connecting th
 {"type":"state","seq":42,"t":123456,"hero":"carnby","stage":0,"room":0,"x":3231,"y":0,"z":-1548,"beta":512,"anim":254}
 {"type":"item_placed","obj":12,"stage":0,"room":0,"x":2000,"y":0,"z":3000,"alpha":0,"beta":512,"gamma":0}   // an item put down: lies in the shared world, can be taken again
 {"type":"props","items":[{"obj":21,"stage":0,"room":0,"active":true,"body":24,"anim":23,"alpha":0,"x":100,"y":0,"z":200,"beta":300}]}   // states of objects 21, 9 and 8 (creatures, trapdoor lid) only from the host; objects 6 and 7 (horse, window) from either player; at most 8 entries
+{"type":"effect","kind":4,"a":9,"b":0}      // host only: a sound, music or camera change by a creature or the lid (kinds 0 to 6, see protocol.ts); the guest plays it
+{"type":"world_var","index":20,"value":1}   // host only: the creature count (variable 20), the one game variable that is shared
 {"type":"creature_hit","obj":21,"force":5}   // guest only: the guest hit a creature; the host's creature takes the hit
 {"type":"hurt","force":1,"by":21}            // host only: a creature hit the guest's hero
 {"type":"hero_died"}                         // either player: the game is over for both
@@ -180,7 +182,7 @@ behaviour on a real mobile network.
 * In the game, each phone moves its own hero as always; the other hero is the companion figure of the Together mode, put at the position the other phone reports and playing the animation it reports.
   The local hero's state goes out at most 15 times a second and only when it changes (a sign of life each second when standing still). The other hero is shown about 120 ms behind the newest state
   (blending between two buffered states), with a limited catch-up speed after a stall (see `RemoteSnapshots.kt` for how the buffer and the clocks work).
-* The creatures of the attic run on the host's phone (Carnby's); the guest's phone shows them as puppets and sends its blows and shots at them to the host. They chase the host's hero; they hurt the guest's hero only when a blow reaches him. If either hero dies, the game is over for both. The stairs are closed
+* The creatures of the attic run on the host's phone (Carnby's); the guest's phone shows them as puppets and sends its blows and shots at them to the host. Each creature chases the nearer of the two heroes (it keeps its target unless the other is 30 % closer); a creature's sounds, music and camera pan, and the creature count, are sent to the guest too. If either hero dies, the game is over for both. The stairs are closed
   ("The way down is closed in the co-op prototype."). A save point that is not in the attic ends the co-op game with a notice.
 * Cleartext `ws://` is allowed in debug builds only (`app/src/debug/AndroidManifest.xml`); a release build accepts only `wss://`.
 
@@ -216,4 +218,4 @@ behaviour on a real mobile network.
 
 ## Not implemented (out of scope for the prototype)
 
-Creatures chase the host's hero only (the guest's hero is hurt only when a blow reaches him); sound and music of the creatures play on the host only; doors, puzzles, story events, joining a running game, lag compensation, accounts.
+Doors, puzzles, story events, joining a running game, lag compensation, accounts.

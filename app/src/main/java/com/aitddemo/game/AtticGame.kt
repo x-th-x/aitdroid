@@ -257,6 +257,58 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     /** Co-op: the local hero died. */
     var coopDied: (() -> Unit)? = null
 
+    /** Co-op, host: sounds, music and camera changes made by the creatures' scripts (kind, a, b; see server/src/protocol.ts) and the creature count, for the guest's phone. */
+    var coopEffect: ((Int, Int, Int) -> Unit)? = null
+    var coopVar: ((Int, Int) -> Unit)? = null
+
+    /** The object whose life script runs right now (-1 none). */
+    private var scriptOwner = -1
+    /** Co-op, host: while a creature's script runs, the hero it hunts when that is the other one (null: the player, as the script says). */
+    private var aggro: Actor? = null
+    private val aggroOnRemote = HashMap<Int, Boolean>()
+    private var sentVar20 = Int.MIN_VALUE
+    private val remoteEffects = java.util.concurrent.ConcurrentLinkedQueue<IntArray>()
+    private val remoteVars = java.util.concurrent.ConcurrentLinkedQueue<IntArray>()
+
+    fun remoteEffect(kind: Int, a: Int, b: Int) { remoteEffects.add(intArrayOf(kind, a, b)) }
+    fun remoteVar(index: Int, value: Int) { remoteVars.add(intArrayOf(index, value)) }
+
+    /** What a creature's or the lid's script does that the guest should see and hear goes over to his phone (the host only). */
+    private fun forward(kind: Int, a: Int, b: Int = -1) {
+        if (!coopHost || scriptOwner !in PUPPETS) return
+        if (time - effectWindow >= 60) { effectWindow = time; effectCount = 0 }
+        if (++effectCount > 12) return // a script that plays a sound every tick must not flood the connection
+        coopEffect?.invoke(kind, a, b)
+    }
+    private var effectWindow = 0
+    private var effectCount = 0
+
+    private fun playRemoteEffect(e: IntArray) {
+        when (e[0]) {
+            0 -> ui.playSample(e[1])
+            1 -> ui.playSampleThen(e[1], e[2], false)
+            2 -> ui.music(e[1], false)
+            3 -> ui.nextMusic(e[1])
+            4 -> if (e[1] == playerIndex || objects.getOrNull(e[1])?.w?.active == true) cameraTarget = e[1]
+            5 -> ui.randomFrequency(e[1])
+            6 -> ui.playSampleThen(e[1], e[2], true)
+        }
+    }
+
+    /** The hero a creature hunts: the nearer of the two heroes; it keeps its target unless the other one is 30 % closer (so it does not dither between two heroes at equal distance). */
+    private fun pickAggro(g: GameObject): Actor? {
+        if (!coopHost || g.w.index !in CREATURES) return null
+        val me = player?.actor ?: return null
+        val other = companion?.takeIf { it.obj.w.active }?.actor ?: return null
+        val a = g.actor ?: return null
+        val dm = Math.abs(a.renderX - me.renderX) + Math.abs(a.renderZ - me.renderZ)
+        val dc = Math.abs(a.renderX - other.renderX) + Math.abs(a.renderZ - other.renderZ)
+        val now = aggroOnRemote[g.w.index] ?: false
+        val next = if (now) dc < dm * 13 / 10 else dc * 13 / 10 < dm
+        aggroOnRemote[g.w.index] = next
+        return if (next) other else null
+    }
+
     private val remoteProps = java.util.concurrent.ConcurrentLinkedQueue<IntArray>()
     private val remoteCreatureHits = java.util.concurrent.ConcurrentLinkedQueue<IntArray>()
     private val remoteHurts = java.util.concurrent.ConcurrentLinkedQueue<IntArray>()
@@ -317,8 +369,17 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                 player?.w?.let { it.hitBy = h[1]; it.hitForce = h[0] }
             }
         }
+        if (coopHost) {
+            val v = vm.vars[CREATURE_COUNT_VAR].toInt()
+            if (v != sentVar20 && time - propsAt <= 0) { sentVar20 = v; coopVar?.invoke(CREATURE_COUNT_VAR, v) }
+        } else {
+            while (true) applyRemoteVar(remoteVars.poll() ?: break)
+            while (true) playRemoteEffect(remoteEffects.poll() ?: break)
+        }
         if (remoteDied && !gameOver) { diedTold = true; gameOver() }
     }
+
+    private fun applyRemoteVar(v: IntArray) { if (v[0] == CREATURE_COUNT_VAR) vm.vars[v[0]] = v[1].toShort() }
 
     /** The other phone's state of a prop. A creature or the lid (host's) is copied as a whole, a puppet; the horse and the window only take on the body and animation. */
     private fun applyProp(e: IntArray) {
@@ -834,7 +895,11 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             old?.worldX ?: w.x, old?.worldY ?: w.y, old?.worldZ ?: w.z, old?.beta ?: w.beta,
             if (data.anim(anim) != null) anim else -1, time, roomView.hardcols, w.typeZv, animType, animInfo,
         )
-        a.followTarget = { n -> objects.getOrNull(n)?.takeIf { it.w.active }?.actor?.let { intArrayOf(it.renderX, it.renderZ) } }
+        a.followTarget = { n ->
+            val hunted = aggro
+            if (n == playerIndex && hunted != null) intArrayOf(hunted.renderX, hunted.renderZ)
+            else objects.getOrNull(n)?.takeIf { it.w.active }?.actor?.let { intArrayOf(it.renderX, it.renderZ) }
+        }
         a.trackSource = { n -> data.track(n) }
         a.roomNumber = w.room
         a.roomShift = { target ->
@@ -926,7 +991,13 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         for (g in objects) {
             val w = g.w
             if (!w.active) continue
-            if (w.life != -1 && w.lifeMode != -1) vm.runObject(w.index)
+            if (w.life != -1 && w.lifeMode != -1) {
+                scriptOwner = w.index
+                aggro = pickAggro(g)
+                vm.runObject(w.index)
+                aggro = null
+                scriptOwner = -1
+            }
             if (pendingFound >= 0 || pendingRead != null || exited || gameOver) break
         }
 
@@ -947,6 +1018,10 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
      */
     private fun touchObjects(g: GameObject, a: Actor) {
         val z = a.zv
+        if (coopHost && g.w.index in CREATURES) {
+            val b = companion?.takeIf { it.obj.w.active }?.actor?.zv
+            if (b != null && z[0] < b[1] && b[0] < z[1] && z[2] < b[3] && b[2] < z[3] && z[4] < b[5] && b[4] < z[5] && g.w.col == -1) g.w.col = playerIndex
+        }
         for (o in objects) {
             if (o === g || !o.w.active) continue
             val b = o.actor?.zv ?: continue
@@ -1201,6 +1276,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     override fun dist(actor: Int, other: Int): Int {
         val a = objects.getOrNull(actor)?.takeIf { it.w.active }?.w ?: return 32000
+        val hunted = aggro
+        if (other == playerIndex && hunted != null && actor in CREATURES) return Math.abs(a.x - hunted.renderX) + Math.abs(a.y - hunted.renderY) + Math.abs(a.z - hunted.renderZ)
         val b = objects.getOrNull(other)?.takeIf { it.w.active }?.w ?: return 32000
         return Math.abs(a.x - b.x) + Math.abs(a.y - b.y) + Math.abs(a.z - b.z)
     }
@@ -1526,6 +1603,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     override fun lifeChanged(obj: Int, life: Int) {}
 
     override fun cameraTarget(obj: Int) {
+        forward(4, obj)
         cameraTarget = obj
         if (intro) { // the scene follows the target into its room
             val w = vm.objects.getOrNull(obj) ?: return
@@ -1545,26 +1623,32 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     override fun sample(n: Int) {
         ui.playSample(n)
+        forward(0, n)
     }
 
     override fun repSample(n: Int) {
         ui.playSample(n)
+        forward(0, n)
     }
 
     override fun music(n: Int) {
         ui.music(n, false)
+        forward(2, n)
     }
 
     override fun nextMusic(n: Int) {
         ui.nextMusic(n)
+        forward(3, n)
     }
 
     override fun sampleThen(first: Int, then: Int) {
         ui.playSampleThen(first, then, false)
+        forward(1, first, then)
     }
 
     override fun sampleThenRepeat(first: Int, then: Int) {
         ui.playSampleThen(first, then, true)
+        forward(6, first, then)
     }
 
     override fun stopSample() {
@@ -1985,6 +2069,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         const val CVAR_CHOOSE_PERSON = 8
         /** The two creatures of the attic (A comes through the window, B out of the trapdoor): objects of OBJETS.ITD. */
         /** The creatures, and the trapdoor lid they open, are run by the host; the horse and the window change on either phone. */
+        const val CREATURE_COUNT_VAR = 20
         val CREATURES = intArrayOf(9, 21)
         val PUPPETS = intArrayOf(8, 9, 21)
         val SHARED_PROPS = intArrayOf(6, 7)

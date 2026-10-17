@@ -55,6 +55,8 @@ sealed class ServerEvent {
     class Remote(val state: RemoteState) : ServerEvent()
     /** Entries: obj, stage, room, active (0/1), body, anim, alpha, x, y, z, beta. */
     class Props(val items: List<IntArray>) : ServerEvent()
+    class Effect(val kind: Int, val a: Int, val b: Int) : ServerEvent()
+    class WorldVar(val index: Int, val value: Int) : ServerEvent()
     class CreatureHit(val obj: Int, val force: Int) : ServerEvent()
     class Hurt(val force: Int, val by: Int) : ServerEvent()
     class HeroDied(val hero: Hero) : ServerEvent()
@@ -92,6 +94,8 @@ object CoopJson {
                         intArrayOf(e.getInt("obj"), e.getInt("stage"), e.getInt("room"), if (e.getBoolean("active")) 1 else 0, e.getInt("body"), e.getInt("anim"), e.getInt("alpha"), e.getInt("x"), e.getInt("y"), e.getInt("z"), e.getInt("beta"))
                     })
                 }
+                "effect" -> ServerEvent.Effect(o.getInt("kind"), o.getInt("a"), o.getInt("b"))
+                "world_var" -> ServerEvent.WorldVar(o.getInt("index"), o.getInt("value"))
                 "creature_hit" -> ServerEvent.CreatureHit(o.getInt("obj"), o.getInt("force"))
                 "hurt" -> ServerEvent.Hurt(o.getInt("force"), o.getInt("by"))
                 "hero_died" -> ServerEvent.HeroDied(Hero.of(o.getString("hero")) ?: return null)
@@ -139,6 +143,8 @@ object CoopJson {
             for (e in items) arr.put(JSONObject().put("obj", e[0]).put("stage", e[1]).put("room", e[2]).put("active", e[3] != 0).put("body", e[4]).put("anim", e[5]).put("alpha", e[6]).put("x", e[7]).put("y", e[8]).put("z", e[9]).put("beta", e[10]))
         })
     }
+    fun effect(kind: Int, a: Int, b: Int) = msg("effect") { put("kind", kind); put("a", a); put("b", b) }
+    fun worldVar(index: Int, value: Int) = msg("world_var") { put("index", index); put("value", value) }
     fun creatureHit(obj: Int, force: Int) = msg("creature_hit") { put("obj", obj); put("force", force) }
     fun hurt(force: Int, by: Int) = msg("hurt") { put("force", force); put("by", by) }
     fun heroDied() = msg("hero_died")

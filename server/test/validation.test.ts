@@ -101,3 +101,11 @@ test("props, creature_hit, hurt and hero_died are checked", () => {
   assert.equal(parseClientMessage('{"type":"hurt","force":-1,"by":21}').ok, false);
   assert.equal(parseClientMessage('{"type":"hero_died"}').ok, true);
 });
+
+test("effect and world_var are checked", () => {
+  assert.equal(parseClientMessage('{"type":"effect","kind":2,"a":1,"b":-1}').ok, true);
+  assert.equal(parseClientMessage('{"type":"effect","kind":9,"a":1,"b":-1}').ok, false);
+  assert.equal(parseClientMessage('{"type":"world_var","index":20,"value":2}').ok, true);
+  assert.equal(parseClientMessage('{"type":"world_var","index":21,"value":2}').ok, false);
+  assert.equal(parseClientMessage('{"type":"world_var","index":20,"value":99999}').ok, false);
+});

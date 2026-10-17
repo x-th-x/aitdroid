@@ -63,7 +63,16 @@ export interface Hurt { type: "hurt"; force: number; by: number }
 /** The sender's hero died: the game is over for both. */
 export interface HeroDied { type: "hero_died" }
 
-export type ClientMessage = Props | CreatureHit | Hurt | HeroDied | ItemPlaced | ObjectMoved | ListSessions | CreateSession | JoinSession | LeaveSession | SelectStart | UploadSave | SetReady | StateMsg | Ping | ItemTaken;
+/**
+ * What the host's creatures and trapdoor do that the guest should see and hear: kind 0 sample (a), 1 sample then another (a, b), 2 music (a), 3 next music (a),
+ * 4 camera target (a: the object the camera follows), 5 random frequency of samples (a), 6 sample then another, repeated (a, b).
+ */
+export interface Effect { type: "effect"; kind: number; a: number; b: number }
+/** A variable of the game that the creatures' scripts keep (the count of creatures, variable 20) and the host's value of it. */
+export interface WorldVar { type: "world_var"; index: number; value: number }
+export const SHARED_VARS: readonly number[] = [20];
+
+export type ClientMessage = Effect | WorldVar | Props | CreatureHit | Hurt | HeroDied | ItemPlaced | ObjectMoved | ListSessions | CreateSession | JoinSession | LeaveSession | SelectStart | UploadSave | SetReady | StateMsg | Ping | ItemTaken;
 
 // ------------------------------------------------------------------------------------------------ server -> client
 
@@ -96,6 +105,8 @@ export type ServerMessage =
   | { type: "remote_state"; seq: number; t: number; serverTime: number; hero: Hero; stage: number; room: number; x: number; y: number; z: number; beta: number; anim: number }
   | { type: "item_taken"; hero: Hero; obj: number }
   | { type: "props"; hero: Hero; items: PropState[] }
+  | { type: "effect"; kind: number; a: number; b: number }
+  | { type: "world_var"; index: number; value: number }
   | { type: "creature_hit"; obj: number; force: number }
   | { type: "hurt"; force: number; by: number }
   | { type: "hero_died"; hero: Hero }
@@ -224,6 +235,15 @@ export function parseClientMessage(raw: string, limits: Limits = DEFAULT_LIMITS)
         items.push({ obj: e.obj, stage: e.stage, room: e.room, active: e.active, body: e.body, anim: e.anim, alpha: e.alpha, x: e.x, y: e.y, z: e.z, beta: e.beta });
       }
       return { ok: true, msg: { type, items } };
+    }
+    case "effect": {
+      if (!isInt(m.kind, 0, 6) || !isInt(m.a, -1, 5000) || !isInt(m.b, -1, 5000)) return fail("bad_message", "kind (0 to 6), a and b (-1 to 5000) are needed", type);
+      return { ok: true, msg: { type, kind: m.kind, a: m.a, b: m.b } };
+    }
+    case "world_var": {
+      if (!isInt(m.index, 0, 1000) || !SHARED_VARS.includes(m.index)) return fail("bad_message", "that variable is not shared", type);
+      if (!isInt(m.value, -32768, 32767)) return fail("bad_message", "value must be a 16 bit integer", type);
+      return { ok: true, msg: { type, index: m.index, value: m.value } };
     }
     case "creature_hit": {
       if (!isInt(m.obj, 0, 1000) || !CREATURE_OBJECTS.includes(m.obj)) return fail("bad_message", "obj is not a creature", type);

@@ -109,6 +109,8 @@ export class SessionManager {
       case "state":
         return this.state(connId, msg);
       case "props":
+      case "effect":
+      case "world_var":
       case "creature_hit":
       case "hurt":
       case "hero_died":
@@ -296,13 +298,14 @@ export class SessionManager {
    * The host runs the creatures: the guest sends their states never, the host sends the guest's blows' effects never. Props, creature hits, hurts and deaths go to the
    * other player only, and only while the game runs.
    */
-  private worldRelay(connId: string, m: Extract<ClientMessage, { type: "props" | "creature_hit" | "hurt" | "hero_died" }>): Outbound[] {
+  private worldRelay(connId: string, m: Extract<ClientMessage, { type: "props" | "effect" | "world_var" | "creature_hit" | "hurt" | "hero_died" }>): Outbound[] {
     const found = this.find(connId);
     if (!found) return this.error(connId, "not_in_session", "you are not in a session", m.type);
     const { session, player } = found;
     if (session.status !== "running") return this.error(connId, "wrong_state", "the game is not running", m.type);
     const isHost = player.slot === 1;
     if (m.type === "props" && !isHost && m.items.some((i) => HOST_OBJECTS.includes(i.obj))) return this.error(connId, "not_host", "only the host runs the creatures and the trapdoor", m.type);
+    if ((m.type === "effect" || m.type === "world_var") && !isHost) return this.error(connId, "not_host", "only the host runs the creatures", m.type);
     if (m.type === "hurt" && !isHost) return this.error(connId, "not_host", "only the host decides who is hurt", m.type);
     if (m.type === "creature_hit" && isHost) return this.error(connId, "wrong_hero", "the host runs the creatures itself", m.type);
     session.lastActivity = this.now();

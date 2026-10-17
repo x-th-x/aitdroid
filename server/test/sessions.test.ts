@@ -489,3 +489,14 @@ test("props, creature hits, hurts and deaths are refused before the game runs", 
   assert.equal(h.errorCode(h.send("A", { type: "props", items: [prop(6)] }), "A"), "wrong_state");
   assert.equal(h.errorCode(h.send("A", { type: "hero_died" }), "A"), "wrong_state");
 });
+
+test("the host's effects and shared variables go to the guest; the guest may not send them", () => {
+  const { h } = pair();
+  startNew(h);
+  h.send("A", { type: "effect", kind: 4, a: 9, b: 0 });
+  assert.equal(h.last("B", "effect")!.a, 9);
+  h.send("A", { type: "world_var", index: 20, value: 1 });
+  assert.equal(h.last("B", "world_var")!.value, 1);
+  assert.equal(h.errorCode(h.send("B", { type: "effect", kind: 0, a: 1, b: 0 }), "B"), "not_host");
+  assert.equal(h.errorCode(h.send("B", { type: "world_var", index: 20, value: 1 }), "B"), "not_host");
+});
