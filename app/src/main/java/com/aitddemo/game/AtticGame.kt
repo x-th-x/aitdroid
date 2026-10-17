@@ -199,6 +199,52 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     /** The companion as an object to draw (it has an actor and a body of the other hero's list), or null. */
     val companionObject: GameObject? get() = companion?.obj
 
+    // ------------------------------------------------------------------------------------------------------------------ Co-op prototype
+
+    /** Co-op: where the other player's hero is (null = not a co-op game). While it is set the companion is driven by it and not by [Partner.follow]. */
+    var remoteHero: RemoteHeroSource? = null
+
+    /** Co-op: the game is a co-op game of the attic: the heroes are the two players, the attic is peaceful, and the way out of the attic is closed. */
+    var coop = false
+        private set
+
+    /** Co-op: the time (game ticks) at which the local hero last stood on the stairs of the attic, which are closed in the prototype; the screen shows a notice for a moment. */
+    var coopStairsTick = -10000
+        private set
+
+    /**
+     * Begins a co-op game. The local hero is the one that runs script 549 (Carnby, or Emily when [emilyLocal]); the companion is the other player's hero. Both phones must
+     * start from the same picture: Carnby at the game's own start place and Emily at the place the companion takes behind him, so the phone of Emily swaps the two.
+     * The attic is made peaceful: the two creatures (objects 9 and 21) that come in the original are removed, because their scripts run on each phone alone and
+     * would attack only the player of that phone; combat is not part of the prototype.
+     */
+    fun startCoop(emilyLocal: Boolean) {
+        coop = true
+        delete(ATTIC_CREATURE_B)
+        delete(ATTIC_CREATURE_A)
+        val p = player?.actor ?: return
+        val c = companion?.actor ?: return
+        if (emilyLocal) {
+            val px = p.renderX; val py = p.renderY; val pz = p.renderZ; val pb = p.beta and 0x3FF
+            p.teleport(c.renderX, c.renderY, c.renderZ, pb)
+            c.teleport(px, py, pz, pb)
+        }
+    }
+
+    /** One tick of the other hero in a co-op game: put at the pose of the other player's phone, with his animation; hidden when he is in another room or nothing is known yet. */
+    private fun tickRemoteHero(source: RemoteHeroSource) {
+        val c = companion ?: return
+        val a = c.actor ?: return
+        val pose = source.pose()
+        if (pose == null || pose.stage != stage || pose.room != room) { c.obj.w.active = false; return }
+        c.obj.w.active = true
+        a.hardcols = roomView.hardcols
+        c.obj.w.stage = stage; c.obj.w.room = room
+        if (pose.anim != a.currentAnim && data.companionAnim(pose.anim) != null) a.playAnim(pose.anim, 1, -1)
+        a.update(partnerClock(time))
+        putFigure(c.obj, pose.x, pose.y, pose.z, pose.beta)
+    }
+
     /** The clock of the other hero: it runs a little slower than the game's, so its steps and its breathing do not stay in step with the player's. */
     private fun partnerClock(t: Int): Int = t * 92 / 100
 
@@ -283,6 +329,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     /** One tick of the companion in the game: it follows the player (see [Partner.follow]). */
     private fun tickCompanion() {
+        remoteHero?.let { tickRemoteHero(it); return }
         val c = companion ?: return
         val a = c.actor ?: return
         val lead = player?.actor ?: return
@@ -760,6 +807,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                 }
                 9 -> g.w.hardDec = zone.parameter
                 10 -> { // stage zone: the object's own floor script takes over
+                    if (coop) { if (g.w.index == playerIndex) coopStairsTick = time; return } // co-op prototype: the way out of the attic is closed
                     val life = g.w.floorLife
                     if (life == -1) return
                     g.w.life = life
@@ -1715,6 +1763,9 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         const val SMOKE_TICKS = 660
         /** Positions in the CVars (DEFINES.ITD): the sound of an impact, the weight limit, the object that sends a thrown item back. */
         const val CVAR_CHOOSE_PERSON = 8
+        /** The two creatures of the attic (A comes through the window, B out of the trapdoor): objects of OBJETS.ITD. */
+        const val ATTIC_CREATURE_A = 21
+        const val ATTIC_CREATURE_B = 9
         const val MAX_ITEMS = 30
         const val CVAR_SAMPLE_CHOC = 9
         const val CVAR_REVERSE_OBJECT = 11

@@ -158,6 +158,40 @@ behaviour on a real mobile network.
 6. Note on the free plan: the service sleeps after about 15 minutes without traffic; the first connection after that waits roughly a minute while it wakes up. The sessions are in memory, so a
    restart or a new deploy ends all sessions (on purpose).
 
+## The Android app (co-op prototype)
+
+* Main menu → **Co-op**. The lobby: server address (tap to change; `wss://...` in production, `ws://<IP>:8080` for a local test), Connect, create a session or join one (list or name), then the two slots
+  (Player 1 = Carnby, Player 2 = Emily), the start choice (**a new game** or **a save point**: the host picks one of his saved games, the guest takes it), and "I am ready".
+  The game starts when both are ready and the server has confirmed the shared start. The code is in `app/src/main/java/com/aitddemo/coop/`.
+* In the game, each phone moves its own hero as always; the other hero is the companion figure of the Together mode, put at the position the other phone reports and playing the animation it reports.
+  The local hero's state goes out at most 15 times a second and only when it changes (a sign of life each second when standing still). The other hero is shown about 120 ms behind the newest state
+  (blending between two buffered states), with a limited catch-up speed after a stall (see `RemoteSnapshots.kt` for how the buffer and the clocks work).
+* The attic is peaceful in a co-op game (the two creatures of the attic are removed: their scripts run on each phone alone and would only attack that phone's hero), and the stairs are closed
+  ("The way down is closed in the co-op prototype."). A save point that is not in the attic ends the co-op game with a notice.
+* Cleartext `ws://` is allowed in debug builds only (`app/src/debug/AndroidManifest.xml`); a release build accepts only `wss://`.
+
+## Test with two Android devices
+
+1. Start the server on the computer (`npm run dev` in `server/`) and note the computer's IP in the Wi-Fi (for example `192.168.1.20`); let port 8080 through the firewall.
+   (With a phone on USB, `adb reverse tcp:8080 tcp:8080` lets the app use `ws://127.0.0.1:8080` instead.) Or deploy to Render and use its `wss://` address.
+2. Install the debug build on both phones (the original game files must be set up on each, as for single player).
+3. Phone A: Co-op → set the server address → Connect → **Create a session** (note the name, e.g. `Raven-27`).
+4. Phone B: Co-op → same server address → Connect → **Show open sessions** → tap the session (or enter its name and Join).
+5. Both: choose **Start a new game** (or: the host offers a save point, the guest takes it) and tap **I am ready**. If the choices differ, the lobby says so and the game does not start.
+6. Walk around the attic with both phones; each sees the other hero move. Check: smooth movement, nothing happens to the other hero when you touch your screen, the note when the other phone leaves
+   (the game is interrupted for good), the closed stairs.
+
+## Tests that were run
+
+* Server: `npm test` — 39 automated tests (validation, session logic, disconnect cases, a real WebSocket run with two clients); all passed.
+* JVM tests of the snapshot buffer/smoother and the sending rule (`../coop-tests/`): all checks passed.
+* Peaceful attic on the PC engine (`coop-tests/PeaceTest.kt`): six minutes standing still, life stayed 20, no creature; the stairs stayed closed and the hero kept control.
+* On one phone (Huawei PCT-L29 over `adb reverse`, the server on the computer, a scripted client as the second player): create, join, choices, ready, start (new game and a shared save point:
+  both clients received the same bytes and the game started in the attic), the lobby when the second player leaves before the start, the scripted Emily shown walking in the attic, Carnby's
+  moves arriving at the server (x grew from 3231 to 5330 with animation 255), and the note "The other player left: the game is interrupted."
+* **Not tested:** two real phones at once, a real mobile network, Render (not deployed), how smooth the remote hero looks over a real network with jitter (the buffer is tested only with simulated jitter),
+  Emily as the local hero on a phone (the code path swaps the start places; only Carnby was played on a phone).
+
 ## Known limitations
 
 * Only the attic (`0/0`). Changing the room is not synchronized; the prototype does not support it.

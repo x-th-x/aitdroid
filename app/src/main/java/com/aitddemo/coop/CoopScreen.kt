@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
@@ -25,6 +27,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -32,6 +35,7 @@ import androidx.compose.ui.unit.sp
 import com.aitddemo.BackButton
 import com.aitddemo.BitmapText
 import com.aitddemo.GameCanvas
+import com.aitddemo.SaveStore
 import com.aitddemo.bitmapTextWidth
 
 private val DIM = Color(0xFF9C8B6E)
@@ -52,16 +56,29 @@ fun CoopScreen(model: CoopModel, onBack: () -> Unit, onStarted: (StartInfo) -> U
     BackHandler { onBack() }
     var editing by remember { mutableStateOf<String?>(null) }
     var joinName by remember { mutableStateOf("") }
+    var pickingSave by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     val start = model.start
     LaunchedEffect(start) { if (start != null) onStarted(start) }
 
-    val rows = buildRows(model, joinName, onEdit = { editing = it })
+    // the host offers one of his saved games: the bytes of the file go to the server, which hands them to both phones at the start
+    val offerSlot = { slot: Int ->
+        val bytes = SaveStore.readBytes(context, slot)
+        if (bytes != null) {
+            val saveId = "slot${slot + 1}-${SaveStore.savedAt(context, slot) ?: 0}"
+            model.uploadSave(saveId, SaveStore.label(context, slot), android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP))
+            model.selectSave(saveId)
+        }
+        pickingSave = false
+    }
+    val rows = if (pickingSave && model.me != null) slotRows(context, offerSlot) { pickingSave = false } else buildRows(model, joinName, onEdit = { editing = it }, onPickSave = { pickingSave = true })
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         GameCanvas(Modifier.fillMaxSize()) {
-            val boxTop = 22
-            val step = 14
+            // many lines (a lobby with a save point and notes) are set closer, so that all of them fit on the 200 lines of the picture
+            val boxTop = if (rows.size > 9) 6 else 22
+            val step = if (rows.size > 9) 12 else 14
             Box(Modifier.offset(x = gx(0), y = gy(boxTop)).size(gx(320), gy(14 + rows.size * step)).background(Color.Black.copy(alpha = 0.5f)).border(unit * 1.5f, GOLD))
             rows.forEachIndexed { i, row ->
                 val y = boxTop + 8 + i * step
@@ -88,7 +105,7 @@ fun CoopScreen(model: CoopModel, onBack: () -> Unit, onStarted: (StartInfo) -> U
     }
 }
 
-private fun buildRows(model: CoopModel, joinName: String, onEdit: (String) -> Unit): List<Row> {
+private fun buildRows(model: CoopModel, joinName: String, onEdit: (String) -> Unit, onPickSave: () -> Unit): List<Row> {
     val rows = ArrayList<Row>()
     val me = model.me
     val session = model.session
@@ -108,14 +125,26 @@ private fun buildRows(model: CoopModel, joinName: String, onEdit: (String) -> Un
             if (joinName.isNotEmpty()) rows.add(Row("Join \"$joinName\"", BRIGHT) { model.join(joinName) })
             rows.add(Row("Disconnect", DIM) { model.disconnect() })
         }
-        else -> lobbyRows(model, me, session, rows)
+        else -> lobbyRows(model, me, session, rows, onPickSave)
     }
     model.peerNote?.let { rows.add(Row(it, WARN)) }
     model.error?.let { rows.add(Row(it.take(52), WARN) { model.clearError() }) }
     return rows
 }
 
-private fun lobbyRows(model: CoopModel, me: ServerEvent.Joined, session: SessionInfo, rows: ArrayList<Row>) {
+/** The saved games of the app, to choose the one that the host offers. */
+private fun slotRows(context: android.content.Context, onPick: (Int) -> Unit, onCancel: () -> Unit): List<Row> {
+    val rows = ArrayList<Row>()
+    rows.add(Row("Offer a save point", BRIGHT))
+    for (slot in 0 until SaveStore.SLOTS) {
+        val has = SaveStore.savedAt(context, slot) != null
+        rows.add(Row(SaveStore.label(context, slot), if (has) BRIGHT else DIM) { if (has) onPick(slot) })
+    }
+    rows.add(Row("Cancel", DIM) { onCancel() })
+    return rows
+}
+
+private fun lobbyRows(model: CoopModel, me: ServerEvent.Joined, session: SessionInfo, rows: ArrayList<Row>, onPickSave: () -> Unit) {
     val status = when (session.status) {
         "waiting" -> "waiting for the second player"
         "ready" -> "both players are here"
@@ -142,6 +171,17 @@ private fun lobbyRows(model: CoopModel, me: ServerEvent.Joined, session: Session
         val mine = session.players.firstOrNull { it.slot == me.slot }
         val chose = mine?.selectionMode == "new"
         rows.add(Row((if (chose) "[x] " else "[ ] ") + "Start a new game", BRIGHT) { model.selectNew() })
+        // a save point: the host offers one of his own, the guest takes the one that is offered (both phones load the same bytes)
+        val offered = session.offeredSave
+        val choseSave = mine?.selectionMode == "save"
+        if (me.slot == 1) {
+            rows.add(Row((if (choseSave) "[x] " else "[ ] ") + (if (offered != null) "Start from: " + offered.label.take(30) else "Start from a save point"), BRIGHT) { if (offered != null && !choseSave) model.selectSave(offered.saveId) else onPickSave() })
+            if (offered != null && choseSave) rows.add(Row("Offer another save point", DIM) { onPickSave() })
+        } else if (offered != null) {
+            rows.add(Row((if (choseSave) "[x] " else "[ ] ") + "Start from the host's save: " + offered.label.take(24), BRIGHT) { model.selectSave(offered.saveId) })
+        } else {
+            rows.add(Row("(the host has not offered a save point)", DIM))
+        }
         session.mismatch?.let { rows.add(Row(it, WARN)) }
         if (session.status == "ready") {
             val ready = mine?.ready == true
@@ -168,20 +208,23 @@ private fun EditOverlay(title: String, initial: String, onDone: (String?) -> Uni
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
     BackHandler { onDone(null) }
-    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.92f)).clickable(enabled = false) {}, contentAlignment = Alignment.Center) {
-        Box(Modifier.fillMaxWidth(0.7f).border(2.dp, GOLD).padding(16.dp)) {
-            Box(Modifier.align(Alignment.TopStart)) { BitmapText(text = title, scale = 2f, color = DIM) }
-            BasicTextField(
-                value = text,
-                onValueChange = { text = it },
-                singleLine = true,
-                textStyle = TextStyle(color = BRIGHT, fontSize = 22.sp),
-                cursorBrush = SolidColor(BRIGHT),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { onDone(text) }),
-                modifier = Modifier.padding(top = 32.dp).fillMaxWidth().focusRequester(focus),
-            )
-            Box(Modifier.align(Alignment.BottomEnd).padding(top = 80.dp).clickable { onDone(text) }.padding(8.dp)) { BitmapText(text = "OK", scale = 2.4f, color = BRIGHT) }
+    // at the top of the screen, so that the keyboard (which covers the lower half in landscape) leaves the field and the OK button in sight
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.92f)).clickable(enabled = false) {}, contentAlignment = Alignment.TopCenter) {
+        Column(Modifier.padding(top = 8.dp).fillMaxWidth(0.8f).border(2.dp, GOLD).padding(12.dp)) {
+            BitmapText(text = title, scale = 2f, color = DIM)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                BasicTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    singleLine = true,
+                    textStyle = TextStyle(color = BRIGHT, fontSize = 22.sp),
+                    cursorBrush = SolidColor(BRIGHT),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { onDone(text) }),
+                    modifier = Modifier.weight(1f).padding(vertical = 8.dp).focusRequester(focus),
+                )
+                Box(Modifier.clickable { onDone(text) }.padding(horizontal = 12.dp, vertical = 6.dp)) { BitmapText(text = "OK", scale = 2.4f, color = BRIGHT) }
+            }
         }
     }
 }

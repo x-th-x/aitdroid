@@ -7,6 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import com.aitddemo.coop.CoopModel
 import com.aitddemo.coop.CoopScreen
+import com.aitddemo.coop.Hero
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -42,7 +43,7 @@ import androidx.compose.ui.unit.dp
 import com.aitddemo.original.GameFiles
 import kotlinx.coroutines.delay
 
-private enum class Screen { LOGO_STATIC, LOGO_3D, TITLE, MENU, SELECT, LOAD, MODELS, MUSIC, INTRO, ATTIC, OPTIONS, FLOORS, COOP }
+private enum class Screen { LOGO_STATIC, LOGO_3D, TITLE, MENU, SELECT, LOAD, MODELS, MUSIC, INTRO, ATTIC, OPTIONS, FLOORS, COOP, COOP_GAME }
 
 private val TEXT_COLOR = Color(0xFFF2E4B8)
 
@@ -108,6 +109,7 @@ private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: 
 
     // the co-op prototype: the connection and the lobby live as long as the app is on the screen
     val coop = remember { CoopModel(prefs) }
+    var coopSave by remember { mutableStateOf<ByteArray?>(null) } // the bytes of the shared save point when the co-op game starts from one
 
     // set by the floor selection of the main menu, cleared by every other way into the game
     var floorStart by remember { mutableStateOf<FloorStart?>(null) }
@@ -179,7 +181,21 @@ private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: 
             )
             Screen.INTRO -> AtticScreen(onExit = { loadSlot = null; floorStart = null; screen = Screen.ATTIC }, controlMode = controlMode, intro = true, emily = emily, together = together)
             Screen.FLOORS -> FloorSelectScreen(onStart = { floorStart = it; emily = it.emily; loadSlot = null; screen = Screen.ATTIC }, onBack = { screen = Screen.MENU })
-            Screen.COOP -> CoopScreen(coop, onBack = { coop.disconnect(); screen = Screen.MENU })
+            Screen.COOP -> CoopScreen(
+                coop,
+                onBack = { coop.disconnect(); screen = Screen.MENU },
+                // the server has confirmed the shared start: both phones got the same configuration; each is the hero of its slot
+                onStarted = { s ->
+                    coopSave = s.saveData?.let { android.util.Base64.decode(it, android.util.Base64.DEFAULT) }
+                    emily = coop.me?.hero == Hero.EMILY
+                    loadSlot = null; floorStart = null
+                    screen = Screen.COOP_GAME
+                },
+            )
+            Screen.COOP_GAME -> AtticScreen(
+                onExit = { coop.leave(); coop.disconnect(); coopSave = null; screen = Screen.MENU },
+                controlMode = controlMode, developerMode = developerMode, emily = emily, together = true, coop = coop, coopSave = coopSave,
+            )
             Screen.MODELS -> ModelsScreen(onExit = { screen = Screen.MENU })
             Screen.MUSIC -> MusicViewerScreen(onExit = { screen = Screen.MENU })
             Screen.ATTIC -> AtticScreen(onExit = { screen = Screen.MENU }, controlMode = controlMode, developerMode = developerMode, devItems = devItems, devPos = devPos, loadSlot = loadSlot, floorStart = floorStart, emily = emily, together = together)

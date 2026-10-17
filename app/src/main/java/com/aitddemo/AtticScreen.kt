@@ -37,6 +37,12 @@ import com.aitddemo.game.AtticGame
 import com.aitddemo.game.Effect
 import com.aitddemo.game.GameObject
 import com.aitddemo.game.GameUi
+import com.aitddemo.game.RemoteHeroSource
+import com.aitddemo.game.RemotePose
+import com.aitddemo.coop.CoopModel
+import com.aitddemo.coop.LocalStateSender
+import com.aitddemo.coop.RemoteSmoother
+import com.aitddemo.coop.RemoteSnapshots
 import com.aitddemo.game.Joy
 import kotlin.math.PI
 import kotlin.math.cos
@@ -387,10 +393,10 @@ private fun effectActor(e: Effect, now: Int, palette: IntArray, data: com.aitdde
 
 /** Entry point: reads the room from the original game files, shows an error message when that is not possible. */
 @Composable
-fun AtticScreen(onExit: () -> Unit, controlMode: ControlMode = ControlMode.STEERING, developerMode: Boolean = false, devItems: List<Int> = emptyList(), devPos: List<Int>? = null, loadSlot: Int? = null, floorStart: FloorStart? = null, intro: Boolean = false, emily: Boolean = false, together: Boolean = false) {
+fun AtticScreen(onExit: () -> Unit, controlMode: ControlMode = ControlMode.STEERING, developerMode: Boolean = false, devItems: List<Int> = emptyList(), devPos: List<Int>? = null, loadSlot: Int? = null, floorStart: FloorStart? = null, intro: Boolean = false, emily: Boolean = false, together: Boolean = false, coop: CoopModel? = null, coopSave: ByteArray? = null) {
     val loader = rememberOriginalFiles(if (together) AtticOriginalReader::missingFilesTogether else if (emily) AtticOriginalReader::missingFilesEmily else AtticOriginalReader::missingFiles, cacheKey = (if (emily) "attic-emily" else "attic") + (if (together) "-together" else "")) { files -> AtticOriginalReader.read(files, emily, together) }
     when (val state = loader.state) {
-        is OriginalState.Ready -> AtticRoom(state.data, onExit, controlMode, developerMode, devItems, devPos, loadSlot, floorStart, intro, emily, together)
+        is OriginalState.Ready -> AtticRoom(state.data, onExit, controlMode, developerMode, devItems, devPos, loadSlot, floorStart, intro, emily, together, coop, coopSave)
         is OriginalState.Failed -> OriginalFilesErrorScreen(state.message, onChooseFolder = loader.chooseFolder, onExit = onExit)
         OriginalState.Loading -> Box(Modifier.fillMaxSize().background(Color.Black)) {
             BitmapText(text = "Lade Originaldateien...", scale = 2f, color = Color(0xFFF2E4B8), modifier = Modifier.align(Alignment.Center))
@@ -400,7 +406,7 @@ fun AtticScreen(onExit: () -> Unit, controlMode: ControlMode = ControlMode.STEER
 }
 
 @Composable
-private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: ControlMode, developerMode: Boolean, devItems: List<Int>, devPos: List<Int>?, loadSlot: Int?, floorStart: FloorStart?, intro: Boolean, emily: Boolean, together: Boolean) {
+private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: ControlMode, developerMode: Boolean, devItems: List<Int>, devPos: List<Int>?, loadSlot: Int?, floorStart: FloorStart?, intro: Boolean, emily: Boolean, together: Boolean, coop: CoopModel?, coopSave: ByteArray?) {
     BackHandler { onExit() }
     // the attic plays the first track of LISTMUS.PAK in a loop (the intro music stops); leaving the attic stops it
     DisposableEffect(world) {
@@ -411,6 +417,10 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     DisposableEffect(sounds) { onDispose { sounds.release() } }
     val ui = remember(world) { AtticUi(world, sounds) }
     val context = androidx.compose.ui.platform.LocalContext.current
+    // co-op prototype: the states of the other player's hero are buffered and smoothed here, the states of the local hero are sent from the game loop
+    val remoteSnapshots = remember { RemoteSnapshots() }
+    val remoteSmoother = remember { RemoteSmoother() }
+    val localSender = remember { LocalStateSender() }
     // the intro is the film of stage 7 that the life scripts play (startGame(7, 1) of the original): the car, the driver, his walk through the house up to the attic stairs
     val game = remember(world) { (if (intro) AtticGame(world.game, ui, 7, 1, true, together) else AtticGame(world.game, ui, together = together)).also { g ->
         // who plays: the scripts choose voices and more by this variable of the game (CHOOSE_PERSO, 0 = Carnby, 1 = Emily); a saved game brings its own value back
@@ -434,7 +444,36 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
         if (DevOptions.vars.any { it.first == 997 }) g.player?.actor?.let { g.effects.add(Effect(3, it.renderX, it.renderY - 1000, it.renderZ, g.time + 300, null, 0, 0, 0, g.vm.cvars[1].toInt())) } // the flash of a gun in front of the player for 5 seconds (for testing)
         if (DevOptions.vars.any { it.first == 998 }) g.player?.actor?.let { g.effects.add(Effect(1, it.renderX, it.renderY - 1000, it.renderZ, g.time, null)) } // the dots of a hit in front of the player (for testing)
         if (loadSlot != null) SaveStore.load(context, loadSlot, g)
+        if (coop != null) {
+            // co-op: both phones start from the same state (a new game, or the bytes of the shared save point), and each phone is the hero of its own slot whatever the save says
+            if (coopSave != null) SaveStore.loadBytes(coopSave, g)
+            g.vm.cvars[AtticGame.CVAR_CHOOSE_PERSON] = if (emily) 1 else 0
+            g.startCoop(emily)
+            var lastMs = System.nanoTime() / 1_000_000.0
+            g.remoteHero = RemoteHeroSource {
+                val now = System.nanoTime() / 1_000_000.0
+                val target = remoteSnapshots.sample(now)
+                if (target == null) null else {
+                    val shown = remoteSmoother.step(target, (now - lastMs).coerceIn(1.0, 100.0))
+                    lastMs = now
+                    RemotePose(shown.stage, shown.room, shown.x, shown.y, shown.z, shown.beta, shown.anim)
+                }
+            }
+        }
     } }
+    // co-op: what the other phone sends goes into the buffer on the network thread (a short lock, no blocking)
+    DisposableEffect(coop) {
+        coop?.onRemoteState = { s -> remoteSnapshots.add(s.seq, s.senderTime, System.nanoTime() / 1_000_000.0, s.stage, s.room, s.x, s.y, s.z, s.beta, s.anim) }
+        onDispose { coop?.onRemoteState = null }
+    }
+    // co-op supports the attic only: a save point from another room (the same on both phones) ends the co-op game with a notice
+    LaunchedEffect(game) {
+        if (coop != null && (game.roomView.stage != 0 || game.roomView.room != 0)) {
+            android.widget.Toast.makeText(context, "This save point is not in the attic; co-op supports only the attic so far.", android.widget.Toast.LENGTH_LONG).show()
+            coop.leave(); coop.disconnect()
+            onExit()
+        }
+    }
     // the room behind the attic stairs is read in the background, so the change of floor does not stop the game
     LaunchedEffect(world) {
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -493,6 +532,16 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
             val paused = foundItem >= 0 || inventoryOpen || menuOpen || ui.gameOverShown || ui.exitShown || ui.endShown || ui.picture != null || game.pendingRead != null
             if (!paused) gameClock += (timer - lastTimer).coerceAtLeast(0)
             lastTimer = timer
+            // co-op: the state of the local hero goes out at most 15 times a second and only when it changed (the frame is queued, nothing waits for the network)
+            if (coop != null) {
+                val me = coop.me?.hero
+                val a = game.player?.actor
+                if (me != null && a != null && coop.start != null && coop.session?.status == "running") { // an interrupted game sends nothing more
+                    localSender.maybeSend(System.nanoTime() / 1_000_000.0, game.roomView.stage, game.roomView.room, a.renderX, a.renderY, a.renderZ, a.beta and 0x3FF, a.currentAnim) { q, t ->
+                        coop.sendState(q, t, me, game.roomView.stage, game.roomView.room, a.renderX, a.renderY, a.renderZ, a.beta and 0x3FF, a.currentAnim)
+                    }
+                }
+            }
             ui.expire(System.nanoTime())
             ui.pollMusic()
             if (ui.picture != null && System.nanoTime() > ui.pictureNanos) ui.picture = null
@@ -765,6 +814,14 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
 
         frameTick // the messages fade every frame
         if (ui.messages.any { it != null }) MessageLines(ui.messages, System.nanoTime(), world.game.palette)
+
+        // co-op: notes about the other player and the closed stairs
+        if (coop != null) {
+            val note = if (coop.session?.status == "interrupted") "The other player left: the game is interrupted." else coop.error ?: coop.peerNote ?: if (game.time - game.coopStairsTick < 240) "The way down is closed in the co-op prototype." else null
+            if (note != null) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp).background(Color.Black.copy(alpha = 0.65f)).padding(horizontal = 12.dp, vertical = 6.dp)) {
+                BitmapText(text = note, scale = 2f, color = Color(0xFFF2E4B8))
+            }
+        }
 
         if (foundItem >= 0) {
             FoundWindow(game, foundItem) { take ->

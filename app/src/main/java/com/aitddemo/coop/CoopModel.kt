@@ -129,7 +129,7 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
             is ServerEvent.Sessions -> sessions = event.sessions
             is ServerEvent.Joined -> { me = event; error = null }
             is ServerEvent.Session -> session = event.info
-            is ServerEvent.Start -> start = event.info
+            is ServerEvent.Start -> { start = event.info; peerNote = null; error = null }
             is ServerEvent.Peer -> peerNote = when (event.state) {
                 "connected" -> "${event.hero.title} joined."
                 "disconnected" -> "${event.hero.title} disconnected."

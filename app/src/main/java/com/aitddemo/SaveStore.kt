@@ -58,7 +58,20 @@ object SaveStore {
     }
 
     fun load(context: Context, slot: Int, game: AtticGame): Boolean = try {
-        val bytes = file(context, slot).readBytes()
+        loadBytes(file(context, slot).readBytes(), game)
+    } catch (_: Exception) {
+        false
+    }
+
+    /** The whole file of a slot (header and state), for sending a save point to the other player of a co-op game; null when the slot is empty. */
+    fun readBytes(context: Context, slot: Int): ByteArray? = try {
+        file(context, slot).takeIf { it.exists() }?.readBytes()
+    } catch (_: Exception) {
+        null
+    }
+
+    /** Loads a game from the bytes of a save file (a slot's own, or the one the other co-op player's phone sent). */
+    fun loadBytes(bytes: ByteArray, game: AtticGame): Boolean = try {
         DataInputStream(ByteArrayInputStream(bytes)).use { inp ->
             if (inp.readInt() != MAGIC) false else {
                 val version = inp.readInt()
