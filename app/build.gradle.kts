@@ -43,4 +43,6 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.core:core-ktx:1.13.1")
+    // the co-op prototype talks to its server over a WebSocket
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

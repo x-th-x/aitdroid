@@ -5,6 +5,8 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import com.aitddemo.coop.CoopModel
+import com.aitddemo.coop.CoopScreen
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -40,7 +42,7 @@ import androidx.compose.ui.unit.dp
 import com.aitddemo.original.GameFiles
 import kotlinx.coroutines.delay
 
-private enum class Screen { LOGO_STATIC, LOGO_3D, TITLE, MENU, SELECT, LOAD, MODELS, MUSIC, INTRO, ATTIC, OPTIONS, FLOORS }
+private enum class Screen { LOGO_STATIC, LOGO_3D, TITLE, MENU, SELECT, LOAD, MODELS, MUSIC, INTRO, ATTIC, OPTIONS, FLOORS, COOP }
 
 private val TEXT_COLOR = Color(0xFFF2E4B8)
 
@@ -104,6 +106,9 @@ private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: 
     val prefs = remember { context.getSharedPreferences("aitdroid", android.content.Context.MODE_PRIVATE) }
     var together by remember { mutableStateOf(prefs.getBoolean("together", false)) }
 
+    // the co-op prototype: the connection and the lobby live as long as the app is on the screen
+    val coop = remember { CoopModel(prefs) }
+
     // set by the floor selection of the main menu, cleared by every other way into the game
     var floorStart by remember { mutableStateOf<FloorStart?>(null) }
 
@@ -151,10 +156,11 @@ private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: 
                         0 -> { floorStart = null; screen = Screen.SELECT }
                         1 -> if (SaveStore.hasAny(context)) screen = Screen.LOAD else Toast.makeText(context, "There is no saved game yet", Toast.LENGTH_SHORT).show()
                         2 -> screen = Screen.OPTIONS
-                        3 -> screen = Screen.FLOORS
-                        4 -> screen = Screen.MODELS
-                        5 -> screen = Screen.MUSIC
-                        6 -> (context as? Activity)?.finish()
+                        3 -> screen = Screen.COOP
+                        4 -> screen = Screen.FLOORS
+                        5 -> screen = Screen.MODELS
+                        6 -> screen = Screen.MUSIC
+                        7 -> (context as? Activity)?.finish()
                     }
                 }
             )
@@ -173,6 +179,7 @@ private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: 
             )
             Screen.INTRO -> AtticScreen(onExit = { loadSlot = null; floorStart = null; screen = Screen.ATTIC }, controlMode = controlMode, intro = true, emily = emily, together = together)
             Screen.FLOORS -> FloorSelectScreen(onStart = { floorStart = it; emily = it.emily; loadSlot = null; screen = Screen.ATTIC }, onBack = { screen = Screen.MENU })
+            Screen.COOP -> CoopScreen(coop, onBack = { coop.disconnect(); screen = Screen.MENU })
             Screen.MODELS -> ModelsScreen(onExit = { screen = Screen.MENU })
             Screen.MUSIC -> MusicViewerScreen(onExit = { screen = Screen.MENU })
             Screen.ATTIC -> AtticScreen(onExit = { screen = Screen.MENU }, controlMode = controlMode, developerMode = developerMode, devItems = devItems, devPos = devPos, loadSlot = loadSlot, floorStart = floorStart, emily = emily, together = together)

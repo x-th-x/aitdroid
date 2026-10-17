@@ -17,9 +17,9 @@ import androidx.compose.ui.graphics.Color
 
 // Menu layout on the 320x200 grid: framed box, lines from y=76 in steps of 16, centered at x=160,
 // highlighted entry gets a background bar and a shadow.
-private val MENU_ITEMS = listOf("Begin a new game", "Resume a saved game", "Options", "Floor selection", "Model Viewer", "Music Viewer", "Return to Homescreen")
+private val MENU_ITEMS = listOf("Begin a new game", "Resume a saved game", "Options", "Co-op", "Floor selection", "Model Viewer", "Music Viewer", "Return to Homescreen")
 // the entries only shown in Developer Mode (indexes in MENU_ITEMS)
-private val DEVELOPER_ITEMS = setOf(3, 4, 5)
+private val DEVELOPER_ITEMS = setOf(4, 5, 6)
 
 @Composable
 fun MenuScreen(developerMode: Boolean, onSelect: (Int) -> Unit) {

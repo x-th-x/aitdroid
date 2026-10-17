@@ -1,5 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- the co-op prototype connects to its server (wss:// in production) -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:label="AITDroid"
         android:icon="@mipmap/ic_launcher"

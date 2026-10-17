@@ -1,0 +1,5 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- debug builds only: plain ws:// to a server on the local network for testing; release builds allow only TLS (wss://) -->
+    <application android:usesCleartextTraffic="true" />
+</manifest>
