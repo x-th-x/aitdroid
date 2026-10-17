@@ -129,3 +129,10 @@ test("latch needs a variable number and a value other than 0", () => {
   assert.equal(parseClientMessage('{"type":"latch","index":74,"value":0}').ok, false);
   assert.equal(parseClientMessage('{"type":"latch","index":300,"value":1}').ok, false);
 });
+
+test("sound needs a sample number; latch may carry the old value", () => {
+  assert.equal(parseClientMessage('{"type":"sound","n":37}').ok, true);
+  assert.equal(parseClientMessage('{"type":"sound","n":-1}').ok, false);
+  assert.equal(parseClientMessage('{"type":"latch","index":3,"value":2,"old":1}').ok, true);
+  assert.equal(parseClientMessage('{"type":"latch","index":3,"value":2,"old":1.5}').ok, false);
+});

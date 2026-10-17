@@ -265,8 +265,27 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     /** Co-op, host: the view of the shared world for the guest, every ten seconds (entries: obj, stage, room, state, x, y, z, beta). */
     var coopSnapshot: ((List<IntArray>) -> Unit)? = null
 
-    /** Co-op: a variable that latched (went from 0 to a value and stayed) is told to the other phone: (variable, value). */
-    var coopLatch: ((Int, Int) -> Unit)? = null
+    /** Co-op: a variable that changed and stayed is told to the other phone: (variable, new value, the value it replaces). */
+    var coopLatch: ((Int, Int, Int) -> Unit)? = null
+    /** Co-op: a sound of the local hero (a footstep, a find) for the other phone. */
+    var coopSound: ((Int) -> Unit)? = null
+
+    /** The other player is gone for good: the other hero is the game's own companion again (he follows the player), the attic's creature puppets are gone, nothing is sent. */
+    var coopSolo = false
+        private set
+
+    fun coopSolo() {
+        if (coopSolo) return
+        coopSolo = true
+        remoteHero = null
+        for (i in CREATURES) { puppetTarget.remove(i); if (!coopHost) objects[i].let { if (it.w.active) deactivate(it) } }
+        companion?.let { it.obj.w.active = true; it.obj.w.stage = stage; it.obj.w.room = room }
+        placeCompanion()
+    }
+    private val remoteSounds = java.util.concurrent.ConcurrentLinkedQueue<Int>()
+    fun remoteSound(n: Int) { remoteSounds.add(n) }
+    private var soundWindow = 0
+    private var soundCount = 0
 
     /** Co-op: the creatures of the floors outside the attic; they are kept out of the game (scripts that send one in or give it a script later are ignored). */
     private var hostile: Set<Int> = emptySet()
@@ -274,32 +293,35 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     /** Variables that are the player's own state (the ones his script writes): never shared. */
     private var personalVars: Set<Int> = emptySet()
     private var latchBase = IntArray(0)
-    private var latchSeen = IntArray(0)
+    private var latchLast = IntArray(0)
+    private var latchChanges = IntArray(0)
     private var latchSince = IntArray(0)
     private val remoteLatches = java.util.concurrent.ConcurrentLinkedQueue<IntArray>()
 
-    fun remoteLatch(index: Int, value: Int) { remoteLatches.add(intArrayOf(index, value)) }
+    fun remoteLatch(index: Int, value: Int, old: Int) { remoteLatches.add(intArrayOf(index, value, old)) }
 
     /**
-     * World variables (a door unlocked, a switch thrown) are shared as latches: a variable that went from 0 to a value and kept it for three seconds is sent, and the other
-     * phone sets it when it is still 0 there. A variable that flips back and forth (a script that rewrites it every tick) never keeps a value and is not shared.
+     * World variables (a door unlocked, a puzzle step done) are shared as changes that stayed: a variable whose value changed and kept the new value for three seconds is sent with
+     * the value it replaces, and the other phone takes it over only if it still holds that old value (so the two phones never overwrite each other's progress). A variable that
+     * flips back and forth, or counts all the time, is not shared.
      */
     private fun syncLatches() {
         while (true) {
             val l = remoteLatches.poll() ?: break
-            if (l[0] in vm.vars.indices && l[0] !in personalVars && l[0] != CREATURE_COUNT_VAR && vm.vars[l[0]].toInt() == 0) {
-                vm.vars[l[0]] = l[1].toShort()
-                latchBase[l[0]] = l[1]
+            val i = l[0]
+            if (i in vm.vars.indices && i !in personalVars && i != CREATURE_COUNT_VAR && vm.vars[i].toInt() == l[2]) {
+                vm.vars[i] = l[1].toShort()
+                latchBase[i] = l[1]; latchLast[i] = l[1]
             }
         }
         if (time % 30 != 0) return
         for (i in vm.vars.indices) {
             if (i in personalVars || i == CREATURE_COUNT_VAR) continue
             val v = vm.vars[i].toInt()
-            if (v == latchBase[i]) { latchSeen[i] = 0; continue }
-            if (latchBase[i] != 0) { latchBase[i] = v; continue } // only a change from 0 is shared; the rest just follows
-            if (latchSeen[i] != v) { latchSeen[i] = v; latchSince[i] = time; continue }
-            if (time - latchSince[i] >= 180) { latchBase[i] = v; coopLatch?.invoke(i, v) }
+            if (v != latchLast[i]) { latchLast[i] = v; latchChanges[i]++; latchSince[i] = time }
+            if (time % 600 == 0 && latchChanges[i] > 0) latchChanges[i]--
+            if (latchChanges[i] > 8 || v == latchBase[i]) continue
+            if (time - latchSince[i] >= 180) { val old = latchBase[i]; latchBase[i] = v; coopLatch?.invoke(i, v, old) }
         }
     }
 
@@ -368,6 +390,21 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     fun remoteVar(index: Int, value: Int) { remoteVars.add(intArrayOf(index, value)) }
 
     /** What a creature's or the lid's script does that the guest should see and hear goes over to his phone (the host only). */
+    /** A sound of the local hero's script goes to the other phone (it plays it while it shows this hero in the same room). At most twelve a second. */
+    private fun forwardHeroSound(n: Int) {
+        if (!coop || coopSolo || scriptOwner != playerIndex) return
+        if (time - soundWindow >= 60) { soundWindow = time; soundCount = 0 }
+        if (++soundCount > 12) return
+        coopSound?.invoke(n)
+    }
+
+    private fun playRemoteSounds() {
+        while (true) {
+            val n = remoteSounds.poll() ?: break
+            if (companion?.obj?.w?.active == true) ui.playSample(n)
+        }
+    }
+
     private fun forward(kind: Int, a: Int, b: Int = -1) {
         if (!coopHost || scriptOwner !in PUPPETS) return
         if (time - effectWindow >= 60) { effectWindow = time; effectCount = 0 }
@@ -391,7 +428,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     /** The hero a creature hunts: the nearer of the two heroes; it keeps its target unless the other one is 30 % closer (so it does not dither between two heroes at equal distance). */
     private fun pickAggro(g: GameObject): Actor? {
-        if (!coopHost || g.w.index !in CREATURES) return null
+        if (!coopHost || coopSolo || g.w.index !in CREATURES) return null
         val me = player?.actor ?: return null
         val other = companion?.takeIf { it.obj.w.active }?.actor ?: return null
         val a = g.actor ?: return null
@@ -587,7 +624,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         }
         personalVars = com.aitddemo.life.LifeScan.varsWrittenFrom(vm.objects[playerIndex].life) { data.script(it) }
         latchBase = IntArray(vm.vars.size) { vm.vars[it].toInt() }
-        latchSeen = IntArray(vm.vars.size)
+        latchLast = IntArray(vm.vars.size) { vm.vars[it].toInt() }
+        latchChanges = IntArray(vm.vars.size)
         latchSince = IntArray(vm.vars.size)
         if (!coopHost) { // the guest's phone does not run the creatures and the lid: it shows what the host's phone sends
             for (i in PUPPETS) {
@@ -724,7 +762,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     /** One tick of the companion in the game: it follows the player (see [Partner.follow]). */
     private fun tickCompanion() {
-        if (coop) { applyRemoteTaken(); applyRemotePlaced(); syncFurniture(); syncWorld(); syncLatches() }
+        if (coop && !coopSolo) { applyRemoteTaken(); applyRemotePlaced(); syncFurniture(); syncWorld(); syncLatches(); playRemoteSounds() }
         remoteHero?.let { tickRemoteHero(it); return }
         val c = companion ?: return
         val a = c.actor ?: return
@@ -1177,7 +1215,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             owners.add(g.w.index)
         }
         // co-op: the other hero is a solid box for the local one (it is only a drawn figure, not an object of the game)
-        if (self === player && coop) companion?.takeIf { it.obj.w.active }?.actor?.let { boxes.add(Actor.Collider(it.zv, false, true)); owners.add(-1) }
+        if (self === player && coop && !coopSolo) companion?.takeIf { it.obj.w.active }?.actor?.let { boxes.add(Actor.Collider(it.zv, false, true)); owners.add(-1) }
         colliderIndexes = owners.toIntArray()
         return boxes
     }
@@ -1761,11 +1799,13 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     override fun sample(n: Int) {
         ui.playSample(n)
         forward(0, n)
+        forwardHeroSound(n)
     }
 
     override fun repSample(n: Int) {
         ui.playSample(n)
         forward(0, n)
+        forwardHeroSound(n)
     }
 
     override fun music(n: Int) {

@@ -41,6 +41,9 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
     /** Counts up whenever the two phones have to send the world to each other again: after this phone resumed, and after the other one came back. */
     var resyncTick by mutableStateOf(0)
         private set
+    /** The other player is gone for good (he left, or did not come back in time): the game goes on without him. */
+    var partnerGone by mutableStateOf(false)
+        private set
     private var token: String? = null
     private var resuming = false
     private var reconnectDeadline = 0L
@@ -66,7 +69,8 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
     @Volatile var onProps: ((List<IntArray>) -> Unit)? = null
     @Volatile var onCreatureHit: ((Int, Int) -> Unit)? = null
     @Volatile var onHurt: ((Int, Int) -> Unit)? = null
-    @Volatile var onLatch: ((Int, Int) -> Unit)? = null
+    @Volatile var onLatch: ((Int, Int, Int) -> Unit)? = null
+    @Volatile var onSound: ((Int) -> Unit)? = null
     @Volatile var onSnapshot: ((List<IntArray>) -> Unit)? = null
     @Volatile var onEffect: ((Int, Int, Int) -> Unit)? = null
     @Volatile var onWorldVar: ((Int, Int) -> Unit)? = null
@@ -126,7 +130,8 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
     fun sendItemTaken(obj: Int): Boolean = client.send(CoopJson.itemTaken(obj))
 
     fun sendProps(items: List<IntArray>): Boolean = client.send(CoopJson.props(items))
-    fun sendLatch(index: Int, value: Int): Boolean = client.send(CoopJson.latch(index, value))
+    fun sendLatch(index: Int, value: Int, old: Int): Boolean = client.send(CoopJson.latch(index, value, old))
+    fun sendSound(n: Int): Boolean = client.send(CoopJson.sound(n))
     fun sendSnapshot(items: List<IntArray>): Boolean = client.send(CoopJson.worldSnapshot(items))
     fun sendEffect(kind: Int, a: Int, b: Int): Boolean = client.send(CoopJson.effect(kind, a, b))
     fun sendWorldVar(index: Int, value: Int): Boolean = client.send(CoopJson.worldVar(index, value))
@@ -186,6 +191,7 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
     }
 
     private fun giveUp() {
+        if (start != null) partnerGone = true
         main.removeCallbacks(retry)
         reconnecting = false
         resuming = false
@@ -193,7 +199,7 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
         client.close()
         reset()
         connection = Connection.DISCONNECTED
-        error = "The connection was lost and the game could not be resumed."
+        error = "The connection was lost and the game could not be resumed. You go on alone."
     }
 
     override fun onEvent(event: ServerEvent) {
@@ -203,7 +209,8 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
         }
         when (event) {
             is ServerEvent.Props -> { onProps?.invoke(event.items); return }
-            is ServerEvent.Latch -> { onLatch?.invoke(event.index, event.value); return }
+            is ServerEvent.Latch -> { onLatch?.invoke(event.index, event.value, event.old); return }
+            is ServerEvent.HeroSound -> { onSound?.invoke(event.n); return }
             is ServerEvent.WorldSnapshot -> { onSnapshot?.invoke(event.items); return }
             is ServerEvent.Effect -> { onEffect?.invoke(event.kind, event.a, event.b); return }
             is ServerEvent.WorldVar -> { onWorldVar?.invoke(event.index, event.value); return }
@@ -248,16 +255,17 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
                 if (resuming) { resuming = false; reconnecting = false; main.removeCallbacks(retry); resyncTick++ }
             }
             is ServerEvent.Session -> session = event.info
-            is ServerEvent.Start -> { start = event.info; peerNote = null; error = null }
+            is ServerEvent.Start -> { partnerGone = false; start = event.info; peerNote = null; error = null }
             is ServerEvent.Peer -> peerNote = when (event.state) {
                 "connected" -> { if (start != null) resyncTick++; "${event.hero.title} joined." }
+                "left" -> { if (start != null) partnerGone = true; "${event.hero.title} left. You go on alone." }
                 "disconnected" -> "${event.hero.title} disconnected."
                 "silent" -> "${event.hero.title} is not sending updates."
                 else -> null
             }
-            is ServerEvent.Closed -> { reconnecting = false; token = null; main.removeCallbacks(retry); session = null; me = null; start = null; error = "The session ended: ${event.reason}." }
+            is ServerEvent.Closed -> { if (start != null) partnerGone = true; reconnecting = false; token = null; main.removeCallbacks(retry); session = null; me = null; start = null; error = "The session ended: ${event.reason}." }
             is ServerEvent.Error -> if (resuming) giveUp() else error = describe(event)
-            is ServerEvent.Remote, is ServerEvent.ItemTaken, is ServerEvent.ItemPlaced, is ServerEvent.ObjectMoved, is ServerEvent.Props, is ServerEvent.Latch, is ServerEvent.WorldSnapshot, is ServerEvent.Effect, is ServerEvent.WorldVar, is ServerEvent.CreatureHit, is ServerEvent.Hurt, is ServerEvent.HeroDied, is ServerEvent.Pong -> {}
+            is ServerEvent.Remote, is ServerEvent.ItemTaken, is ServerEvent.ItemPlaced, is ServerEvent.ObjectMoved, is ServerEvent.Props, is ServerEvent.Latch, is ServerEvent.HeroSound, is ServerEvent.WorldSnapshot, is ServerEvent.Effect, is ServerEvent.WorldVar, is ServerEvent.CreatureHit, is ServerEvent.Hurt, is ServerEvent.HeroDied, is ServerEvent.Pong -> {}
         }
     }
 

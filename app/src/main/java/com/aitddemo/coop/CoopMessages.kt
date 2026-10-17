@@ -56,7 +56,8 @@ sealed class ServerEvent {
     /** Entries: obj, stage, room, active (0/1), body, anim, alpha, x, y, z, beta. */
     class Props(val items: List<IntArray>) : ServerEvent()
     /** Entries: obj, stage, room, state (0 in place, 1 put down, 2 taken), x, y, z, beta. */
-    class Latch(val index: Int, val value: Int) : ServerEvent()
+    class Latch(val index: Int, val value: Int, val old: Int) : ServerEvent()
+    class HeroSound(val n: Int) : ServerEvent()
     class WorldSnapshot(val items: List<IntArray>) : ServerEvent()
     class Effect(val kind: Int, val a: Int, val b: Int) : ServerEvent()
     class WorldVar(val index: Int, val value: Int) : ServerEvent()
@@ -97,7 +98,8 @@ object CoopJson {
                         intArrayOf(e.getInt("obj"), e.getInt("stage"), e.getInt("room"), if (e.getBoolean("active")) 1 else 0, e.getInt("body"), e.getInt("anim"), e.getInt("alpha"), e.getInt("x"), e.getInt("y"), e.getInt("z"), e.getInt("beta"))
                     })
                 }
-                "latch" -> ServerEvent.Latch(o.getInt("index"), o.getInt("value"))
+                "latch" -> ServerEvent.Latch(o.getInt("index"), o.getInt("value"), o.optInt("old", 0))
+                "sound" -> ServerEvent.HeroSound(o.getInt("n"))
                 "world_snapshot" -> {
                     val a = o.getJSONArray("items")
                     ServerEvent.WorldSnapshot((0 until a.length()).map { a.getJSONObject(it) }.map { e ->
@@ -154,7 +156,8 @@ object CoopJson {
             for (e in items) arr.put(JSONObject().put("obj", e[0]).put("stage", e[1]).put("room", e[2]).put("active", e[3] != 0).put("body", e[4]).put("anim", e[5]).put("alpha", e[6]).put("x", e[7]).put("y", e[8]).put("z", e[9]).put("beta", e[10]))
         })
     }
-    fun latch(index: Int, value: Int) = msg("latch") { put("index", index); put("value", value) }
+    fun latch(index: Int, value: Int, old: Int) = msg("latch") { put("index", index); put("value", value); put("old", old) }
+    fun sound(n: Int) = msg("sound") { put("n", n) }
     fun worldSnapshot(items: List<IntArray>) = msg("world_snapshot") {
         put("items", org.json.JSONArray().also { arr ->
             for (e in items) arr.put(JSONObject().put("obj", e[0]).put("stage", e[1]).put("room", e[2]).put("state", e[3]).put("x", e[4]).put("y", e[5]).put("z", e[6]).put("beta", e[7]))

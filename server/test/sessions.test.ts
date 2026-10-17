@@ -378,7 +378,7 @@ test("a server restart has no sessions: nothing is restored", () => {
 });
 
 test("session names stay unique among active sessions", () => {
-  const h = new Harness();
+  const h = new Harness({ maxSessions: 1000 });
   const names = new Set<string>();
   for (let i = 0; i < 300; i++) {
     h.connect("c" + i);
@@ -586,11 +586,11 @@ test("an interrupted game that nobody resumes is closed after the keep time", ()
 test("a latched variable goes to the other player, from either side", () => {
   const { h } = pair();
   startNew(h);
-  h.send("B", { type: "latch", index: 74, value: 1 });
+  h.send("B", { type: "latch", index: 74, value: 1, old: 0 });
   assert.equal(h.last("A", "latch")!.index, 74);
-  h.send("A", { type: "latch", index: 16, value: 5 });
+  h.send("A", { type: "latch", index: 16, value: 5, old: 0 });
   assert.equal(h.last("B", "latch")!.value, 5);
-  assert.equal(h.errorCode(h.send("A", { type: "latch", index: 5, value: 1 }), "A") === undefined, true);
+  assert.equal(h.errorCode(h.send("A", { type: "latch", index: 5, value: 1, old: 0 }), "A") === undefined, true);
 });
 
 test("any room is allowed when the server is set to all areas, and a change of room is no jump", () => {
@@ -608,4 +608,40 @@ test("any room is allowed when the server is set to all areas, and a change of r
   assert.equal(h.errorCode(h.send("A", { ...stateOf("carnby", 2, 90000, 90000), stage: 1, room: 7 }), "A"), undefined);
   // inside one room the speed rule still holds
   assert.equal(h.errorCode(h.send("A", { ...stateOf("carnby", 3, -90000, -90000), stage: 1, room: 7 }), "A"), "implausible_state");
+});
+
+test("a hero's sound goes to the other player, both ways", () => {
+  const { h } = pair();
+  startNew(h);
+  h.send("A", { type: "sound", n: 37 });
+  assert.equal(h.last("B", "sound")!.n, 37);
+  h.send("B", { type: "sound", n: 5 });
+  assert.equal(h.last("A", "sound")!.n, 5);
+  assert.equal(h.last("A", "sound")!.n === 37, false);
+});
+
+test("a latch carries the value it replaces", () => {
+  const { h } = pair();
+  startNew(h);
+  h.send("A", { type: "latch", index: 80, value: 2, old: 1 });
+  const l = h.last("B", "latch")!;
+  assert.deepEqual([l.index, l.value, l.old], [80, 2, 1]);
+});
+
+test("somebody who leaves on purpose is told as left, a lost connection as disconnected", () => {
+  const a = pair();
+  startNew(a.h);
+  a.h.send("B", { type: "leave_session" });
+  assert.equal(a.h.last("A", "peer")!.state, "left");
+  const b = pair();
+  startNew(b.h);
+  b.h.drop("B");
+  assert.equal(b.h.last("A", "peer")!.state, "disconnected");
+});
+
+test("the server takes only so many sessions", () => {
+  const h = new Harness({ maxSessions: 1 });
+  h.connect("A"); h.connect("B");
+  h.send("A", { type: "create_session" });
+  assert.equal(h.errorCode(h.send("B", { type: "create_session" }), "B"), "server_busy");
 });

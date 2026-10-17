@@ -42,7 +42,19 @@ export function createServer(cfg: Config, now: () => number = Date.now): Running
     }
   }
 
-  wss.on("connection", (ws) => {
+  const perIp = new Map<string, number>();
+
+  wss.on("connection", (ws, req) => {
+    // the address of the player: behind Render's proxy it is the first entry of x-forwarded-for
+    const forwarded = req.headers["x-forwarded-for"];
+    const ip = (typeof forwarded === "string" && forwarded.split(",")[0].trim()) || req.socket.remoteAddress || "?";
+    if (sockets.size >= cfg.maxConnections || (perIp.get(ip) ?? 0) >= cfg.maxConnectionsPerIp) {
+      ws.send(JSON.stringify({ type: "error", code: "server_busy", message: "too many connections; try again later" }));
+      ws.close(1013, "try again later");
+      return;
+    }
+    perIp.set(ip, (perIp.get(ip) ?? 0) + 1);
+    ws.once("close", () => { const n = (perIp.get(ip) ?? 1) - 1; if (n <= 0) perIp.delete(ip); else perIp.set(ip, n); });
     const id = randomUUID();
     sockets.set(id, ws);
     let alive = true;

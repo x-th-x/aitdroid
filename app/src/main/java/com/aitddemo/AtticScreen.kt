@@ -454,7 +454,8 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
             g.coopProps = { items -> coop.sendProps(items) }
             g.coopCreatureHit = { obj, force -> coop.sendCreatureHit(obj, force) }
             g.coopHurt = { force, by -> coop.sendHurt(force, by) }
-            g.coopLatch = { index, value -> coop.sendLatch(index, value) }
+            g.coopLatch = { index, value, old -> coop.sendLatch(index, value, old) }
+            g.coopSound = { n -> coop.sendSound(n) }
             g.coopSnapshot = { items -> coop.sendSnapshot(items) }
             g.coopEffect = { kind, a, b -> coop.sendEffect(kind, a, b) }
             g.coopVar = { index, value -> coop.sendWorldVar(index, value) }
@@ -480,13 +481,18 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
         coop?.onCreatureHit = { obj, force -> game.remoteCreatureHit(obj, force) }
         coop?.onHurt = { force, by -> game.remoteHurt(force, by) }
         coop?.onHeroDied = { game.remoteHeroDied() }
-        coop?.onLatch = { index, value -> game.remoteLatch(index, value) }
+        coop?.onLatch = { index, value, old -> game.remoteLatch(index, value, old) }
+        coop?.onSound = { n -> game.remoteSound(n) }
         coop?.onSnapshot = { items -> game.remoteSnapshot(items) }
         coop?.onEffect = { kind, a, b -> game.remoteEffect(kind, a, b) }
         coop?.onWorldVar = { index, value -> game.remoteVar(index, value) }
         coop?.onItemPlaced = { m -> game.remoteItemPlaced(m) }
         coop?.onObjectMoved = { obj, x, y, z -> game.remoteObjectMoved(obj, x, y, z) }
-        onDispose { coop?.onRemoteState = null; coop?.onItemTaken = null; coop?.onProps = null; coop?.onCreatureHit = null; coop?.onHurt = null; coop?.onHeroDied = null; coop?.onLatch = null; coop?.onSnapshot = null; coop?.onEffect = null; coop?.onWorldVar = null; coop?.onItemPlaced = null; coop?.onObjectMoved = null }
+        onDispose { coop?.onRemoteState = null; coop?.onItemTaken = null; coop?.onProps = null; coop?.onCreatureHit = null; coop?.onHurt = null; coop?.onHeroDied = null; coop?.onLatch = null; coop?.onSound = null; coop?.onSnapshot = null; coop?.onEffect = null; coop?.onWorldVar = null; coop?.onItemPlaced = null; coop?.onObjectMoved = null }
+    }
+    // co-op: when the other player is gone for good, the game goes on alone with the game's own companion
+    LaunchedEffect(coop?.partnerGone) {
+        if (coop != null && coop.partnerGone) game.coopSolo()
     }
     // co-op: after a lost connection (this phone's or the other one's) both phones start their counters again and send the world once more
     LaunchedEffect(coop?.resyncTick) {
@@ -838,7 +844,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
 
         // co-op: notes about the other player and the closed stairs
         if (coop != null) {
-            val note = if (coop.reconnecting) "The connection was lost. Trying to reconnect..." else if (coop.session?.status == "interrupted") "The other player is away: the game is interrupted until they come back." else coop.error ?: coop.peerNote ?: null
+            val note = if (coop.partnerGone) (coop.peerNote ?: coop.error ?: "The other player is gone. You go on alone.") else if (coop.reconnecting) "The connection was lost. Trying to reconnect..." else if (coop.session?.status == "interrupted") "The other player is away: the game is interrupted until they come back." else coop.error ?: coop.peerNote ?: null
             if (note != null) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp).background(Color.Black.copy(alpha = 0.65f)).padding(horizontal = 12.dp, vertical = 6.dp)) {
                 BitmapText(text = note, scale = 2f, color = Color(0xFFF2E4B8))
             }

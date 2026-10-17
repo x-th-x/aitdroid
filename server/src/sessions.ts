@@ -113,6 +113,7 @@ export class SessionManager {
         return this.setReady(connId, msg.ready);
       case "state":
         return this.state(connId, msg);
+      case "sound":
       case "latch":
       case "props":
       case "effect":
@@ -135,6 +136,7 @@ export class SessionManager {
 
   private create(connId: string): Outbound[] {
     if (this.byConn.has(connId)) return this.error(connId, "already_in_session", "you are already in a session; leave it first", "create_session");
+    if (this.sessions.size >= this.cfg.maxSessions) return this.error(connId, "server_busy", "the server is full; try again later", "create_session");
     const t = this.now();
     const name = this.freshName();
     const session: Session = { id: randomUUID(), name, status: "waiting", players: [this.newPlayer(connId, 1, t), null], createdAt: t, lastActivity: t, interruptedAt: null, save: null };
@@ -341,7 +343,7 @@ export class SessionManager {
    * The host runs the creatures: the guest sends their states never, the host sends the guest's blows' effects never. Props, creature hits, hurts and deaths go to the
    * other player only, and only while the game runs.
    */
-  private worldRelay(connId: string, m: Extract<ClientMessage, { type: "latch" | "props" | "effect" | "world_snapshot" | "world_var" | "creature_hit" | "hurt" | "hero_died" }>): Outbound[] {
+  private worldRelay(connId: string, m: Extract<ClientMessage, { type: "sound" | "latch" | "props" | "effect" | "world_snapshot" | "world_var" | "creature_hit" | "hurt" | "hero_died" }>): Outbound[] {
     const found = this.find(connId);
     if (!found) return this.error(connId, "not_in_session", "you are not in a session", m.type);
     const { session, player } = found;
@@ -428,7 +430,7 @@ export class SessionManager {
       session.status = "interrupted";
       session.interruptedAt = t;
       if (other?.connected) {
-        out.push({ to: other.connId, msg: { type: "peer", slot: player.slot, hero: player.hero, state: "disconnected" } });
+        out.push({ to: other.connId, msg: { type: "peer", slot: player.slot, hero: player.hero, state: how === "left" ? "left" : "disconnected" } });
         out.push(...this.broadcast(session));
       }
       return out;

@@ -19,6 +19,10 @@ export interface Config {
   interruptedKeepMs: number;
   /** Messages per second one connection may send before it is told off. */
   maxMessagesPerSecond: number;
+  /** How many sessions, connections, and connections of one address the server takes at the same time. */
+  maxSessions: number;
+  maxConnections: number;
+  maxConnectionsPerIp: number;
 }
 
 function intEnv(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
@@ -55,7 +59,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     silentAfterMs: intEnv(env, "SILENT_AFTER_MS", 5000),
     idleSessionMs: intEnv(env, "IDLE_SESSION_MS", 30 * 60 * 1000),
     interruptedKeepMs: intEnv(env, "INTERRUPTED_KEEP_MS", 2 * 60 * 1000),
-    maxMessagesPerSecond: intEnv(env, "MAX_MESSAGES_PER_SECOND", 60),
+    maxMessagesPerSecond: intEnv(env, "MAX_MESSAGES_PER_SECOND", 120),
+    maxSessions: intEnv(env, "MAX_SESSIONS", 100),
+    maxConnections: intEnv(env, "MAX_CONNECTIONS", 300),
+    maxConnectionsPerIp: intEnv(env, "MAX_CONNECTIONS_PER_IP", 8),
   };
 }
 

@@ -44,6 +44,7 @@ Check that the server is up: open `http://<host>:8080/health` (or `https://<serv
 |---|---|---|
 | `PORT` | 8080 | port to listen on (Render sets it) |
 | `HOST` | 0.0.0.0 | address to listen on |
+| `MAX_SESSIONS`, `MAX_CONNECTIONS`, `MAX_CONNECTIONS_PER_IP` | `100`, `300`, `8` | how many sessions, connections, and connections of one address (the first entry of `x-forwarded-for` behind Render) the server takes; beyond that: `server_busy` |
 | `ALLOWED_AREAS` | `*` | places a client may report: `*` for every place of the game, or a `stage/room` list (`0/0` is the attic). A new game starts in the attic either way |
 | `MAX_SPEED` | 20000 | fastest plausible movement in engine units per second (a sanity check, see below) |
 | `SILENT_AFTER_MS` | 5000 | a running player who sends no state for this long is reported as silent |
@@ -98,7 +99,8 @@ Text frames with one JSON object each, `{"type": ..., ...}`. After connecting th
 {"type":"select_start","mode":"save","saveId":"slot1-1a2b3c"}
 {"type":"upload_save","saveId":"slot1-1a2b3c","label":"Slot 1 - 10.10.2026 14:23","data":"<base64>"}
 {"type":"set_ready","ready":true}
-{"type":"latch","index":74,"value":1}   // either player: a game variable went from 0 to a value and stayed (a door unlocked); the other phone sets it, too, when it is 0 there
+{"type":"latch","index":74,"value":2,"old":1}   // either player: a game variable changed from old to value and stayed (a door unlocked, a puzzle step done); the other phone sets it, too, when it still holds old there
+{"type":"sound","n":37}   // either player: a sound of his hero (a footstep, a find); the other phone plays it while it shows that hero in the same room
 {"type":"resume","name":"Raven-27","token":"<the token from joined>"}   // after a lost connection in a running game: take the place again (within 2 minutes)
 {"type":"state","seq":42,"t":123456,"hero":"carnby","stage":0,"room":0,"x":3231,"y":0,"z":-1548,"beta":512,"anim":254}
 {"type":"item_placed","obj":12,"stage":0,"room":0,"x":2000,"y":0,"z":3000,"alpha":0,"beta":512,"gamma":0}   // an item put down: lies in the shared world, can be taken again

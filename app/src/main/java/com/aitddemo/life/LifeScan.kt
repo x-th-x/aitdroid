@@ -6,17 +6,19 @@ package com.aitddemo.life
  */
 object LifeScan {
     /** [lifeSets]: pairs (object the life goes to, or -1 for the script's own object; script number). [varWrites]: the variables the script changes. */
-    class Facts(val lifeSets: List<IntArray>, val varWrites: Set<Int>)
+    class Facts(val lifeSets: List<IntArray>, val varWrites: Set<Int>, val varReads: Set<Int> = emptySet())
 
     /** Reads a script to its end; null when it does not decode exactly to the end (an op that is not known). */
     fun decode(w: ShortArray): Facts? {
         var p = 0
         val lifeSets = ArrayList<IntArray>()
         val writes = HashSet<Int>()
+        val reads = HashSet<Int>()
         fun s16(): Int = if (p < w.size) w[p++].toInt() else { p = Int.MAX_VALUE / 2; 0 }
         fun skipEval() {
             val v = s16()
-            if (v == -1 || v == 0) { s16(); return }
+            if (v == -1) { s16(); return }
+            if (v == 0) { reads.add(s16()); return }
             if (v and 0x8000 != 0) s16()
             val code = (v and 0x7FFF) - 1
             if (code == 0x10) skipEval() else repeat(Aitd1Ops.extraOperands(code)) { s16() }
@@ -45,7 +47,7 @@ object LifeScan {
                 "LIFE" -> lifeSets.add(intArrayOf(target, operands[0]))
             }
         }
-        return if (p == w.size) Facts(lifeSets, writes) else null
+        return if (p == w.size) Facts(lifeSets, writes, reads) else null
     }
 
     /**

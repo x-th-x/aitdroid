@@ -85,9 +85,11 @@ export interface WorldSnapshot { type: "world_snapshot"; items: WorldEntry[] }
  * A variable of the game that went from 0 to a value and stayed there (a door unlocked, a switch thrown): the other phone sets it too when it is still 0 there. Variables
  * that the player's own script keeps (his state) are never sent. Either player may send it.
  */
-export interface Latch { type: "latch"; index: number; value: number }
+export interface Latch { type: "latch"; index: number; value: number; old: number }
+/** A sound of the sender's hero (a footstep, a door, a find): the other phone plays it when it shows that hero in the same room. */
+export interface HeroSound { type: "sound"; n: number }
 
-export type ClientMessage = Latch | Resume | WorldSnapshot | Effect | WorldVar | Props | CreatureHit | Hurt | HeroDied | ItemPlaced | ObjectMoved | ListSessions | CreateSession | JoinSession | LeaveSession | SelectStart | UploadSave | SetReady | StateMsg | Ping | ItemTaken;
+export type ClientMessage = HeroSound | Latch | Resume | WorldSnapshot | Effect | WorldVar | Props | CreatureHit | Hurt | HeroDied | ItemPlaced | ObjectMoved | ListSessions | CreateSession | JoinSession | LeaveSession | SelectStart | UploadSave | SetReady | StateMsg | Ping | ItemTaken;
 
 // ------------------------------------------------------------------------------------------------ server -> client
 
@@ -120,7 +122,8 @@ export type ServerMessage =
   | { type: "remote_state"; seq: number; t: number; serverTime: number; hero: Hero; stage: number; room: number; x: number; y: number; z: number; beta: number; anim: number }
   | { type: "item_taken"; hero: Hero; obj: number }
   | { type: "props"; hero: Hero; items: PropState[] }
-  | { type: "latch"; index: number; value: number }
+  | { type: "latch"; index: number; value: number; old: number }
+  | { type: "sound"; n: number }
   | { type: "world_snapshot"; items: WorldEntry[] }
   | { type: "effect"; kind: number; a: number; b: number }
   | { type: "world_var"; index: number; value: number }
@@ -129,7 +132,7 @@ export type ServerMessage =
   | { type: "hero_died"; hero: Hero }
   | { type: "item_placed"; hero: Hero; obj: number; stage: number; room: number; x: number; y: number; z: number; alpha: number; beta: number; gamma: number }
   | { type: "object_moved"; hero: Hero; obj: number; x: number; y: number; z: number }
-  | { type: "peer"; slot: 1 | 2; hero: Hero; state: "connected" | "disconnected" | "silent" | "active" }
+  | { type: "peer"; slot: 1 | 2; hero: Hero; state: "connected" | "disconnected" | "left" | "silent" | "active" }
   | { type: "closed"; reason: string }
   | { type: "error"; code: ErrorCode; message: string; requestType?: string }
   | { type: "pong"; t: number; serverTime: number };
@@ -151,7 +154,8 @@ export type ErrorCode =
   | "save_too_large"
   | "save_missing"
   | "selection_mismatch"
-  | "bad_token";
+  | "bad_token"
+  | "server_busy";
 
 // ------------------------------------------------------------------------------------------------ validation
 
@@ -261,7 +265,16 @@ export function parseClientMessage(raw: string, limits: Limits = DEFAULT_LIMITS)
     }
     case "latch": {
       if (!isInt(m.index, 0, 255) || !isInt(m.value, -32768, 32767) || m.value === 0) return fail("bad_message", "index (0 to 255) and a value other than 0 (16 bit) are needed", type);
-      return { ok: true, msg: { type, index: m.index, value: m.value } };
+      let old = 0;
+      if (m.old !== undefined) {
+        if (!isInt(m.old, -32768, 32767)) return fail("bad_message", "old must be a 16 bit integer", type);
+        old = m.old;
+      }
+      return { ok: true, msg: { type, index: m.index, value: m.value, old } };
+    }
+    case "sound": {
+      if (!isInt(m.n, 0, 5000)) return fail("bad_message", "n must be an integer from 0 to 5000", type);
+      return { ok: true, msg: { type, n: m.n } };
     }
     case "world_snapshot": {
       if (!Array.isArray(m.items) || m.items.length < 1 || m.items.length > 40) return fail("bad_message", "items must be a list of 1 to 40 entries", type);
