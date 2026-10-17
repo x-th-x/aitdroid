@@ -12,7 +12,7 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "22"
-      # which places of the game a client may report (stage/room; 0/0 is the attic)
+      # which places of the game a client may report: * for all of them, or a list of stage/room (0/0 is the attic)
       - key: ALLOWED_AREAS
-        value: "0/0"
+        value: "*"
     # Render sets PORT itself; the server listens on it

@@ -81,7 +81,13 @@ export const SHARED_VARS: readonly number[] = [20];
 export interface WorldEntry { obj: number; stage: number; room: number; state: number; x: number; y: number; z: number; beta: number }
 export interface WorldSnapshot { type: "world_snapshot"; items: WorldEntry[] }
 
-export type ClientMessage = Resume | WorldSnapshot | Effect | WorldVar | Props | CreatureHit | Hurt | HeroDied | ItemPlaced | ObjectMoved | ListSessions | CreateSession | JoinSession | LeaveSession | SelectStart | UploadSave | SetReady | StateMsg | Ping | ItemTaken;
+/**
+ * A variable of the game that went from 0 to a value and stayed there (a door unlocked, a switch thrown): the other phone sets it too when it is still 0 there. Variables
+ * that the player's own script keeps (his state) are never sent. Either player may send it.
+ */
+export interface Latch { type: "latch"; index: number; value: number }
+
+export type ClientMessage = Latch | Resume | WorldSnapshot | Effect | WorldVar | Props | CreatureHit | Hurt | HeroDied | ItemPlaced | ObjectMoved | ListSessions | CreateSession | JoinSession | LeaveSession | SelectStart | UploadSave | SetReady | StateMsg | Ping | ItemTaken;
 
 // ------------------------------------------------------------------------------------------------ server -> client
 
@@ -114,6 +120,7 @@ export type ServerMessage =
   | { type: "remote_state"; seq: number; t: number; serverTime: number; hero: Hero; stage: number; room: number; x: number; y: number; z: number; beta: number; anim: number }
   | { type: "item_taken"; hero: Hero; obj: number }
   | { type: "props"; hero: Hero; items: PropState[] }
+  | { type: "latch"; index: number; value: number }
   | { type: "world_snapshot"; items: WorldEntry[] }
   | { type: "effect"; kind: number; a: number; b: number }
   | { type: "world_var"; index: number; value: number }
@@ -251,6 +258,10 @@ export function parseClientMessage(raw: string, limits: Limits = DEFAULT_LIMITS)
         items.push({ obj: e.obj, stage: e.stage, room: e.room, active: e.active, body: e.body, anim: e.anim, alpha: e.alpha, x: e.x, y: e.y, z: e.z, beta: e.beta });
       }
       return { ok: true, msg: { type, items } };
+    }
+    case "latch": {
+      if (!isInt(m.index, 0, 255) || !isInt(m.value, -32768, 32767) || m.value === 0) return fail("bad_message", "index (0 to 255) and a value other than 0 (16 bit) are needed", type);
+      return { ok: true, msg: { type, index: m.index, value: m.value } };
     }
     case "world_snapshot": {
       if (!Array.isArray(m.items) || m.items.length < 1 || m.items.length > 40) return fail("bad_message", "items must be a list of 1 to 40 entries", type);

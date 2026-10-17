@@ -44,7 +44,7 @@ Check that the server is up: open `http://<host>:8080/health` (or `https://<serv
 |---|---|---|
 | `PORT` | 8080 | port to listen on (Render sets it) |
 | `HOST` | 0.0.0.0 | address to listen on |
-| `ALLOWED_AREAS` | `0/0` | places a client may report, `stage/room` list; `0/0` is the attic. The first entry is the start area |
+| `ALLOWED_AREAS` | `*` | places a client may report: `*` for every place of the game, or a `stage/room` list (`0/0` is the attic). A new game starts in the attic either way |
 | `MAX_SPEED` | 20000 | fastest plausible movement in engine units per second (a sanity check, see below) |
 | `SILENT_AFTER_MS` | 5000 | a running player who sends no state for this long is reported as silent |
 | `IDLE_SESSION_MS` | 1800000 | waiting/ready sessions nobody touches are removed after this |
@@ -98,6 +98,7 @@ Text frames with one JSON object each, `{"type": ..., ...}`. After connecting th
 {"type":"select_start","mode":"save","saveId":"slot1-1a2b3c"}
 {"type":"upload_save","saveId":"slot1-1a2b3c","label":"Slot 1 - 10.10.2026 14:23","data":"<base64>"}
 {"type":"set_ready","ready":true}
+{"type":"latch","index":74,"value":1}   // either player: a game variable went from 0 to a value and stayed (a door unlocked); the other phone sets it, too, when it is 0 there
 {"type":"resume","name":"Raven-27","token":"<the token from joined>"}   // after a lost connection in a running game: take the place again (within 2 minutes)
 {"type":"state","seq":42,"t":123456,"hero":"carnby","stage":0,"room":0,"x":3231,"y":0,"z":-1548,"beta":512,"anim":254}
 {"type":"item_placed","obj":12,"stage":0,"room":0,"x":2000,"y":0,"z":3000,"alpha":0,"beta":512,"gamma":0}   // an item put down: lies in the shared world, can be taken again
@@ -184,8 +185,8 @@ behaviour on a real mobile network.
 * In the game, each phone moves its own hero as always; the other hero is the companion figure of the Together mode, put at the position the other phone reports and playing the animation it reports.
   The local hero's state goes out at most 15 times a second and only when it changes (a sign of life each second when standing still). The other hero is shown about 120 ms behind the newest state
   (blending between two buffered states), with a limited catch-up speed after a stall (see `RemoteSnapshots.kt` for how the buffer and the clocks work).
-* The creatures of the attic run on the host's phone (Carnby's); the guest's phone shows them as puppets and sends its blows and shots at them to the host. Each creature chases the nearer of the two heroes (it keeps its target unless the other is 30 % closer); a creature's sounds, music and camera pan, and the creature count, are sent to the guest too. If either hero dies, the game is over for both. The stairs are closed
-  ("The way down is closed in the co-op prototype."). A save point that is not in the attic ends the co-op game with a notice.
+* The creatures of the attic run on the host's phone (Carnby's); the guest's phone shows them as puppets and sends its blows and shots at them to the host. Each creature chases the nearer of the two heroes (it keeps its target unless the other is 30 % closer); a creature's sounds, music and camera pan, and the creature count, are sent to the guest too. If either hero dies, the game is over for both.
+* Beyond the attic: the stairs are open and a save point from any room may be shared. Each phone moves its own hero from room to room (the other hero is shown only while he is in the same room); the creatures of the other floors are left out (found by reading the life scripts: an object whose own scripts change the creature count), so the floors are peaceful. Items, furniture and the heroes' places are shared in every room. World variables (a door unlocked, a switch thrown) are shared as latches: a variable that went from 0 to a value and kept it for three seconds is sent, and the other phone sets it when it is 0 there; the variables the player's own script writes (his life, his controls) and variables that flip back and forth are never shared. Anything that depends on a creature (a door that opens when a monster dies) can stay shut in this mode.
 * Cleartext `ws://` is allowed in debug builds only (`app/src/debug/AndroidManifest.xml`); a release build accepts only `wss://`.
 
 ## Test with two Android devices
@@ -214,7 +215,7 @@ behaviour on a real mobile network.
 
 * Losing the connection: the game is interrupted and both phones keep it. A phone whose connection dropped tries every 2 seconds for 2 minutes to take its place again (`resume` with the token it got when it joined); the server replaces a half dead connection of the same player. When it is back, both phones restart their counters and send the world again (the host's snapshot, all props). Somebody who leaves on purpose cannot come back, and after 2 minutes without both players the game is closed. The chest and the wardrobe opening is shown to the other hero, without running their scripts on that phone.
 * Keeping the two worlds in step: every event (item taken or put down, furniture pushed, props) is sent at once, and in addition the host sends a snapshot of every object that was ever taken, put down or pushed every ten seconds (and resends all props). The guest lays it over its own world, except what the guest did itself in the last five seconds and the items in its bag (those it tells the host again). On the PC, with all item and furniture events dropped, the guest's world was equal to the host's after the next snapshot (an item put down, an item taken, a pushed wardrobe); a change made only on the guest was put right 5 to 10 seconds later.
-* Only the attic (`0/0`). Changing the room is not synchronized; the prototype does not support it.
+* Rooms: every room is allowed by default; the server only checks that a state is in range and that the hero does not move too fast inside one room (a change of room is not a jump).
 * The server relays; it does not simulate. Clients are trusted for their own hero's movement, within the plausibility checks above.
 * No reconnection: a lost connection in a running game interrupts it for good.
 * Sessions live in memory only.
@@ -222,4 +223,4 @@ behaviour on a real mobile network.
 
 ## Not implemented (out of scope for the prototype)
 
-The attic has no door that matters (the stairs are closed in co-op, the trapdoor lid is part of the host's props), so door states are left for the floors outside the attic. Puzzles, story events, joining a running game, lag compensation, accounts.
+Doors and puzzles are shared only through the latched variables, not by their own state; story events, joining a running game, lag compensation, accounts.

@@ -123,3 +123,9 @@ test("resume needs a name and a token", () => {
   assert.equal(parseClientMessage('{"type":"resume","name":"Raven-27","token":"short"}').ok, false);
   assert.equal(parseClientMessage('{"type":"resume","token":"123e4567-e89b-12d3-a456-426614174000"}').ok, false);
 });
+
+test("latch needs a variable number and a value other than 0", () => {
+  assert.equal(parseClientMessage('{"type":"latch","index":74,"value":1}').ok, true);
+  assert.equal(parseClientMessage('{"type":"latch","index":74,"value":0}').ok, false);
+  assert.equal(parseClientMessage('{"type":"latch","index":300,"value":1}').ok, false);
+});

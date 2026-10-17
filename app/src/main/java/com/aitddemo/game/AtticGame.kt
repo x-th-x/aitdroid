@@ -230,9 +230,9 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         while (true) {
             val m = remoteMoved.poll() ?: break
             val g = objects.getOrNull(m[0]) ?: continue
-            val a = g.actor ?: continue
             touched.add(m[0])
-            if (!g.w.active || g.w.room != room) continue
+            val a = g.actor
+            if (a == null || !g.w.active || g.w.room != room) { g.w.x = m[1]; g.w.y = m[2]; g.w.z = m[3]; continue } // not in this scene: it stands there when it comes in
             a.teleport(m[1], m[2], m[3], a.beta and 0x3FF)
             pushedDirty.remove(m[0])
         }
@@ -264,6 +264,44 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     /** Co-op, host: the view of the shared world for the guest, every ten seconds (entries: obj, stage, room, state, x, y, z, beta). */
     var coopSnapshot: ((List<IntArray>) -> Unit)? = null
+
+    /** Co-op: a variable that latched (went from 0 to a value and stayed) is told to the other phone: (variable, value). */
+    var coopLatch: ((Int, Int) -> Unit)? = null
+
+    /** Co-op: the creatures of the floors outside the attic; they are kept out of the game (scripts that send one in or give it a script later are ignored). */
+    private var hostile: Set<Int> = emptySet()
+
+    /** Variables that are the player's own state (the ones his script writes): never shared. */
+    private var personalVars: Set<Int> = emptySet()
+    private var latchBase = IntArray(0)
+    private var latchSeen = IntArray(0)
+    private var latchSince = IntArray(0)
+    private val remoteLatches = java.util.concurrent.ConcurrentLinkedQueue<IntArray>()
+
+    fun remoteLatch(index: Int, value: Int) { remoteLatches.add(intArrayOf(index, value)) }
+
+    /**
+     * World variables (a door unlocked, a switch thrown) are shared as latches: a variable that went from 0 to a value and kept it for three seconds is sent, and the other
+     * phone sets it when it is still 0 there. A variable that flips back and forth (a script that rewrites it every tick) never keeps a value and is not shared.
+     */
+    private fun syncLatches() {
+        while (true) {
+            val l = remoteLatches.poll() ?: break
+            if (l[0] in vm.vars.indices && l[0] !in personalVars && l[0] != CREATURE_COUNT_VAR && vm.vars[l[0]].toInt() == 0) {
+                vm.vars[l[0]] = l[1].toShort()
+                latchBase[l[0]] = l[1]
+            }
+        }
+        if (time % 30 != 0) return
+        for (i in vm.vars.indices) {
+            if (i in personalVars || i == CREATURE_COUNT_VAR) continue
+            val v = vm.vars[i].toInt()
+            if (v == latchBase[i]) { latchSeen[i] = 0; continue }
+            if (latchBase[i] != 0) { latchBase[i] = v; continue } // only a change from 0 is shared; the rest just follows
+            if (latchSeen[i] != v) { latchSeen[i] = v; latchSince[i] = time; continue }
+            if (time - latchSince[i] >= 180) { latchBase[i] = v; coopLatch?.invoke(i, v) }
+        }
+    }
 
     /** The connection came back (this phone's or the other one's): everything is sent again at the next tick. */
     fun coopResync() {
@@ -539,6 +577,18 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         coop = true
         coopHost = !emilyLocal
         for (i in VISUAL_PROPS) closedBody[i] = objects[i].w.body
+        // the creatures of the other floors are removed (the attic's two run on the host's phone); the variables the player's own script writes are his own and not shared
+        hostile = com.aitddemo.life.LifeScan.creatureObjects(vm.objects.toList(), { data.script(it) }, CREATURE_COUNT_VAR).filter { vm.objects[it].stage != 0 && it !in CREATURES }.toSet()
+        for (o in hostile) {
+            delete(o)
+            vm.objects[o].life = -1
+            vm.objects[o].stage = -1
+            vm.objects[o].room = -1
+        }
+        personalVars = com.aitddemo.life.LifeScan.varsWrittenFrom(vm.objects[playerIndex].life) { data.script(it) }
+        latchBase = IntArray(vm.vars.size) { vm.vars[it].toInt() }
+        latchSeen = IntArray(vm.vars.size)
+        latchSince = IntArray(vm.vars.size)
         if (!coopHost) { // the guest's phone does not run the creatures and the lid: it shows what the host's phone sends
             for (i in PUPPETS) {
                 val g = objects[i]
@@ -674,7 +724,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     /** One tick of the companion in the game: it follows the player (see [Partner.follow]). */
     private fun tickCompanion() {
-        if (coop) { applyRemoteTaken(); applyRemotePlaced(); syncFurniture(); syncWorld() }
+        if (coop) { applyRemoteTaken(); applyRemotePlaced(); syncFurniture(); syncWorld(); syncLatches() }
         remoteHero?.let { tickRemoteHero(it); return }
         val c = companion ?: return
         val a = c.actor ?: return
@@ -1170,7 +1220,6 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                 }
                 9 -> g.w.hardDec = zone.parameter
                 10 -> { // stage zone: the object's own floor script takes over
-                    if (coop) { if (g.w.index == playerIndex) coopStairsTick = time; return } // co-op prototype: the way out of the attic is closed
                     val life = g.w.floorLife
                     if (life == -1) return
                     g.w.life = life
@@ -1600,6 +1649,11 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     /** STAGE, ANGLE: the object's position, room or angles were set by a script. */
     override fun moved(obj: Int) {
+        if (coop && obj in hostile) { // a creature of another floor that a script sends into a room stays out
+            vm.objects[obj].stage = -1; vm.objects[obj].room = -1
+            objects[obj].let { if (it.w.active) deactivate(it) }
+            return
+        }
         val g = objects[obj]
         val w = g.w
         val inScene = wanted(w, viewList(), stage, room)
@@ -1681,7 +1735,9 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         if (vm.objects.getOrNull(item) != null && !inventory.contains(item)) takeItem(item)
     }
 
-    override fun lifeChanged(obj: Int, life: Int) {}
+    override fun lifeChanged(obj: Int, life: Int) {
+        if (coop && obj in hostile) vm.objects[obj].life = -1
+    }
 
     override fun cameraTarget(obj: Int) {
         forward(4, obj)

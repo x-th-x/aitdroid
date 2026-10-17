@@ -6,6 +6,8 @@ export interface Config {
   host: string;
   /** The places of the game that the prototype supports (stage/room). A client may only report states inside them. */
   areas: Area[];
+  /** Every place of the game is allowed (ALLOWED_AREAS=*); [areas] then only holds the place a new game starts in (the attic). */
+  allAreas: boolean;
   limits: Limits;
   /** The fastest a hero may move between two reported states, in engine units per second (a plausibility check, not an anti-cheat). */
   maxSpeed: number;
@@ -29,6 +31,7 @@ function intEnv(env: NodeJS.ProcessEnv, name: string, fallback: number): number 
 
 /** "0/0,1/6" -> [{stage:0,room:0},{stage:1,room:6}] */
 export function parseAreas(text: string): Area[] {
+  if (text.trim() === "*") return [{ stage: 0, room: 0 }];
   const out: Area[] = [];
   for (const part of text.split(",")) {
     const m = /^\s*(\d{1,2})\/(\d{1,3})\s*$/.exec(part);
@@ -45,7 +48,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     port: intEnv(env, "PORT", 8080),
     host: env.HOST && env.HOST !== "" ? env.HOST : "0.0.0.0",
     // the attic is stage 0, room 0 of the game's room list (AtticGame starts there)
-    areas: parseAreas(env.ALLOWED_AREAS && env.ALLOWED_AREAS !== "" ? env.ALLOWED_AREAS : "0/0"),
+    areas: parseAreas(env.ALLOWED_AREAS && env.ALLOWED_AREAS !== "" ? env.ALLOWED_AREAS : "*"),
+    allAreas: !env.ALLOWED_AREAS || env.ALLOWED_AREAS === "" || env.ALLOWED_AREAS.trim() === "*",
     limits: { ...DEFAULT_LIMITS, maxSaveBase64: intEnv(env, "MAX_SAVE_BASE64", DEFAULT_LIMITS.maxSaveBase64) },
     maxSpeed: intEnv(env, "MAX_SPEED", 20000),
     silentAfterMs: intEnv(env, "SILENT_AFTER_MS", 5000),
@@ -56,5 +60,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 }
 
 export function testConfig(over: Partial<Config> = {}): Config {
-  return { ...loadConfig({}), ...over };
+  // the tests of the rooms rule run in the attic only, unless a test says otherwise
+  return { ...loadConfig({}), allAreas: false, areas: [{ stage: 0, room: 0 }], ...over };
 }

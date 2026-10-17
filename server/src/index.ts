@@ -7,7 +7,7 @@ const server = createServer(cfg);
 server
   .listen()
   .then((port) => {
-    console.log("aitdroid co-op server listening on " + cfg.host + ":" + port + " (areas: " + cfg.areas.map((a) => a.stage + "/" + a.room).join(", ") + ")");
+    console.log("aitdroid co-op server listening on " + cfg.host + ":" + port + " (areas: " + (cfg.allAreas ? "all" : cfg.areas.map((a) => a.stage + "/" + a.room).join(", ")) + ")");
   })
   .catch((e) => {
     console.error("could not start:", e);

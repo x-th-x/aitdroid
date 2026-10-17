@@ -26,6 +26,8 @@ interface Player {
   lastSeq: number;
   lastStateAt: number;
   lastPos: { x: number; y: number; z: number } | null;
+  /** The place (stage/room) of the last state: the coordinates of another room are in another frame, so a change of room is no jump. */
+  lastArea: string | null;
   silent: boolean;
   /** The secret with which this player takes his place again after a lost connection; null once he left on purpose. */
   token: string | null;
@@ -111,6 +113,7 @@ export class SessionManager {
         return this.setReady(connId, msg.ready);
       case "state":
         return this.state(connId, msg);
+      case "latch":
       case "props":
       case "effect":
       case "world_snapshot":
@@ -180,6 +183,7 @@ export class SessionManager {
     player.connected = true;
     player.lastSeq = -1;
     player.lastPos = null;
+    player.lastArea = null;
     player.silent = false;
     player.lastStateAt = t;
     session.lastActivity = t;
@@ -291,11 +295,12 @@ export class SessionManager {
     if (session.status !== "running") return this.error(connId, "wrong_state", "the game is not running", "state");
     // the server decides who controls which hero: a client can only report its own
     if (m.hero !== player.hero) return this.error(connId, "wrong_hero", "you control " + player.hero + ", not " + m.hero, "state");
-    if (!this.cfg.areas.some((a) => a.stage === m.stage && a.room === m.room)) return this.error(connId, "area_not_allowed", "the room " + m.stage + "/" + m.room + " is not supported in the prototype", "state");
+    if (!this.cfg.allAreas && !this.cfg.areas.some((a) => a.stage === m.stage && a.room === m.room)) return this.error(connId, "area_not_allowed", "the room " + m.stage + "/" + m.room + " is not supported in the prototype", "state");
     // an old or repeated state is dropped without a fuss (the network may reorder)
     if (m.seq <= player.lastSeq) return [];
     const t = this.now();
-    if (player.lastPos) {
+    const area = m.stage + "/" + m.room;
+    if (player.lastPos && player.lastArea === area) {
       const dtMs = Math.max(1, t - player.lastStateAt);
       const dist = Math.hypot(m.x - player.lastPos.x, m.z - player.lastPos.z);
       // a generous allowance on top of the speed, so that a burst after a stall (several states at once) passes
@@ -303,6 +308,7 @@ export class SessionManager {
     }
     player.lastSeq = m.seq;
     player.lastPos = { x: m.x, y: m.y, z: m.z };
+    player.lastArea = area;
     player.lastStateAt = t;
     session.lastActivity = t;
     const out: Outbound[] = [];
@@ -335,7 +341,7 @@ export class SessionManager {
    * The host runs the creatures: the guest sends their states never, the host sends the guest's blows' effects never. Props, creature hits, hurts and deaths go to the
    * other player only, and only while the game runs.
    */
-  private worldRelay(connId: string, m: Extract<ClientMessage, { type: "props" | "effect" | "world_snapshot" | "world_var" | "creature_hit" | "hurt" | "hero_died" }>): Outbound[] {
+  private worldRelay(connId: string, m: Extract<ClientMessage, { type: "latch" | "props" | "effect" | "world_snapshot" | "world_var" | "creature_hit" | "hurt" | "hero_died" }>): Outbound[] {
     const found = this.find(connId);
     if (!found) return this.error(connId, "not_in_session", "you are not in a session", m.type);
     const { session, player } = found;
@@ -471,7 +477,7 @@ export class SessionManager {
   // ------------------------------------------------------------------------------------------ helpers
 
   private newPlayer(connId: string, slot: 1 | 2, t: number): Player {
-    return { connId, slot, hero: HEROES[slot - 1], connected: true, selection: null, ready: false, lastSeq: -1, lastStateAt: t, lastPos: null, silent: false, token: randomUUID() };
+    return { connId, slot, hero: HEROES[slot - 1], connected: true, selection: null, ready: false, lastSeq: -1, lastStateAt: t, lastPos: null, lastArea: null, silent: false, token: randomUUID() };
   }
 
   private find(connId: string): { session: Session; player: Player } | null {

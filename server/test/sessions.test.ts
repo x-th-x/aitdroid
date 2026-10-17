@@ -582,3 +582,30 @@ test("an interrupted game that nobody resumes is closed after the keep time", ()
   h.tick();
   assert.equal(h.m.sessionCount, 0);
 });
+
+test("a latched variable goes to the other player, from either side", () => {
+  const { h } = pair();
+  startNew(h);
+  h.send("B", { type: "latch", index: 74, value: 1 });
+  assert.equal(h.last("A", "latch")!.index, 74);
+  h.send("A", { type: "latch", index: 16, value: 5 });
+  assert.equal(h.last("B", "latch")!.value, 5);
+  assert.equal(h.errorCode(h.send("A", { type: "latch", index: 5, value: 1 }), "A") === undefined, true);
+});
+
+test("any room is allowed when the server is set to all areas, and a change of room is no jump", () => {
+  const h = new Harness({ allAreas: true });
+  h.connect("A"); h.connect("B");
+  h.send("A", { type: "create_session" });
+  const name = h.last("A", "joined")!.name;
+  h.send("B", { type: "join_session", name });
+  h.send("A", { type: "select_start", mode: "new" });
+  h.send("B", { type: "select_start", mode: "new" });
+  h.send("A", { type: "set_ready", ready: true });
+  h.send("B", { type: "set_ready", ready: true });
+  assert.equal(h.errorCode(h.send("A", { ...stateOf("carnby", 1, 100, 100), stage: 1, room: 6 }), "A"), undefined);
+  // the next room has other coordinates: far from the last place, and fine
+  assert.equal(h.errorCode(h.send("A", { ...stateOf("carnby", 2, 90000, 90000), stage: 1, room: 7 }), "A"), undefined);
+  // inside one room the speed rule still holds
+  assert.equal(h.errorCode(h.send("A", { ...stateOf("carnby", 3, -90000, -90000), stage: 1, room: 7 }), "A"), "implausible_state");
+});
