@@ -450,6 +450,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
             g.vm.cvars[AtticGame.CVAR_CHOOSE_PERSON] = if (emily) 1 else 0
             g.startCoop(emily)
             g.coopItemTaken = { item -> coop.sendItemTaken(item) }
+            g.coopItemPlaced = { obj, st, rm, x, y, z, al, be, ga -> coop.sendItemPlaced(obj, st, rm, x, y, z, al, be, ga) }
             g.coopObjectMoved = { obj, x, y, z -> coop.sendObjectMoved(obj, x, y, z) }
             var lastMs = System.nanoTime() / 1_000_000.0
             g.remoteHero = RemoteHeroSource {
@@ -467,8 +468,9 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     DisposableEffect(coop) {
         coop?.onRemoteState = { s -> remoteSnapshots.add(s.seq, s.senderTime, System.nanoTime() / 1_000_000.0, s.stage, s.room, s.x, s.y, s.z, s.beta, s.anim) }
         coop?.onItemTaken = { item -> game.remoteItemTaken(item) }
+        coop?.onItemPlaced = { m -> game.remoteItemPlaced(m) }
         coop?.onObjectMoved = { obj, x, y, z -> game.remoteObjectMoved(obj, x, y, z) }
-        onDispose { coop?.onRemoteState = null; coop?.onItemTaken = null; coop?.onObjectMoved = null }
+        onDispose { coop?.onRemoteState = null; coop?.onItemTaken = null; coop?.onItemPlaced = null; coop?.onObjectMoved = null }
     }
     // co-op supports the attic only: a save point from another room (the same on both phones) ends the co-op game with a notice
     LaunchedEffect(game) {

@@ -422,3 +422,22 @@ test("a pushed object is refused before the game runs", () => {
   const { h } = pair();
   assert.equal(h.errorCode(h.send("A", { type: "object_moved", obj: 4, x: 0, y: 0, z: 0 }), "A"), "wrong_state");
 });
+
+test("a placed item goes to the other player and can be taken (and relayed) again", () => {
+  const { h } = pair();
+  startNew(h);
+  h.send("A", { type: "item_taken", obj: 12 });
+  const out = h.send("A", { type: "item_placed", obj: 12, stage: 0, room: 0, x: 2000, y: 0, z: 3000, alpha: 0, beta: 512, gamma: 0 });
+  assert.equal(out.length, 1);
+  assert.equal(out[0].to, "B");
+  const r = h.last("B", "item_placed")!;
+  assert.deepEqual([r.hero, r.obj, r.x, r.z, r.beta], ["carnby", 12, 2000, 3000, 512]);
+  assert.equal(h.last("A", "item_placed"), undefined);
+  // after it was put down, taking it again is news again
+  assert.equal(h.send("B", { type: "item_taken", obj: 12 }).length, 1);
+});
+
+test("a placed item is refused before the game runs", () => {
+  const { h } = pair();
+  assert.equal(h.errorCode(h.send("A", { type: "item_placed", obj: 1, stage: 0, room: 0, x: 0, y: 0, z: 0, alpha: 0, beta: 0, gamma: 0 }), "A"), "wrong_state");
+});

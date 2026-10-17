@@ -108,6 +108,8 @@ export class SessionManager {
         return this.setReady(connId, msg.ready);
       case "state":
         return this.state(connId, msg);
+      case "item_placed":
+        return this.itemPlaced(connId, msg);
       case "object_moved":
         return this.objectMoved(connId, msg);
       case "item_taken":
@@ -283,6 +285,19 @@ export class SessionManager {
     const other = session.players[player.slot === 1 ? 1 : 0];
     if (!other?.connected) return [];
     return [{ to: other.connId, msg: { type: "item_taken", hero: player.hero, obj: m.obj } }];
+  }
+
+  /** An item was put down: it is in the world again (so taking it later is relayed again), and the other player is told where it lies. */
+  private itemPlaced(connId: string, m: Extract<ClientMessage, { type: "item_placed" }>): Outbound[] {
+    const found = this.find(connId);
+    if (!found) return this.error(connId, "not_in_session", "you are not in a session", "item_placed");
+    const { session, player } = found;
+    if (session.status !== "running") return this.error(connId, "wrong_state", "the game is not running", "item_placed");
+    session.takenItems.delete(m.obj);
+    session.lastActivity = this.now();
+    const other = session.players[player.slot === 1 ? 1 : 0];
+    if (!other?.connected) return [];
+    return [{ to: other.connId, msg: { type: "item_placed", hero: player.hero, obj: m.obj, stage: m.stage, room: m.room, x: m.x, y: m.y, z: m.z, alpha: m.alpha, beta: m.beta, gamma: m.gamma } }];
   }
 
   /** A piece of furniture was pushed: relayed to the other player as it is (the last push wins). */

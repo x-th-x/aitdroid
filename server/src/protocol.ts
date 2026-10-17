@@ -46,7 +46,10 @@ export interface ItemTaken { type: "item_taken"; obj: number }
 /** The sender pushed a piece of furniture (an object of the game) to a new place, in the engine's room-relative coordinates. The last push wins on both phones. */
 export interface ObjectMoved { type: "object_moved"; obj: number; x: number; y: number; z: number }
 
-export type ClientMessage = ObjectMoved | ListSessions | CreateSession | JoinSession | LeaveSession | SelectStart | UploadSave | SetReady | StateMsg | Ping | ItemTaken;
+/** The sender put an item down (dropped it, or a script placed it): it lies at this place in the shared world now and can be picked up by both. */
+export interface ItemPlaced { type: "item_placed"; obj: number; stage: number; room: number; x: number; y: number; z: number; alpha: number; beta: number; gamma: number }
+
+export type ClientMessage = ItemPlaced | ObjectMoved | ListSessions | CreateSession | JoinSession | LeaveSession | SelectStart | UploadSave | SetReady | StateMsg | Ping | ItemTaken;
 
 // ------------------------------------------------------------------------------------------------ server -> client
 
@@ -78,6 +81,7 @@ export type ServerMessage =
   | { type: "start"; sessionId: string; mode: StartMode; saveId: string | null; saveData: string | null; area: Area; serverTime: number }
   | { type: "remote_state"; seq: number; t: number; serverTime: number; hero: Hero; stage: number; room: number; x: number; y: number; z: number; beta: number; anim: number }
   | { type: "item_taken"; hero: Hero; obj: number }
+  | { type: "item_placed"; hero: Hero; obj: number; stage: number; room: number; x: number; y: number; z: number; alpha: number; beta: number; gamma: number }
   | { type: "object_moved"; hero: Hero; obj: number; x: number; y: number; z: number }
   | { type: "peer"; slot: 1 | 2; hero: Hero; state: "connected" | "disconnected" | "silent" | "active" }
   | { type: "closed"; reason: string }
@@ -188,6 +192,14 @@ export function parseClientMessage(raw: string, limits: Limits = DEFAULT_LIMITS)
     case "item_taken": {
       if (!isInt(m.obj, 0, 1000)) return fail("bad_message", "obj must be an integer from 0 to 1000", type);
       return { ok: true, msg: { type, obj: m.obj } };
+    }
+    case "item_placed": {
+      if (!isInt(m.obj, 0, 1000)) return fail("bad_message", "obj must be an integer from 0 to 1000", type);
+      if (!isInt(m.stage, 0, 20) || !isInt(m.room, 0, 100)) return fail("bad_message", "stage and room must be small non-negative integers", type);
+      const c = limits.maxCoord;
+      if (!isInt(m.x, -c, c) || !isInt(m.y, -c, c) || !isInt(m.z, -c, c)) return fail("bad_message", "x, y and z must be integers within +-" + c, type);
+      if (!isInt(m.alpha, 0, 1023) || !isInt(m.beta, 0, 1023) || !isInt(m.gamma, 0, 1023)) return fail("bad_message", "alpha, beta and gamma must be integers from 0 to 1023", type);
+      return { ok: true, msg: { type, obj: m.obj, stage: m.stage, room: m.room, x: m.x, y: m.y, z: m.z, alpha: m.alpha, beta: m.beta, gamma: m.gamma } };
     }
     case "object_moved": {
       if (!isInt(m.obj, 0, 1000)) return fail("bad_message", "obj must be an integer from 0 to 1000", type);

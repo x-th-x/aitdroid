@@ -48,6 +48,9 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
     /** Called on OkHttp's thread when the other player pushed a piece of furniture: (object, x, y, z). */
     @Volatile var onObjectMoved: ((Int, Int, Int, Int) -> Unit)? = null
 
+    /** Called on OkHttp's thread when the other player put an item down: (object, stage, room, x, y, z, alpha, beta, gamma). */
+    @Volatile var onItemPlaced: ((IntArray) -> Unit)? = null
+
     fun changeUrl(value: String) {
         url = value.trim()
         prefs?.edit()?.putString(KEY_URL, url)?.apply()
@@ -96,6 +99,10 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
     /** For the game: tells the other phone that an item was taken. */
     fun sendItemTaken(obj: Int): Boolean = client.send(CoopJson.itemTaken(obj))
 
+    /** For the game: tells the other phone that an item was put down at this place. */
+    fun sendItemPlaced(obj: Int, stage: Int, room: Int, x: Int, y: Int, z: Int, alpha: Int, beta: Int, gamma: Int): Boolean =
+        client.send(CoopJson.itemPlaced(obj, stage, room, x, y, z, alpha, beta, gamma))
+
     /** For the game: tells the other phone where a pushed piece of furniture is now. */
     fun sendObjectMoved(obj: Int, x: Int, y: Int, z: Int): Boolean = client.send(CoopJson.objectMoved(obj, x, y, z))
 
@@ -121,6 +128,10 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
     override fun onEvent(event: ServerEvent) {
         if (event is ServerEvent.Remote) {
             onRemoteState?.invoke(event.state)
+            return
+        }
+        if (event is ServerEvent.ItemPlaced) {
+            onItemPlaced?.invoke(intArrayOf(event.obj, event.stage, event.room, event.x, event.y, event.z, event.alpha, event.beta, event.gamma))
             return
         }
         if (event is ServerEvent.ObjectMoved) {
@@ -158,7 +169,7 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
             }
             is ServerEvent.Closed -> { session = null; me = null; start = null; error = "The session ended: ${event.reason}." }
             is ServerEvent.Error -> error = describe(event)
-            is ServerEvent.Remote, is ServerEvent.ItemTaken, is ServerEvent.ObjectMoved, is ServerEvent.Pong -> {}
+            is ServerEvent.Remote, is ServerEvent.ItemTaken, is ServerEvent.ItemPlaced, is ServerEvent.ObjectMoved, is ServerEvent.Pong -> {}
         }
     }
 

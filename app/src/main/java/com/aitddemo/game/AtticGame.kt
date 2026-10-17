@@ -242,6 +242,28 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         }
     }
 
+    /** Co-op: called when the local hero put an item down: (object, stage, room, x, y, z, alpha, beta, gamma). */
+    var coopItemPlaced: ((Int, Int, Int, Int, Int, Int, Int, Int, Int) -> Unit)? = null
+
+    private val remotePlaced = java.util.concurrent.ConcurrentLinkedQueue<IntArray>()
+
+    /** Co-op: the other player put [m] (object, stage, room, x, y, z, alpha, beta, gamma) down. Safe to call from any thread. */
+    fun remoteItemPlaced(m: IntArray) { remotePlaced.add(m) }
+
+    /** An item the other player put down lies in this world too, ready to be picked up (not offered at once, like an item that was just put down here). */
+    private fun applyRemotePlaced() {
+        while (true) {
+            val m = remotePlaced.poll() ?: return
+            val w = vm.objects.getOrNull(m[0]) ?: continue
+            if (m[0] in inventory) continue
+            w.stage = m[1]; w.room = m[2]; w.x = m[3]; w.y = m[4]; w.z = m[5]; w.alpha = m[6]; w.beta = m[7]; w.gamma = m[8]
+            w.foundFlag = (w.foundFlag and 0x7FFF) or 0x4000
+            w.flags = w.flags or AF_FOUNDABLE
+            w.trackNumber = time.coerceAtLeast(1)
+            moved(m[0])
+        }
+    }
+
     /** Items the other player took, waiting for the game thread (they arrive on the network thread). */
     private val remoteTaken = java.util.concurrent.ConcurrentLinkedQueue<Int>()
 
@@ -293,6 +315,26 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         if (pose.anim != a.currentAnim && data.companionAnim(pose.anim) != null) a.playAnim(pose.anim, 1, -1)
         a.update(partnerClock(time))
         putFigure(c.obj, pose.x, pose.y, pose.z, pose.beta)
+        stepAside(a)
+    }
+
+    /**
+     * Co-op: when the local hero overlaps the other hero (the other one walked into him, or both met at the same moment) he steps a little way off, away from the other
+     * one, unless a wall is there. Each phone moves only its own hero, and both do it, so the two part and nobody is stuck inside the other.
+     */
+    private fun stepAside(other: Actor) {
+        val me = player?.actor ?: return
+        val z = me.zv
+        val b = other.zv
+        if (!(z[0] < b[1] && b[0] < z[1] && z[2] < b[3] && b[2] < z[3] && z[4] < b[5] && b[4] < z[5])) return
+        var dx = (z[0] + z[1]) / 2 - (b[0] + b[1]) / 2
+        var dz = (z[4] + z[5]) / 2 - (b[4] + b[5]) / 2
+        val len = Math.hypot(dx.toDouble(), dz.toDouble())
+        if (len < 1.0) { dx = 1; dz = 0 } else { dx = (dx * 25 / len).toInt(); dz = (dz * 25 / len).toInt() }
+        if (dx == 0 && dz == 0) dx = if (z[0] >= b[0]) 1 else -1
+        val moved = intArrayOf(z[0] + dx, z[1] + dx, z[2], z[3], z[4] + dz, z[5] + dz)
+        if (roomView.hardcols.any { moved[0] < it.x2 && it.x1 < moved[1] && moved[2] < it.y2 && it.y1 < moved[3] && moved[4] < it.z2 && it.z1 < moved[5] }) return
+        me.pushBy(dx, dz)
     }
 
     /** The clock of the other hero: it runs a little slower than the game's, so its steps and its breathing do not stay in step with the player's. */
@@ -379,7 +421,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     /** One tick of the companion in the game: it follows the player (see [Partner.follow]). */
     private fun tickCompanion() {
-        if (coop) { applyRemoteTaken(); syncFurniture() }
+        if (coop) { applyRemoteTaken(); applyRemotePlaced(); syncFurniture() }
         remoteHero?.let { tickRemoteHero(it); return }
         val c = companion ?: return
         val a = c.actor ?: return
@@ -817,6 +859,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             boxes.add(Actor.Collider(a.zv, !foundable && g.w.flags and AF_MOVABLE != 0, !foundable))
             owners.add(g.w.index)
         }
+        // co-op: the other hero is a solid box for the local one (it is only a drawn figure, not an object of the game)
+        if (self === player && coop) companion?.takeIf { it.obj.w.active }?.actor?.let { boxes.add(Actor.Collider(it.zv, false, true)); owners.add(-1) }
         colliderIndexes = owners.toIntArray()
         return boxes
     }
@@ -1322,6 +1366,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         removeFromInventory(item)
         w.foundFlag = w.foundFlag or 0x4000
         moved(item)
+        if (coop) coopItemPlaced?.invoke(item, w.stage, w.room, w.x, w.y, w.z, w.alpha and 0x3FF, w.beta and 0x3FF, w.gamma and 0x3FF)
     }
 
     /** PUT_AT / DROP: an item is placed where another object is (it leaves the inventory and can be picked up again). */
@@ -1334,6 +1379,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         w.flags = w.flags or AF_FOUNDABLE
         w.trackNumber = time.coerceAtLeast(1) // do not offer it again at once
         moved(item)
+        if (coop) coopItemPlaced?.invoke(item, w.stage, w.room, w.x, w.y, w.z, w.alpha and 0x3FF, w.beta and 0x3FF, w.gamma and 0x3FF)
     }
 
     override fun drop(item: Int, from: Int) = putAt(item, from)

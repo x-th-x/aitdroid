@@ -80,3 +80,10 @@ test("object_moved needs an object number and whole coordinates", () => {
   assert.equal(parseClientMessage('{"type":"object_moved","obj":4,"x":1e9,"y":0,"z":0}').ok, false);
   assert.equal(parseClientMessage('{"type":"object_moved","obj":-1,"x":1,"y":0,"z":0}').ok, false);
 });
+
+test("item_placed needs a place and angles in range", () => {
+  const ok = '{"type":"item_placed","obj":3,"stage":0,"room":0,"x":1,"y":0,"z":2,"alpha":0,"beta":100,"gamma":0}';
+  assert.equal(parseClientMessage(ok).ok, true);
+  assert.equal(parseClientMessage(ok.replace('"beta":100', '"beta":2000')).ok, false);
+  assert.equal(parseClientMessage(ok.replace('"room":0,', '')).ok, false);
+});
