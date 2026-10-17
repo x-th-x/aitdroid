@@ -100,7 +100,7 @@ Text frames with one JSON object each, `{"type": ..., ...}`. After connecting th
 {"type":"upload_save","saveId":"slot1-1a2b3c","label":"Slot 1 - 10.10.2026 14:23","data":"<base64>"}
 {"type":"set_ready","ready":true}
 {"type":"latch","index":74,"value":2,"old":1}   // either player: a game variable changed from old to value and stayed (a door unlocked, a puzzle step done); the other phone sets it, too, when it still holds old there
-{"type":"sound","n":37}   // either player: a sound of his hero (a footstep, a find); the other phone plays it while it shows that hero in the same room
+{"type":"sound","n":37,"then":-1,"loop":false}   // either player: a sound of his hero or of something he is using (a footstep, a groan, a kick, a chest); the other phone plays it while it shows that hero in the same room; "then" is a sample that follows, "loop" repeats it
 {"type":"resume","name":"Raven-27","token":"<the token from joined>"}   // after a lost connection in a running game: take the place again (within 2 minutes)
 {"type":"state","seq":42,"t":123456,"hero":"carnby","stage":0,"room":0,"x":3231,"y":0,"z":-1548,"beta":512,"anim":254}
 {"type":"item_placed","obj":12,"stage":0,"room":0,"x":2000,"y":0,"z":3000,"alpha":0,"beta":512,"gamma":0}   // an item put down: lies in the shared world, can be taken again
@@ -123,7 +123,7 @@ Text frames with one JSON object each, `{"type": ..., ...}`. After connecting th
 ### Server → client
 
 ```json
-{"type":"welcome","protocol":1,"serverTime":1760000000000,"areas":[{"stage":0,"room":0}]}
+{"type":"welcome","protocol":2,"serverTime":1760000000000,"areas":[{"stage":0,"room":0}]}
 {"type":"sessions","sessions":[{"name":"Raven-27","status":"waiting","players":1}]}
 {"type":"joined","sessionId":"<uuid>","name":"Raven-27","slot":2,"hero":"emily","token":"<secret of this player>"}
 {"type":"session","sessionId":"<uuid>","name":"Raven-27","status":"ready","players":[{"slot":1,"hero":"carnby","connected":true,"selection":{"mode":"new"},"ready":false},

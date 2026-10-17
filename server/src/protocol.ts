@@ -1,7 +1,7 @@
 // The WebSocket protocol between the Android clients and the server: JSON text messages, each with a "type".
 // Everything a client sends is validated here before the session logic sees it (types, ranges, lengths); nothing is trusted.
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 export type Hero = "carnby" | "emily";
 export type StartMode = "new" | "save";
@@ -87,7 +87,7 @@ export interface WorldSnapshot { type: "world_snapshot"; items: WorldEntry[] }
  */
 export interface Latch { type: "latch"; index: number; value: number; old: number }
 /** A sound of the sender's hero (a footstep, a door, a find): the other phone plays it when it shows that hero in the same room. */
-export interface HeroSound { type: "sound"; n: number }
+export interface HeroSound { type: "sound"; n: number; then: number; loop: boolean }
 
 export type ClientMessage = HeroSound | Latch | Resume | WorldSnapshot | Effect | WorldVar | Props | CreatureHit | Hurt | HeroDied | ItemPlaced | ObjectMoved | ListSessions | CreateSession | JoinSession | LeaveSession | SelectStart | UploadSave | SetReady | StateMsg | Ping | ItemTaken;
 
@@ -123,7 +123,7 @@ export type ServerMessage =
   | { type: "item_taken"; hero: Hero; obj: number }
   | { type: "props"; hero: Hero; items: PropState[] }
   | { type: "latch"; index: number; value: number; old: number }
-  | { type: "sound"; n: number }
+  | { type: "sound"; n: number; then: number; loop: boolean }
   | { type: "world_snapshot"; items: WorldEntry[] }
   | { type: "effect"; kind: number; a: number; b: number }
   | { type: "world_var"; index: number; value: number }
@@ -274,7 +274,13 @@ export function parseClientMessage(raw: string, limits: Limits = DEFAULT_LIMITS)
     }
     case "sound": {
       if (!isInt(m.n, 0, 5000)) return fail("bad_message", "n must be an integer from 0 to 5000", type);
-      return { ok: true, msg: { type, n: m.n } };
+      let then = -1;
+      if (m.then !== undefined) {
+        if (!isInt(m.then, -1, 5000)) return fail("bad_message", "then must be an integer from -1 to 5000", type);
+        then = m.then;
+      }
+      if (m.loop !== undefined && typeof m.loop !== "boolean") return fail("bad_message", "loop must be true or false", type);
+      return { ok: true, msg: { type, n: m.n, then, loop: m.loop === true } };
     }
     case "world_snapshot": {
       if (!Array.isArray(m.items) || m.items.length < 1 || m.items.length > 40) return fail("bad_message", "items must be a list of 1 to 40 entries", type);

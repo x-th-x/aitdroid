@@ -70,7 +70,7 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
     @Volatile var onCreatureHit: ((Int, Int) -> Unit)? = null
     @Volatile var onHurt: ((Int, Int) -> Unit)? = null
     @Volatile var onLatch: ((Int, Int, Int) -> Unit)? = null
-    @Volatile var onSound: ((Int) -> Unit)? = null
+    @Volatile var onSound: ((Int, Int, Boolean) -> Unit)? = null
     @Volatile var onSnapshot: ((List<IntArray>) -> Unit)? = null
     @Volatile var onEffect: ((Int, Int, Int) -> Unit)? = null
     @Volatile var onWorldVar: ((Int, Int) -> Unit)? = null
@@ -131,7 +131,7 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
 
     fun sendProps(items: List<IntArray>): Boolean = client.send(CoopJson.props(items))
     fun sendLatch(index: Int, value: Int, old: Int): Boolean = client.send(CoopJson.latch(index, value, old))
-    fun sendSound(n: Int): Boolean = client.send(CoopJson.sound(n))
+    fun sendSound(n: Int, then: Int, loop: Boolean): Boolean = client.send(CoopJson.sound(n, then, loop))
     fun sendSnapshot(items: List<IntArray>): Boolean = client.send(CoopJson.worldSnapshot(items))
     fun sendEffect(kind: Int, a: Int, b: Int): Boolean = client.send(CoopJson.effect(kind, a, b))
     fun sendWorldVar(index: Int, value: Int): Boolean = client.send(CoopJson.worldVar(index, value))
@@ -210,7 +210,7 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
         when (event) {
             is ServerEvent.Props -> { onProps?.invoke(event.items); return }
             is ServerEvent.Latch -> { onLatch?.invoke(event.index, event.value, event.old); return }
-            is ServerEvent.HeroSound -> { onSound?.invoke(event.n); return }
+            is ServerEvent.HeroSound -> { onSound?.invoke(event.n, event.then, event.loop); return }
             is ServerEvent.WorldSnapshot -> { onSnapshot?.invoke(event.items); return }
             is ServerEvent.Effect -> { onEffect?.invoke(event.kind, event.a, event.b); return }
             is ServerEvent.WorldVar -> { onWorldVar?.invoke(event.index, event.value); return }
@@ -246,7 +246,7 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
 
     private fun apply(event: ServerEvent) {
         when (event) {
-            is ServerEvent.Welcome -> if (event.protocol != PROTOCOL) error = "The server speaks protocol ${event.protocol}; this app expects $PROTOCOL."
+            is ServerEvent.Welcome -> if (event.protocol != PROTOCOL) error = "The server is out of date (protocol ${event.protocol}, the app needs $PROTOCOL): please update the server."
             is ServerEvent.Sessions -> sessions = event.sessions
             is ServerEvent.Joined -> {
                 me = event
@@ -277,7 +277,9 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
         "save_missing" -> "That save point is not offered by the host."
         "not_host" -> "Only the host can offer a save point."
         "already_in_session" -> "You are already in a session."
-        "wrong_hero", "area_not_allowed", "implausible_state", "wrong_state" -> "The server refused an update: ${e.message}."
+        "area_not_allowed" -> "This server does not allow this part of the game (it only allows the attic). The server owner has to set ALLOWED_AREAS to * and update the server."
+        "unknown_type" -> "The server is older than the app and does not know a message (${e.message}). Please update the server."
+        "wrong_hero", "implausible_state", "wrong_state" -> "The server refused an update: ${e.message}."
         else -> e.message
     }
 
@@ -294,7 +296,7 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
 
         const val URL_VERSION = 1
         const val KEY_URL_VERSION = "coop_url_version"
-        const val PROTOCOL = 1
+        const val PROTOCOL = 2
         /** How long a phone keeps trying to take its place again (the server keeps the game for the same time). */
         const val RECONNECT_WINDOW_MS = 120_000L
         const val KEY_URL = "coop_url"

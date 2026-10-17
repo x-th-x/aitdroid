@@ -267,8 +267,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     /** Co-op: a variable that changed and stayed is told to the other phone: (variable, new value, the value it replaces). */
     var coopLatch: ((Int, Int, Int) -> Unit)? = null
-    /** Co-op: a sound of the local hero (a footstep, a find) for the other phone. */
-    var coopSound: ((Int) -> Unit)? = null
+    /** Co-op: a sound of the local hero, or of something he is using, for the other phone: (sample, the sample that follows or -1, repeated). */
+    var coopSound: ((Int, Int, Boolean) -> Unit)? = null
 
     /** The other player is gone for good: the other hero is the game's own companion again (he follows the player), the attic's creature puppets are gone, nothing is sent. */
     var coopSolo = false
@@ -282,8 +282,10 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         companion?.let { it.obj.w.active = true; it.obj.w.stage = stage; it.obj.w.room = room }
         placeCompanion()
     }
-    private val remoteSounds = java.util.concurrent.ConcurrentLinkedQueue<Int>()
-    fun remoteSound(n: Int) { remoteSounds.add(n) }
+    private val remoteSounds = java.util.concurrent.ConcurrentLinkedQueue<IntArray>()
+    fun remoteSound(n: Int, then: Int, loop: Boolean) { remoteSounds.add(intArrayOf(n, then, if (loop) 1 else 0)) }
+    /** When the local hero last touched, hit or was touched by each object (a chest he opens, a door he pushes): what that object sounds meanwhile is his sound. */
+    private val lastInteract = HashMap<Int, Int>()
     private var soundWindow = 0
     private var soundCount = 0
 
@@ -391,17 +393,33 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     /** What a creature's or the lid's script does that the guest should see and hear goes over to his phone (the host only). */
     /** A sound of the local hero's script goes to the other phone (it plays it while it shows this hero in the same room). At most twelve a second. */
-    private fun forwardHeroSound(n: Int) {
-        if (!coop || coopSolo || scriptOwner != playerIndex) return
+    private fun forwardHeroSound(n: Int, then: Int = -1, loop: Boolean = false) {
+        if (!coop || coopSolo || scriptOwner in PUPPETS) return // the creatures' sounds are the host's (forward)
+        // the hero's own script, or an object he is using right now (a chest he opens, a thing he kicks)
+        if (scriptOwner != playerIndex && time - (lastInteract[scriptOwner] ?: -100000) > 180) return
+        heroSoundNow(n, then, loop)
+    }
+
+    private fun heroSoundNow(n: Int, then: Int = -1, loop: Boolean = false) {
+        if (!coop || coopSolo) return
         if (time - soundWindow >= 60) { soundWindow = time; soundCount = 0 }
-        if (++soundCount > 12) return
-        coopSound?.invoke(n)
+        if (++soundCount > 24) return
+        coopSound?.invoke(n, then, loop)
+    }
+
+    private fun noteInteractions() {
+        for (g in objects) {
+            val w = g.w
+            if (g === player || !w.active) continue
+            if (w.colBy == playerIndex || w.hitBy == playerIndex || w.col == playerIndex || w.hit == playerIndex) lastInteract[w.index] = time
+        }
     }
 
     private fun playRemoteSounds() {
         while (true) {
-            val n = remoteSounds.poll() ?: break
-            if (companion?.obj?.w?.active == true) ui.playSample(n)
+            val s = remoteSounds.poll() ?: break
+            if (companion?.obj?.w?.active != true) continue // he is not in this room: out of earshot
+            if (s[1] >= 0) ui.playSampleThen(s[0], s[1], s[2] != 0) else ui.playSample(s[0])
         }
     }
 
@@ -649,7 +667,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         val c = companion ?: return
         val a = c.actor ?: return
         val pose = source.pose()
-        if (pose == null || pose.stage != stage || pose.room != room) { c.obj.w.active = false; return }
+        // nothing heard from him for three seconds (his phone stalled, or the server refused his states): the figure is not left standing at the last place
+        if (pose == null || pose.stage != stage || pose.room != room || pose.silentMs > 3000.0) { c.obj.w.active = false; return }
         c.obj.w.active = true
         a.hardcols = roomView.hardcols
         c.obj.w.stage = stage; c.obj.w.room = room
@@ -762,7 +781,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     /** One tick of the companion in the game: it follows the player (see [Partner.follow]). */
     private fun tickCompanion() {
-        if (coop && !coopSolo) { applyRemoteTaken(); applyRemotePlaced(); syncFurniture(); syncWorld(); syncLatches(); playRemoteSounds() }
+        if (coop && !coopSolo) { applyRemoteTaken(); applyRemotePlaced(); syncFurniture(); syncWorld(); syncLatches(); noteInteractions(); playRemoteSounds() }
         remoteHero?.let { tickRemoteHero(it); return }
         val c = companion ?: return
         val a = c.actor ?: return
@@ -1821,11 +1840,13 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     override fun sampleThen(first: Int, then: Int) {
         ui.playSampleThen(first, then, false)
         forward(1, first, then)
+        forwardHeroSound(first, then, false)
     }
 
     override fun sampleThenRepeat(first: Int, then: Int) {
         ui.playSampleThen(first, then, true)
         forward(6, first, then)
+        forwardHeroSound(first, then, true)
     }
 
     override fun stopSample() {
@@ -2082,6 +2103,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         }
         if (stop || g.flightTicks >= 60) {
             ui.playSample(vm.cvars[CVAR_SAMPLE_CHOC].toInt())
+            if (g.flightThrower == playerIndex) heroSoundNow(vm.cvars[CVAR_SAMPLE_CHOC].toInt()) // the impact of what the local hero threw
             landThrown(g, g.w.x, g.w.z)
             g.flightTicks = -1
             return

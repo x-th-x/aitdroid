@@ -613,9 +613,10 @@ test("any room is allowed when the server is set to all areas, and a change of r
 test("a hero's sound goes to the other player, both ways", () => {
   const { h } = pair();
   startNew(h);
-  h.send("A", { type: "sound", n: 37 });
+  h.send("A", { type: "sound", n: 37, then: 12, loop: true });
   assert.equal(h.last("B", "sound")!.n, 37);
-  h.send("B", { type: "sound", n: 5 });
+  assert.equal(h.last("B", "sound")!.then, 12);
+  h.send("B", { type: "sound", n: 5, then: -1, loop: false });
   assert.equal(h.last("A", "sound")!.n, 5);
   assert.equal(h.last("A", "sound")!.n === 37, false);
 });

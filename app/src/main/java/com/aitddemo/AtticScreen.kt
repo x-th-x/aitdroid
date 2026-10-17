@@ -455,7 +455,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
             g.coopCreatureHit = { obj, force -> coop.sendCreatureHit(obj, force) }
             g.coopHurt = { force, by -> coop.sendHurt(force, by) }
             g.coopLatch = { index, value, old -> coop.sendLatch(index, value, old) }
-            g.coopSound = { n -> coop.sendSound(n) }
+            g.coopSound = { n, then, loop -> coop.sendSound(n, then, loop) }
             g.coopSnapshot = { items -> coop.sendSnapshot(items) }
             g.coopEffect = { kind, a, b -> coop.sendEffect(kind, a, b) }
             g.coopVar = { index, value -> coop.sendWorldVar(index, value) }
@@ -468,7 +468,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
                 if (target == null) null else {
                     val shown = remoteSmoother.step(target, (now - lastMs).coerceIn(1.0, 100.0))
                     lastMs = now
-                    RemotePose(shown.stage, shown.room, shown.x, shown.y, shown.z, shown.beta, shown.anim)
+                    RemotePose(shown.stage, shown.room, shown.x, shown.y, shown.z, shown.beta, shown.anim, shown.silentMs)
                 }
             }
         }
@@ -482,7 +482,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
         coop?.onHurt = { force, by -> game.remoteHurt(force, by) }
         coop?.onHeroDied = { game.remoteHeroDied() }
         coop?.onLatch = { index, value, old -> game.remoteLatch(index, value, old) }
-        coop?.onSound = { n -> game.remoteSound(n) }
+        coop?.onSound = { n, then, loop -> game.remoteSound(n, then, loop) }
         coop?.onSnapshot = { items -> game.remoteSnapshot(items) }
         coop?.onEffect = { kind, a, b -> game.remoteEffect(kind, a, b) }
         coop?.onWorldVar = { index, value -> game.remoteVar(index, value) }

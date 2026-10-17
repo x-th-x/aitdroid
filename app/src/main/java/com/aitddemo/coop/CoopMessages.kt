@@ -57,7 +57,7 @@ sealed class ServerEvent {
     class Props(val items: List<IntArray>) : ServerEvent()
     /** Entries: obj, stage, room, state (0 in place, 1 put down, 2 taken), x, y, z, beta. */
     class Latch(val index: Int, val value: Int, val old: Int) : ServerEvent()
-    class HeroSound(val n: Int) : ServerEvent()
+    class HeroSound(val n: Int, val then: Int, val loop: Boolean) : ServerEvent()
     class WorldSnapshot(val items: List<IntArray>) : ServerEvent()
     class Effect(val kind: Int, val a: Int, val b: Int) : ServerEvent()
     class WorldVar(val index: Int, val value: Int) : ServerEvent()
@@ -99,7 +99,7 @@ object CoopJson {
                     })
                 }
                 "latch" -> ServerEvent.Latch(o.getInt("index"), o.getInt("value"), o.optInt("old", 0))
-                "sound" -> ServerEvent.HeroSound(o.getInt("n"))
+                "sound" -> ServerEvent.HeroSound(o.getInt("n"), o.optInt("then", -1), o.optBoolean("loop", false))
                 "world_snapshot" -> {
                     val a = o.getJSONArray("items")
                     ServerEvent.WorldSnapshot((0 until a.length()).map { a.getJSONObject(it) }.map { e ->
@@ -157,7 +157,7 @@ object CoopJson {
         })
     }
     fun latch(index: Int, value: Int, old: Int) = msg("latch") { put("index", index); put("value", value); put("old", old) }
-    fun sound(n: Int) = msg("sound") { put("n", n) }
+    fun sound(n: Int, then: Int, loop: Boolean) = msg("sound") { put("n", n); put("then", then); put("loop", loop) }
     fun worldSnapshot(items: List<IntArray>) = msg("world_snapshot") {
         put("items", org.json.JSONArray().also { arr ->
             for (e in items) arr.put(JSONObject().put("obj", e[0]).put("stage", e[1]).put("room", e[2]).put("state", e[3]).put("x", e[4]).put("y", e[5]).put("z", e[6]).put("beta", e[7]))
