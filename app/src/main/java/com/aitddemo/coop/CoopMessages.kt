@@ -49,7 +49,7 @@ class RemoteState(
 sealed class ServerEvent {
     class Welcome(val protocol: Int, val serverTime: Long) : ServerEvent()
     class Sessions(val sessions: List<ListedSession>) : ServerEvent()
-    class Joined(val sessionId: String, val name: String, val slot: Int, val hero: Hero) : ServerEvent()
+    class Joined(val sessionId: String, val name: String, val slot: Int, val hero: Hero, val token: String) : ServerEvent()
     class Session(val info: SessionInfo) : ServerEvent()
     class Start(val info: StartInfo) : ServerEvent()
     class Remote(val state: RemoteState) : ServerEvent()
@@ -81,7 +81,7 @@ object CoopJson {
                     val a = o.getJSONArray("sessions")
                     ServerEvent.Sessions((0 until a.length()).map { a.getJSONObject(it) }.map { ListedSession(it.getString("name"), it.getString("status"), it.getInt("players")) })
                 }
-                "joined" -> ServerEvent.Joined(o.getString("sessionId"), o.getString("name"), o.getInt("slot"), Hero.of(o.getString("hero")) ?: return null)
+                "joined" -> ServerEvent.Joined(o.getString("sessionId"), o.getString("name"), o.getInt("slot"), Hero.of(o.getString("hero")) ?: return null, o.optString("token", ""))
                 "session" -> ServerEvent.Session(sessionInfo(o) ?: return null)
                 "start" -> {
                     val area = o.getJSONObject("area")
@@ -141,6 +141,7 @@ object CoopJson {
     fun createSession() = msg("create_session")
     fun joinSession(name: String) = msg("join_session") { put("name", name) }
     fun leaveSession() = msg("leave_session")
+    fun resume(name: String, token: String) = msg("resume") { put("name", name); put("token", token) }
     fun selectNew() = msg("select_start") { put("mode", "new") }
     fun selectSave(saveId: String) = msg("select_start") { put("mode", "save"); put("saveId", saveId) }
     fun uploadSave(saveId: String, label: String, base64: String) = msg("upload_save") { put("saveId", saveId); put("label", label); put("data", base64) }

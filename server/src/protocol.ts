@@ -19,6 +19,8 @@ export interface ListSessions { type: "list_sessions" }
 export interface CreateSession { type: "create_session" }
 export interface JoinSession { type: "join_session"; name: string }
 export interface LeaveSession { type: "leave_session" }
+/** A player whose connection dropped in a running game takes his place again with the token he got when he joined (within two minutes). */
+export interface Resume { type: "resume"; name: string; token: string }
 export interface SelectStart { type: "select_start"; mode: StartMode; saveId?: string }
 export interface UploadSave { type: "upload_save"; saveId: string; label?: string; data: string }
 export interface SetReady { type: "set_ready"; ready: boolean }
@@ -79,7 +81,7 @@ export const SHARED_VARS: readonly number[] = [20];
 export interface WorldEntry { obj: number; stage: number; room: number; state: number; x: number; y: number; z: number; beta: number }
 export interface WorldSnapshot { type: "world_snapshot"; items: WorldEntry[] }
 
-export type ClientMessage = WorldSnapshot | Effect | WorldVar | Props | CreatureHit | Hurt | HeroDied | ItemPlaced | ObjectMoved | ListSessions | CreateSession | JoinSession | LeaveSession | SelectStart | UploadSave | SetReady | StateMsg | Ping | ItemTaken;
+export type ClientMessage = Resume | WorldSnapshot | Effect | WorldVar | Props | CreatureHit | Hurt | HeroDied | ItemPlaced | ObjectMoved | ListSessions | CreateSession | JoinSession | LeaveSession | SelectStart | UploadSave | SetReady | StateMsg | Ping | ItemTaken;
 
 // ------------------------------------------------------------------------------------------------ server -> client
 
@@ -106,7 +108,7 @@ export interface SessionInfo {
 export type ServerMessage =
   | { type: "welcome"; protocol: number; serverTime: number; areas: Area[] }
   | { type: "sessions"; sessions: { name: string; status: SessionStatus; players: number }[] }
-  | { type: "joined"; sessionId: string; name: string; slot: 1 | 2; hero: Hero }
+  | { type: "joined"; sessionId: string; name: string; slot: 1 | 2; hero: Hero; token: string }
   | ({ type: "session" } & SessionInfo)
   | { type: "start"; sessionId: string; mode: StartMode; saveId: string | null; saveData: string | null; area: Area; serverTime: number }
   | { type: "remote_state"; seq: number; t: number; serverTime: number; hero: Hero; stage: number; room: number; x: number; y: number; z: number; beta: number; anim: number }
@@ -141,7 +143,8 @@ export type ErrorCode =
   | "implausible_state"
   | "save_too_large"
   | "save_missing"
-  | "selection_mismatch";
+  | "selection_mismatch"
+  | "bad_token";
 
 // ------------------------------------------------------------------------------------------------ validation
 
@@ -190,6 +193,11 @@ export function parseClientMessage(raw: string, limits: Limits = DEFAULT_LIMITS)
     case "join_session": {
       if (typeof m.name !== "string" || m.name.trim().length < 1 || m.name.length > limits.maxNameLength) return fail("bad_message", "name must be a string of 1 to " + limits.maxNameLength + " characters", type);
       return { ok: true, msg: { type, name: m.name } };
+    }
+    case "resume": {
+      if (typeof m.name !== "string" || m.name.trim().length < 1 || m.name.length > limits.maxNameLength) return fail("bad_message", "name must be a string of 1 to " + limits.maxNameLength + " characters", type);
+      if (typeof m.token !== "string" || !/^[A-Za-z0-9-]{8,64}$/.test(m.token)) return fail("bad_message", "token is missing or malformed", type);
+      return { ok: true, msg: { type, name: m.name, token: m.token } };
     }
     case "select_start": {
       if (m.mode !== "new" && m.mode !== "save") return fail("bad_message", "mode must be \"new\" or \"save\"", type);

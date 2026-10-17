@@ -342,11 +342,11 @@ test("a disconnect while the game runs interrupts it; nobody can take the place"
   assert.equal(h.m.sessionCount, 0);
 });
 
-test("an interrupted session ends when both are gone, and by time", () => {
+test("an interrupted session ends when both left on purpose, and by time", () => {
   const { h } = pair();
   startNew(h);
-  h.drop("A");
-  h.drop("B");
+  h.send("A", { type: "leave_session" });
+  h.send("B", { type: "leave_session" });
   assert.equal(h.m.sessionCount, 0);
   const g = pair(new Harness());
   startNew(g.h);
@@ -508,4 +508,77 @@ test("the host's world snapshot goes to the guest; the guest may not send one", 
   h.send("A", { type: "world_snapshot", items: [entry] });
   assert.equal(h.last("B", "world_snapshot")!.items[0].obj, 12);
   assert.equal(h.errorCode(h.send("B", { type: "world_snapshot", items: [entry] }), "B"), "not_host");
+});
+
+function tokenOf(h: Harness, id: string): string {
+  return h.last(id, "joined")!.token;
+}
+
+test("a player whose connection dropped takes his place again with his token", () => {
+  const { h, name } = pair();
+  startNew(h);
+  const tokenB = tokenOf(h, "B");
+  h.drop("B");
+  assert.equal(h.last("A", "session")!.status, "interrupted");
+  h.connect("B2");
+  h.send("B2", { type: "resume", name, token: tokenB });
+  assert.equal(h.last("B2", "joined")!.hero, "emily");
+  assert.equal(h.last("A", "peer")!.state, "connected");
+  assert.equal(h.last("A", "session")!.status, "running");
+  // the state of the returned hero goes to the other phone again, with a fresh counter
+  h.send("B2", stateOf("emily", 1, 3000, -1000));
+  assert.equal(h.last("A", "remote_state")!.seq, 1);
+});
+
+test("a wrong token, a player who left on purpose, and a waiting session cannot resume", () => {
+  const { h, name } = pair();
+  startNew(h);
+  const tokenB = tokenOf(h, "B");
+  h.drop("B");
+  h.connect("X");
+  assert.equal(h.errorCode(h.send("X", { type: "resume", name, token: "not-the-token-0000" }), "X"), "bad_token");
+  h.send("A", { type: "leave_session" });
+  h.connect("B3");
+  assert.notEqual(h.errorCode(h.send("B3", { type: "resume", name, token: tokenB }), "B3"), undefined);
+});
+
+test("both players may drop at the same time and come back", () => {
+  const { h, name } = pair();
+  startNew(h);
+  const tokenA = tokenOf(h, "A");
+  const tokenB = tokenOf(h, "B");
+  h.drop("A");
+  h.drop("B");
+  assert.equal(h.m.sessionCount, 1);
+  h.connect("A2");
+  h.connect("B2");
+  h.send("A2", { type: "resume", name, token: tokenA });
+  assert.equal(h.last("A2", "session")!.status, "interrupted");
+  h.send("B2", { type: "resume", name, token: tokenB });
+  assert.equal(h.last("B2", "session")!.status, "running");
+  assert.equal(h.last("A2", "session")!.status, "running");
+});
+
+test("a new connection replaces a half dead one of the same player", () => {
+  const { h, name } = pair();
+  startNew(h);
+  const tokenB = tokenOf(h, "B");
+  h.connect("B2");
+  h.send("B2", { type: "resume", name, token: tokenB });
+  assert.equal(h.last("B", "closed")!.reason.includes("again"), true);
+  h.send("B2", stateOf("emily", 1, 3000, -1000));
+  assert.equal(h.last("A", "remote_state")!.hero, "emily");
+  // the old connection closing later changes nothing
+  h.drop("B");
+  assert.equal(h.last("A", "session")!.status, "running");
+});
+
+test("an interrupted game that nobody resumes is closed after the keep time", () => {
+  const { h } = pair();
+  startNew(h);
+  h.drop("A");
+  h.drop("B");
+  h.time += 3 * 60 * 1000;
+  h.tick();
+  assert.equal(h.m.sessionCount, 0);
 });

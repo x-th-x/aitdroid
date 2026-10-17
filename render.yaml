@@ -1,7 +1,7 @@
 # Render blueprint for the co-op server (see server/README.md). Not deployed yet: this file only describes the service.
 services:
   - type: web
-    name: aitdroid-coop-server
+    name: aitdroid-coop
     runtime: node
     # the Android project stays untouched; the server lives in its own directory
     rootDir: server

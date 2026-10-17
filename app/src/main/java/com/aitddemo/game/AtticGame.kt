@@ -265,6 +265,17 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     /** Co-op, host: the view of the shared world for the guest, every ten seconds (entries: obj, stage, room, state, x, y, z, beta). */
     var coopSnapshot: ((List<IntArray>) -> Unit)? = null
 
+    /** The connection came back (this phone's or the other one's): everything is sent again at the next tick. */
+    fun coopResync() {
+        snapshotAt = time - 600
+        propSent.clear()
+        sentVar20 = Int.MIN_VALUE
+    }
+
+    /** The chest and the wardrobe: the other hero opening them is shown (body and animation), without running their scripts here (they would offer the other hero's find to this one). */
+    private val closedBody = HashMap<Int, Int>()
+    private val mirrorLife = HashMap<Int, Int>()
+
     /** Every object that was taken, put down or pushed in this game (by either hero), and when this phone last did it itself. */
     private val touched = LinkedHashSet<Int>()
     private val recentLocal = HashMap<Int, Int>()
@@ -399,7 +410,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         if (time - propsAt >= 6) {
             propsAt = time
             val changed = ArrayList<IntArray>()
-            for (i in (if (coopHost) HOST_PROPS else SHARED_PROPS)) {
+            for (i in (if (coopHost) HOST_PROPS else SHARED_PROPS) + VISUAL_PROPS) {
                 val e = propEntry(i)
                 if (propSent[i]?.let { sameProp(i, it, e) } == true) continue
                 propSent[i] = e
@@ -453,6 +464,19 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             else if ((g.asset?.number ?: -1) != w.body) body(i)
             g.actor?.let { a -> if (e[5] != a.currentAnim && data.anim(e[5]) != null) a.playAnim(e[5], 1, -1) }
             puppetTarget[i] = e
+        } else if (i in VISUAL_PROPS) {
+            if (!w.active) return
+            val closed = closedBody[i] ?: w.body
+            if (e[4] != closed) { // opened over there: shown here, with the script of this object asleep until it closes again
+                if (i !in mirrorLife) { mirrorLife[i] = w.life; w.life = -1 }
+                if (e[4] != w.body) { w.body = e[4]; body(i) }
+                g.actor?.let { a -> if (e[5] >= 0 && e[5] != a.currentAnim && data.anim(e[5]) != null) a.playAnim(e[5], 0, -1) }
+            } else if (i in mirrorLife) { // closed again
+                if (w.body != closed) { w.body = closed; body(i) }
+                g.actor?.playAnim(-1, 0, -1)
+                w.life = mirrorLife.remove(i)!!
+            }
+            propSent[i] = propEntry(i)
         } else if (i in SHARED_PROPS) {
             if (!w.active) return
             if (e[4] != w.body) { w.body = e[4]; body(i); if (w.life != -1) w.life = -1 } // a window that broke stays broken (its script has done its work)
@@ -514,6 +538,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     fun startCoop(emilyLocal: Boolean) {
         coop = true
         coopHost = !emilyLocal
+        for (i in VISUAL_PROPS) closedBody[i] = objects[i].w.body
         if (!coopHost) { // the guest's phone does not run the creatures and the lid: it shows what the host's phone sends
             for (i in PUPPETS) {
                 val g = objects[i]
@@ -2129,6 +2154,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         val CREATURES = intArrayOf(9, 21)
         val PUPPETS = intArrayOf(8, 9, 21)
         val SHARED_PROPS = intArrayOf(6, 7)
+        /** The chest and the wardrobe: opening them is shown to the other hero. */
+        val VISUAL_PROPS = intArrayOf(0, 4)
         val HOST_PROPS = intArrayOf(8, 9, 21, 6, 7)
         const val ATTIC_CREATURE_A = 21
         const val ATTIC_CREATURE_B = 9

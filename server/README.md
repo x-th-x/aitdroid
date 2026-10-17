@@ -98,6 +98,7 @@ Text frames with one JSON object each, `{"type": ..., ...}`. After connecting th
 {"type":"select_start","mode":"save","saveId":"slot1-1a2b3c"}
 {"type":"upload_save","saveId":"slot1-1a2b3c","label":"Slot 1 - 10.10.2026 14:23","data":"<base64>"}
 {"type":"set_ready","ready":true}
+{"type":"resume","name":"Raven-27","token":"<the token from joined>"}   // after a lost connection in a running game: take the place again (within 2 minutes)
 {"type":"state","seq":42,"t":123456,"hero":"carnby","stage":0,"room":0,"x":3231,"y":0,"z":-1548,"beta":512,"anim":254}
 {"type":"item_placed","obj":12,"stage":0,"room":0,"x":2000,"y":0,"z":3000,"alpha":0,"beta":512,"gamma":0}   // an item put down: lies in the shared world, can be taken again
 {"type":"props","items":[{"obj":21,"stage":0,"room":0,"active":true,"body":24,"anim":23,"alpha":0,"x":100,"y":0,"z":200,"beta":300}]}   // states of objects 21, 9 and 8 (creatures, trapdoor lid) only from the host; objects 6 and 7 (horse, window) from either player; at most 8 entries
@@ -121,7 +122,7 @@ Text frames with one JSON object each, `{"type": ..., ...}`. After connecting th
 ```json
 {"type":"welcome","protocol":1,"serverTime":1760000000000,"areas":[{"stage":0,"room":0}]}
 {"type":"sessions","sessions":[{"name":"Raven-27","status":"waiting","players":1}]}
-{"type":"joined","sessionId":"<uuid>","name":"Raven-27","slot":2,"hero":"emily"}
+{"type":"joined","sessionId":"<uuid>","name":"Raven-27","slot":2,"hero":"emily","token":"<secret of this player>"}
 {"type":"session","sessionId":"<uuid>","name":"Raven-27","status":"ready","players":[{"slot":1,"hero":"carnby","connected":true,"selection":{"mode":"new"},"ready":false},
   {"slot":2,"hero":"emily","connected":true,"selection":null,"ready":false}],"selectionsMatch":false,"mismatch":null,"offeredSave":null}
 {"type":"start","sessionId":"<uuid>","mode":"new","saveId":null,"saveData":null,"area":{"stage":0,"room":0},"serverTime":1760000000000}
@@ -167,7 +168,7 @@ behaviour on a real mobile network.
 ## Deploy to Render (not done yet)
 
 1. Push the branch with `server/` and `render.yaml` to GitHub (a private repo works: install Render's GitHub app for it).
-2. In the Render dashboard: **New → Blueprint**, pick the repository and the branch; Render reads `render.yaml` (a web service `aitdroid-coop-server`, root directory `server`,
+2. In the Render dashboard: **New → Blueprint**, pick the repository and the branch; Render reads `render.yaml` (a web service `aitdroid-coop`, root directory `server`,
    build `npm ci && npm run build`, start `npm start`, health check `/health`). Alternatively create a **Web Service** by hand with the same values.
 3. Wait for the first deploy to finish; the URL is `https://aitdroid-coop.onrender.com` (or the name Render gives).
 4. Check `https://<service>.onrender.com/health` in a browser.
@@ -211,6 +212,7 @@ behaviour on a real mobile network.
 
 ## Known limitations
 
+* Losing the connection: the game is interrupted and both phones keep it. A phone whose connection dropped tries every 2 seconds for 2 minutes to take its place again (`resume` with the token it got when it joined); the server replaces a half dead connection of the same player. When it is back, both phones restart their counters and send the world again (the host's snapshot, all props). Somebody who leaves on purpose cannot come back, and after 2 minutes without both players the game is closed. The chest and the wardrobe opening is shown to the other hero, without running their scripts on that phone.
 * Keeping the two worlds in step: every event (item taken or put down, furniture pushed, props) is sent at once, and in addition the host sends a snapshot of every object that was ever taken, put down or pushed every ten seconds (and resends all props). The guest lays it over its own world, except what the guest did itself in the last five seconds and the items in its bag (those it tells the host again). On the PC, with all item and furniture events dropped, the guest's world was equal to the host's after the next snapshot (an item put down, an item taken, a pushed wardrobe); a change made only on the guest was put right 5 to 10 seconds later.
 * Only the attic (`0/0`). Changing the room is not synchronized; the prototype does not support it.
 * The server relays; it does not simulate. Clients are trusted for their own hero's movement, within the plausibility checks above.
@@ -220,4 +222,4 @@ behaviour on a real mobile network.
 
 ## Not implemented (out of scope for the prototype)
 
-The attic has no door that matters (the stairs are closed in co-op, the trapdoor lid is part of the host's props), so door states are left for the floors outside the attic. Opening a chest or wardrobe is not shown to the other player (only what comes out of it); puzzles, story events, joining a running game, lag compensation, accounts.
+The attic has no door that matters (the stairs are closed in co-op, the trapdoor lid is part of the host's props), so door states are left for the floors outside the attic. Puzzles, story events, joining a running game, lag compensation, accounts.

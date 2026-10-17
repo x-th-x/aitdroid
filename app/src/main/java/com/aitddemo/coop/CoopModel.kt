@@ -35,6 +35,17 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
     /** Set when the server has confirmed the shared start: both clients got the same content. */
     var start by mutableStateOf<StartInfo?>(null)
         private set
+    /** The connection was lost in a running game and the phone is trying to take its place again (for two minutes). */
+    var reconnecting by mutableStateOf(false)
+        private set
+    /** Counts up whenever the two phones have to send the world to each other again: after this phone resumed, and after the other one came back. */
+    var resyncTick by mutableStateOf(0)
+        private set
+    private var token: String? = null
+    private var resuming = false
+    private var reconnectDeadline = 0L
+    private val retry = Runnable { attemptReconnect() }
+
     /** A note about the other player ("Emily disconnected"), or null. */
     var peerNote by mutableStateOf<String?>(null)
         private set
@@ -80,6 +91,10 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
     }
 
     fun disconnect() {
+        main.removeCallbacks(retry)
+        reconnecting = false
+        resuming = false
+        token = null
         client.close()
         reset()
         connection = Connection.DISCONNECTED
@@ -94,6 +109,7 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
     fun setReady(ready: Boolean) = send(CoopJson.setReady(ready))
 
     fun leave() {
+        token = null // leaving on purpose: no way back into this game
         send(CoopJson.leaveSession())
         session = null
         me = null
@@ -139,7 +155,43 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
     // ------------------------------------------------------------------------------------------ what the server tells (OkHttp's thread)
 
     override fun onOpen() {
-        main.post { connection = Connection.CONNECTED; error = null }
+        main.post {
+            connection = Connection.CONNECTED
+            error = null
+            val mine = me
+            val secret = token
+            if (reconnecting && mine != null && secret != null) { // the connection is back: take the place again
+                resuming = true
+                client.send(CoopJson.resume(mine.name, secret))
+            }
+        }
+    }
+
+    private fun beginReconnect() {
+        if (!reconnecting) {
+            reconnecting = true
+            reconnectDeadline = android.os.SystemClock.elapsedRealtime() + RECONNECT_WINDOW_MS
+        }
+        if (android.os.SystemClock.elapsedRealtime() > reconnectDeadline) { giveUp(); return }
+        connection = Connection.CONNECTING
+        main.removeCallbacks(retry)
+        main.postDelayed(retry, 2000)
+    }
+
+    private fun attemptReconnect() {
+        if (!reconnecting) return
+        if (!client.connect(url)) giveUp()
+    }
+
+    private fun giveUp() {
+        main.removeCallbacks(retry)
+        reconnecting = false
+        resuming = false
+        token = null
+        client.close()
+        reset()
+        connection = Connection.DISCONNECTED
+        error = "The connection was lost and the game could not be resumed."
     }
 
     override fun onEvent(event: ServerEvent) {
@@ -174,7 +226,8 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
 
     override fun onClosed(reason: String) {
         main.post {
-            // a running game does not come back by itself: the screens show why it ended
+            // a running game tries to take its place again for two minutes; otherwise the screens show why it ended
+            if (start != null && token != null && me != null) { beginReconnect(); return@post }
             reset()
             connection = Connection.DISCONNECTED
             error = "The connection ended: $reason"
@@ -185,17 +238,22 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
         when (event) {
             is ServerEvent.Welcome -> if (event.protocol != PROTOCOL) error = "The server speaks protocol ${event.protocol}; this app expects $PROTOCOL."
             is ServerEvent.Sessions -> sessions = event.sessions
-            is ServerEvent.Joined -> { me = event; error = null }
+            is ServerEvent.Joined -> {
+                me = event
+                error = null
+                if (event.token.isNotEmpty()) token = event.token
+                if (resuming) { resuming = false; reconnecting = false; main.removeCallbacks(retry); resyncTick++ }
+            }
             is ServerEvent.Session -> session = event.info
             is ServerEvent.Start -> { start = event.info; peerNote = null; error = null }
             is ServerEvent.Peer -> peerNote = when (event.state) {
-                "connected" -> "${event.hero.title} joined."
+                "connected" -> { if (start != null) resyncTick++; "${event.hero.title} joined." }
                 "disconnected" -> "${event.hero.title} disconnected."
                 "silent" -> "${event.hero.title} is not sending updates."
                 else -> null
             }
-            is ServerEvent.Closed -> { session = null; me = null; start = null; error = "The session ended: ${event.reason}." }
-            is ServerEvent.Error -> error = describe(event)
+            is ServerEvent.Closed -> { reconnecting = false; token = null; main.removeCallbacks(retry); session = null; me = null; start = null; error = "The session ended: ${event.reason}." }
+            is ServerEvent.Error -> if (resuming) giveUp() else error = describe(event)
             is ServerEvent.Remote, is ServerEvent.ItemTaken, is ServerEvent.ItemPlaced, is ServerEvent.ObjectMoved, is ServerEvent.Props, is ServerEvent.WorldSnapshot, is ServerEvent.Effect, is ServerEvent.WorldVar, is ServerEvent.CreatureHit, is ServerEvent.Hurt, is ServerEvent.HeroDied, is ServerEvent.Pong -> {}
         }
     }
@@ -226,6 +284,8 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
         const val URL_VERSION = 1
         const val KEY_URL_VERSION = "coop_url_version"
         const val PROTOCOL = 1
+        /** How long a phone keeps trying to take its place again (the server keeps the game for the same time). */
+        const val RECONNECT_WINDOW_MS = 120_000L
         const val KEY_URL = "coop_url"
         // the address of the production service on Render (a phone that has saved another address in the lobby keeps that one)
         const val DEFAULT_URL = "wss://aitdroid-coop.onrender.com"

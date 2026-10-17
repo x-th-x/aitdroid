@@ -27,6 +27,8 @@ interface Player {
   lastStateAt: number;
   lastPos: { x: number; y: number; z: number } | null;
   silent: boolean;
+  /** The secret with which this player takes his place again after a lost connection; null once he left on purpose. */
+  token: string | null;
 }
 
 interface SavedGame {
@@ -97,6 +99,8 @@ export class SessionManager {
         return this.create(connId);
       case "join_session":
         return this.join(connId, msg.name);
+      case "resume":
+        return this.resume(connId, msg.name, msg.token);
       case "leave_session":
         return this.byConn.has(connId) ? this.leave(connId, "left") : this.error(connId, "not_in_session", "you are not in a session", msg.type);
       case "select_start":
@@ -134,7 +138,7 @@ export class SessionManager {
     this.sessions.set(session.id, session);
     this.byName.set(nameKey(name), session.id);
     this.byConn.set(connId, { sessionId: session.id, slot: 1 });
-    return [{ to: connId, msg: { type: "joined", sessionId: session.id, name, slot: 1, hero: "carnby" } }, ...this.broadcast(session)];
+    return [{ to: connId, msg: { type: "joined", sessionId: session.id, name, slot: 1, hero: "carnby", token: session.players[0]!.token! } }, ...this.broadcast(session)];
   }
 
   private join(connId: string, name: string): Outbound[] {
@@ -151,10 +155,46 @@ export class SessionManager {
     this.byConn.set(connId, { sessionId: session.id, slot: 2 });
     const host = session.players[0]!;
     return [
-      { to: connId, msg: { type: "joined", sessionId: session.id, name: session.name, slot: 2, hero: "emily" } },
+      { to: connId, msg: { type: "joined", sessionId: session.id, name: session.name, slot: 2, hero: "emily", token: session.players[1]!.token! } },
       { to: host.connId, msg: { type: "peer", slot: 2, hero: "emily", state: "connected" } },
       ...this.broadcast(session),
     ];
+  }
+
+  /** A player whose connection dropped takes his place again: the game goes on where it was (both phones kept it), and each phone sends the world again. */
+  private resume(connId: string, name: string, token: string): Outbound[] {
+    if (this.byConn.has(connId)) return this.error(connId, "already_in_session", "you are already in a session; leave it first", "resume");
+    const id = this.byName.get(nameKey(name));
+    const session = id ? this.sessions.get(id) : undefined;
+    if (!session) return this.error(connId, "unknown_session", "that game is not there any more", "resume");
+    const player = session.players.find((p) => p !== null && p.token !== null && p.token === token) ?? null;
+    if (!player || (session.status !== "interrupted" && session.status !== "running")) return this.error(connId, "bad_token", "that game cannot be resumed", "resume");
+    const out: Outbound[] = [];
+    if (player.connected && player.connId !== connId) {
+      // the old connection is half dead (the network changed): the new one replaces it
+      out.push({ to: player.connId, msg: { type: "closed", reason: "you connected again from somewhere else" } });
+      this.byConn.delete(player.connId);
+    }
+    const t = this.now();
+    player.connId = connId;
+    player.connected = true;
+    player.lastSeq = -1;
+    player.lastPos = null;
+    player.silent = false;
+    player.lastStateAt = t;
+    session.lastActivity = t;
+    this.byConn.set(connId, { sessionId: session.id, slot: player.slot });
+    const other = session.players[player.slot === 1 ? 1 : 0];
+    if (other?.connected) {
+      session.status = "running";
+      session.interruptedAt = null;
+      out.push({ to: other.connId, msg: { type: "peer", slot: player.slot, hero: player.hero, state: "connected" } });
+    } else {
+      session.status = "interrupted"; // the other one is still away
+      session.interruptedAt = t;
+    }
+    out.push({ to: connId, msg: { type: "joined", sessionId: session.id, name: session.name, slot: player.slot, hero: player.hero, token } });
+    return [...out, ...this.broadcast(session)];
   }
 
   // ------------------------------------------------------------------------------------------ the start agreement
@@ -376,8 +416,9 @@ export class SessionManager {
       return [...out, ...this.broadcast(session)];
     }
     if (session.status === "running") {
-      // a running game cannot get a new player and is not restored: it is interrupted, and the other player is told
+      // the game is interrupted and the other player is told; the one who left can take his place again for a while (see resume), unless he left on purpose
       player.connected = false;
+      if (how === "left") player.token = null;
       session.status = "interrupted";
       session.interruptedAt = t;
       if (other?.connected) {
@@ -386,9 +427,11 @@ export class SessionManager {
       }
       return out;
     }
-    // interrupted: the session ends when nobody is left in it
+    // interrupted: when both are away, the session waits for them to come back (until it expires), unless somebody left on purpose and nobody is there any more
     player.connected = false;
-    if (!other || !other.connected) this.remove(session);
+    if (how === "left") player.token = null;
+    session.interruptedAt = t;
+    if (!other || (!other.connected && (other.token === null || player.token === null))) this.remove(session);
     return out;
   }
 
@@ -428,7 +471,7 @@ export class SessionManager {
   // ------------------------------------------------------------------------------------------ helpers
 
   private newPlayer(connId: string, slot: 1 | 2, t: number): Player {
-    return { connId, slot, hero: HEROES[slot - 1], connected: true, selection: null, ready: false, lastSeq: -1, lastStateAt: t, lastPos: null, silent: false };
+    return { connId, slot, hero: HEROES[slot - 1], connected: true, selection: null, ready: false, lastSeq: -1, lastStateAt: t, lastPos: null, silent: false, token: randomUUID() };
   }
 
   private find(connId: string): { session: Session; player: Player } | null {

@@ -117,3 +117,9 @@ test("world_snapshot is checked", () => {
   assert.equal(parseClientMessage('{"type":"world_snapshot","items":[' + e.replace('"state":1', '"state":3') + ']}').ok, false);
   assert.equal(parseClientMessage('{"type":"world_snapshot","items":[' + Array(41).fill(e).join(",") + ']}').ok, false);
 });
+
+test("resume needs a name and a token", () => {
+  assert.equal(parseClientMessage('{"type":"resume","name":"Raven-27","token":"123e4567-e89b-12d3-a456-426614174000"}').ok, true);
+  assert.equal(parseClientMessage('{"type":"resume","name":"Raven-27","token":"short"}').ok, false);
+  assert.equal(parseClientMessage('{"type":"resume","token":"123e4567-e89b-12d3-a456-426614174000"}').ok, false);
+});
