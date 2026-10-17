@@ -49,7 +49,21 @@ export interface ObjectMoved { type: "object_moved"; obj: number; x: number; y: 
 /** The sender put an item down (dropped it, or a script placed it): it lies at this place in the shared world now and can be picked up by both. */
 export interface ItemPlaced { type: "item_placed"; obj: number; stage: number; room: number; x: number; y: number; z: number; alpha: number; beta: number; gamma: number }
 
-export type ClientMessage = ItemPlaced | ObjectMoved | ListSessions | CreateSession | JoinSession | LeaveSession | SelectStart | UploadSave | SetReady | StateMsg | Ping | ItemTaken;
+/** The state of one prop or creature of the attic (a game object): where it is, which body and animation it shows. */
+export interface PropState { obj: number; stage: number; room: number; active: boolean; body: number; anim: number; alpha: number; x: number; y: number; z: number; beta: number }
+/** The creatures and the trapdoor lid are run by the host's phone only; the guest's phone shows them as puppets of what the host sends. The horse and the window may change on either phone. */
+export const HOST_OBJECTS: readonly number[] = [8, 9, 21];
+/** The creatures of the attic: the guest's blows and shots at them go to the host. */
+export const CREATURE_OBJECTS: readonly number[] = [9, 21];
+export interface Props { type: "props"; items: PropState[] }
+/** The guest hit a creature (which the host runs): with this force. */
+export interface CreatureHit { type: "creature_hit"; obj: number; force: number }
+/** The host's creature hit the guest's hero. */
+export interface Hurt { type: "hurt"; force: number; by: number }
+/** The sender's hero died: the game is over for both. */
+export interface HeroDied { type: "hero_died" }
+
+export type ClientMessage = Props | CreatureHit | Hurt | HeroDied | ItemPlaced | ObjectMoved | ListSessions | CreateSession | JoinSession | LeaveSession | SelectStart | UploadSave | SetReady | StateMsg | Ping | ItemTaken;
 
 // ------------------------------------------------------------------------------------------------ server -> client
 
@@ -81,6 +95,10 @@ export type ServerMessage =
   | { type: "start"; sessionId: string; mode: StartMode; saveId: string | null; saveData: string | null; area: Area; serverTime: number }
   | { type: "remote_state"; seq: number; t: number; serverTime: number; hero: Hero; stage: number; room: number; x: number; y: number; z: number; beta: number; anim: number }
   | { type: "item_taken"; hero: Hero; obj: number }
+  | { type: "props"; hero: Hero; items: PropState[] }
+  | { type: "creature_hit"; obj: number; force: number }
+  | { type: "hurt"; force: number; by: number }
+  | { type: "hero_died"; hero: Hero }
   | { type: "item_placed"; hero: Hero; obj: number; stage: number; room: number; x: number; y: number; z: number; alpha: number; beta: number; gamma: number }
   | { type: "object_moved"; hero: Hero; obj: number; x: number; y: number; z: number }
   | { type: "peer"; slot: 1 | 2; hero: Hero; state: "connected" | "disconnected" | "silent" | "active" }
@@ -193,6 +211,31 @@ export function parseClientMessage(raw: string, limits: Limits = DEFAULT_LIMITS)
       if (!isInt(m.obj, 0, 1000)) return fail("bad_message", "obj must be an integer from 0 to 1000", type);
       return { ok: true, msg: { type, obj: m.obj } };
     }
+    case "props": {
+      if (!Array.isArray(m.items) || m.items.length < 1 || m.items.length > 8) return fail("bad_message", "items must be a list of 1 to 8 entries", type);
+      const c = limits.maxCoord;
+      const items: PropState[] = [];
+      for (const raw of m.items) {
+        if (typeof raw !== "object" || raw === null) return fail("bad_message", "an entry of items is not an object", type);
+        const e = raw as Record<string, unknown>;
+        if (!isInt(e.obj, 0, 1000) || !isInt(e.stage, -1, 20) || !isInt(e.room, -1, 100) || typeof e.active !== "boolean") return fail("bad_message", "obj, stage, room or active of an entry is wrong", type);
+        if (!isInt(e.body, -1, 2000) || !isInt(e.anim, -1, 2000) || !isInt(e.alpha, 0, 1023) || !isInt(e.beta, 0, 1023)) return fail("bad_message", "body, anim, alpha or beta of an entry is wrong", type);
+        if (!isInt(e.x, -c, c) || !isInt(e.y, -c, c) || !isInt(e.z, -c, c)) return fail("bad_message", "x, y and z of an entry must be integers within +-" + c, type);
+        items.push({ obj: e.obj, stage: e.stage, room: e.room, active: e.active, body: e.body, anim: e.anim, alpha: e.alpha, x: e.x, y: e.y, z: e.z, beta: e.beta });
+      }
+      return { ok: true, msg: { type, items } };
+    }
+    case "creature_hit": {
+      if (!isInt(m.obj, 0, 1000) || !CREATURE_OBJECTS.includes(m.obj)) return fail("bad_message", "obj is not a creature", type);
+      if (!isInt(m.force, 0, 200)) return fail("bad_message", "force must be an integer from 0 to 200", type);
+      return { ok: true, msg: { type, obj: m.obj, force: m.force } };
+    }
+    case "hurt": {
+      if (!isInt(m.force, 0, 200) || !isInt(m.by, 0, 1000)) return fail("bad_message", "force (0 to 200) and by (an object) are needed", type);
+      return { ok: true, msg: { type, force: m.force, by: m.by } };
+    }
+    case "hero_died":
+      return { ok: true, msg: { type } };
     case "item_placed": {
       if (!isInt(m.obj, 0, 1000)) return fail("bad_message", "obj must be an integer from 0 to 1000", type);
       if (!isInt(m.stage, 0, 20) || !isInt(m.room, 0, 100)) return fail("bad_message", "stage and room must be small non-negative integers", type);

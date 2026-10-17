@@ -53,6 +53,11 @@ sealed class ServerEvent {
     class Session(val info: SessionInfo) : ServerEvent()
     class Start(val info: StartInfo) : ServerEvent()
     class Remote(val state: RemoteState) : ServerEvent()
+    /** Entries: obj, stage, room, active (0/1), body, anim, alpha, x, y, z, beta. */
+    class Props(val items: List<IntArray>) : ServerEvent()
+    class CreatureHit(val obj: Int, val force: Int) : ServerEvent()
+    class Hurt(val force: Int, val by: Int) : ServerEvent()
+    class HeroDied(val hero: Hero) : ServerEvent()
     class ItemPlaced(val obj: Int, val stage: Int, val room: Int, val x: Int, val y: Int, val z: Int, val alpha: Int, val beta: Int, val gamma: Int) : ServerEvent()
     class ObjectMoved(val obj: Int, val x: Int, val y: Int, val z: Int) : ServerEvent()
     class ItemTaken(val hero: Hero, val obj: Int) : ServerEvent()
@@ -81,6 +86,15 @@ object CoopJson {
                 "remote_state" -> ServerEvent.Remote(
                     RemoteState(o.getInt("seq"), o.getDouble("t"), o.getLong("serverTime"), Hero.of(o.getString("hero")) ?: return null, o.getInt("stage"), o.getInt("room"), o.getInt("x"), o.getInt("y"), o.getInt("z"), o.getInt("beta"), o.getInt("anim")),
                 )
+                "props" -> {
+                    val a = o.getJSONArray("items")
+                    ServerEvent.Props((0 until a.length()).map { a.getJSONObject(it) }.map { e ->
+                        intArrayOf(e.getInt("obj"), e.getInt("stage"), e.getInt("room"), if (e.getBoolean("active")) 1 else 0, e.getInt("body"), e.getInt("anim"), e.getInt("alpha"), e.getInt("x"), e.getInt("y"), e.getInt("z"), e.getInt("beta"))
+                    })
+                }
+                "creature_hit" -> ServerEvent.CreatureHit(o.getInt("obj"), o.getInt("force"))
+                "hurt" -> ServerEvent.Hurt(o.getInt("force"), o.getInt("by"))
+                "hero_died" -> ServerEvent.HeroDied(Hero.of(o.getString("hero")) ?: return null)
                 "item_placed" -> ServerEvent.ItemPlaced(o.getInt("obj"), o.getInt("stage"), o.getInt("room"), o.getInt("x"), o.getInt("y"), o.getInt("z"), o.getInt("alpha"), o.getInt("beta"), o.getInt("gamma"))
                 "object_moved" -> ServerEvent.ObjectMoved(o.getInt("obj"), o.getInt("x"), o.getInt("y"), o.getInt("z"))
                 "item_taken" -> ServerEvent.ItemTaken(Hero.of(o.getString("hero")) ?: return null, o.getInt("obj"))
@@ -120,6 +134,14 @@ object CoopJson {
     fun uploadSave(saveId: String, label: String, base64: String) = msg("upload_save") { put("saveId", saveId); put("label", label); put("data", base64) }
     fun setReady(ready: Boolean) = msg("set_ready") { put("ready", ready) }
     fun ping(t: Double) = msg("ping") { put("t", t) }
+    fun props(items: List<IntArray>) = msg("props") {
+        put("items", org.json.JSONArray().also { arr ->
+            for (e in items) arr.put(JSONObject().put("obj", e[0]).put("stage", e[1]).put("room", e[2]).put("active", e[3] != 0).put("body", e[4]).put("anim", e[5]).put("alpha", e[6]).put("x", e[7]).put("y", e[8]).put("z", e[9]).put("beta", e[10]))
+        })
+    }
+    fun creatureHit(obj: Int, force: Int) = msg("creature_hit") { put("obj", obj); put("force", force) }
+    fun hurt(force: Int, by: Int) = msg("hurt") { put("force", force); put("by", by) }
+    fun heroDied() = msg("hero_died")
     fun itemPlaced(obj: Int, stage: Int, room: Int, x: Int, y: Int, z: Int, alpha: Int, beta: Int, gamma: Int) = msg("item_placed") {
         put("obj", obj); put("stage", stage); put("room", room); put("x", x); put("y", y); put("z", z); put("alpha", alpha); put("beta", beta); put("gamma", gamma)
     }

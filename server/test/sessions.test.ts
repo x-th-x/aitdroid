@@ -441,3 +441,51 @@ test("a placed item is refused before the game runs", () => {
   const { h } = pair();
   assert.equal(h.errorCode(h.send("A", { type: "item_placed", obj: 1, stage: 0, room: 0, x: 0, y: 0, z: 0, alpha: 0, beta: 0, gamma: 0 }), "A"), "wrong_state");
 });
+
+const prop = (obj: number) => ({ obj, stage: 0, room: 0, active: true, body: 24, anim: 23, alpha: 0, x: 100, y: 0, z: 200, beta: 300 });
+
+test("the host's creatures and the trapdoor go to the guest; the guest may not send them", () => {
+  const { h } = pair();
+  startNew(h);
+  const out = h.send("A", { type: "props", items: [prop(21), prop(9), prop(8)] });
+  assert.equal(out.length, 1);
+  assert.equal(out[0].to, "B");
+  assert.equal(h.last("B", "props")!.items.length, 3);
+  assert.equal(h.errorCode(h.send("B", { type: "props", items: [prop(21)] }), "B"), "not_host");
+});
+
+test("the horse and the window may change on either phone", () => {
+  const { h } = pair();
+  startNew(h);
+  h.send("B", { type: "props", items: [prop(6), prop(7)] });
+  assert.equal(h.last("A", "props")!.items[0].obj, 6);
+  h.send("A", { type: "props", items: [prop(7)] });
+  assert.equal(h.last("B", "props")!.items[0].obj, 7);
+});
+
+test("a creature hit goes from the guest to the host only; a hurt from the host to the guest only", () => {
+  const { h } = pair();
+  startNew(h);
+  const out = h.send("B", { type: "creature_hit", obj: 21, force: 5 });
+  assert.equal(out[0].to, "A");
+  assert.equal(h.last("A", "creature_hit")!.force, 5);
+  assert.equal(h.errorCode(h.send("A", { type: "creature_hit", obj: 21, force: 5 }), "A"), "wrong_hero");
+  h.send("A", { type: "hurt", force: 1, by: 21 });
+  assert.equal(h.last("B", "hurt")!.by, 21);
+  assert.equal(h.errorCode(h.send("B", { type: "hurt", force: 1, by: 21 }), "B"), "not_host");
+});
+
+test("a death is told to the other player, from either side", () => {
+  const { h } = pair();
+  startNew(h);
+  h.send("B", { type: "hero_died" });
+  assert.equal(h.last("A", "hero_died")!.hero, "emily");
+  h.send("A", { type: "hero_died" });
+  assert.equal(h.last("B", "hero_died")!.hero, "carnby");
+});
+
+test("props, creature hits, hurts and deaths are refused before the game runs", () => {
+  const { h } = pair();
+  assert.equal(h.errorCode(h.send("A", { type: "props", items: [prop(6)] }), "A"), "wrong_state");
+  assert.equal(h.errorCode(h.send("A", { type: "hero_died" }), "A"), "wrong_state");
+});

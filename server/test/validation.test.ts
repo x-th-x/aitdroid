@@ -87,3 +87,17 @@ test("item_placed needs a place and angles in range", () => {
   assert.equal(parseClientMessage(ok.replace('"beta":100', '"beta":2000')).ok, false);
   assert.equal(parseClientMessage(ok.replace('"room":0,', '')).ok, false);
 });
+
+test("props, creature_hit, hurt and hero_died are checked", () => {
+  const item = '{"obj":9,"stage":0,"room":0,"active":true,"body":24,"anim":23,"alpha":0,"x":1,"y":0,"z":2,"beta":5}';
+  assert.equal(parseClientMessage('{"type":"props","items":[' + item + ']}').ok, true);
+  assert.equal(parseClientMessage('{"type":"props","items":[]}').ok, false);
+  assert.equal(parseClientMessage('{"type":"props","items":[' + Array(9).fill(item).join(",") + ']}').ok, false);
+  assert.equal(parseClientMessage('{"type":"props","items":[' + item.replace('"active":true', '"active":1') + ']}').ok, false);
+  assert.equal(parseClientMessage('{"type":"creature_hit","obj":21,"force":5}').ok, true);
+  assert.equal(parseClientMessage('{"type":"creature_hit","obj":4,"force":5}').ok, false);
+  assert.equal(parseClientMessage('{"type":"creature_hit","obj":21,"force":500}').ok, false);
+  assert.equal(parseClientMessage('{"type":"hurt","force":1,"by":21}').ok, true);
+  assert.equal(parseClientMessage('{"type":"hurt","force":-1,"by":21}').ok, false);
+  assert.equal(parseClientMessage('{"type":"hero_died"}').ok, true);
+});

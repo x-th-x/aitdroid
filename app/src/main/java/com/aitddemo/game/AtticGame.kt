@@ -242,6 +242,110 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         }
     }
 
+    // ---- co-op: the creatures, the trapdoor, the horse and the window
+
+    /** Co-op: this phone is the host's (Carnby's): it runs the creatures and the trapdoor lid; the guest's phone shows them as puppets of what this phone sends. */
+    var coopHost = false
+        private set
+
+    /** Co-op: called with the entries (obj, stage, room, active, body, anim, alpha, x, y, z, beta) of the props whose state changed; at most about ten times a second. */
+    var coopProps: ((List<IntArray>) -> Unit)? = null
+    /** Co-op, guest: the local hero hit a creature: (object, force). */
+    var coopCreatureHit: ((Int, Int) -> Unit)? = null
+    /** Co-op, host: a creature hit the other hero: (force, creature). */
+    var coopHurt: ((Int, Int) -> Unit)? = null
+    /** Co-op: the local hero died. */
+    var coopDied: (() -> Unit)? = null
+
+    private val remoteProps = java.util.concurrent.ConcurrentLinkedQueue<IntArray>()
+    private val remoteCreatureHits = java.util.concurrent.ConcurrentLinkedQueue<IntArray>()
+    private val remoteHurts = java.util.concurrent.ConcurrentLinkedQueue<IntArray>()
+    @Volatile private var remoteDied = false
+    private var diedTold = false
+    private val propSent = HashMap<Int, IntArray>()
+    private val puppetTarget = HashMap<Int, IntArray>()
+    private var propsAt = 0
+
+    fun remoteProps(items: List<IntArray>) { remoteProps.addAll(items) }
+    fun remoteCreatureHit(obj: Int, force: Int) { remoteCreatureHits.add(intArrayOf(obj, force)) }
+    fun remoteHurt(force: Int, by: Int) { remoteHurts.add(intArrayOf(force, by)) }
+    fun remoteHeroDied() { remoteDied = true }
+
+    private fun propEntry(i: Int): IntArray {
+        val g = objects[i]
+        val w = g.w
+        val a = g.actor
+        return intArrayOf(i, w.stage, w.room, if (w.active) 1 else 0, w.body, a?.currentAnim ?: w.anim, w.alpha and 0x3FF, a?.renderX ?: w.x, a?.renderY ?: w.y, a?.renderZ ?: w.z, (a?.beta ?: w.beta) and 0x3FF)
+    }
+
+    /** The entries of the two shared props (horse, window) differ only in what they show, not in where they stand. */
+    private fun sameProp(i: Int, a: IntArray, b: IntArray): Boolean =
+        if (i in PUPPETS) a.contentEquals(b) else (3..6).all { a[it] == b[it] }
+
+    /** One tick of the shared world: apply what the other phone sent, move the puppets, send what changed here, carry hits and hurts across, and end the game together. */
+    private fun syncWorld() {
+        while (true) applyProp(remoteProps.poll() ?: break)
+        for ((i, t) in puppetTarget) {
+            val a = objects[i].actor ?: continue
+            val dx = t[7] - a.renderX; val dy = t[8] - a.renderY; val dz = t[9] - a.renderZ
+            if (Math.abs(dx) + Math.abs(dz) > 3000) a.teleport(t[7], t[8], t[9], t[10]) else a.teleport(a.renderX + dx * 3 / 10, a.renderY + dy * 3 / 10, a.renderZ + dz * 3 / 10, t[10])
+        }
+        if (time - propsAt >= 6) {
+            propsAt = time
+            val changed = ArrayList<IntArray>()
+            for (i in (if (coopHost) HOST_PROPS else SHARED_PROPS)) {
+                val e = propEntry(i)
+                if (propSent[i]?.let { sameProp(i, it, e) } == true) continue
+                propSent[i] = e
+                changed.add(e)
+            }
+            if (changed.isNotEmpty()) coopProps?.invoke(changed)
+        }
+        if (coopHost) {
+            while (true) {
+                val h = remoteCreatureHits.poll() ?: break
+                val w = objects.getOrNull(h[0])?.w ?: continue
+                if (h[0] in CREATURES && w.active) { w.hitBy = playerIndex; w.hitForce = h[1] }
+            }
+        } else {
+            for (i in CREATURES) { // the guest's blows and shots land on the puppets: they go to the host, which runs the creature
+                val w = objects[i].w
+                if (w.active && w.hitBy != -1) { coopCreatureHit?.invoke(i, w.hitForce); w.hitBy = -1 }
+            }
+            while (true) {
+                val h = remoteHurts.poll() ?: break
+                player?.w?.let { it.hitBy = h[1]; it.hitForce = h[0] }
+            }
+        }
+        if (remoteDied && !gameOver) { diedTold = true; gameOver() }
+    }
+
+    /** The other phone's state of a prop. A creature or the lid (host's) is copied as a whole, a puppet; the horse and the window only take on the body and animation. */
+    private fun applyProp(e: IntArray) {
+        val i = e[0]
+        val g = objects.getOrNull(i) ?: return
+        val w = g.w
+        if (i in PUPPETS) {
+            if (coopHost) return
+            if (e[3] == 0) {
+                if (w.active) deactivate(g)
+                puppetTarget.remove(i)
+                if (i in CREATURES) { w.stage = -1; w.room = -1 }
+                return
+            }
+            w.stage = e[1]; w.room = e[2]; w.body = e[4]; w.alpha = e[6]; w.beta = e[10]
+            if (!w.active) { w.x = e[7]; w.y = e[8]; w.z = e[9]; if (e[5] != -1) w.anim = e[5]; activate(g) }
+            else if ((g.asset?.number ?: -1) != w.body) body(i)
+            g.actor?.let { a -> if (e[5] != a.currentAnim && data.anim(e[5]) != null) a.playAnim(e[5], 1, -1) }
+            puppetTarget[i] = e
+        } else if (i in SHARED_PROPS) {
+            if (!w.active) return
+            if (e[4] != w.body) { w.body = e[4]; body(i); if (w.life != -1) w.life = -1 } // a window that broke stays broken (its script has done its work)
+            g.actor?.let { a -> if (e[5] >= 0 && e[5] != a.currentAnim && data.anim(e[5]) != null) a.playAnim(e[5], 0, -1) }
+            propSent[i] = propEntry(i) // what was just applied is not sent back
+        }
+    }
+
     /** Co-op: called when the local hero put an item down: (object, stage, room, x, y, z, alpha, beta, gamma). */
     var coopItemPlaced: ((Int, Int, Int, Int, Int, Int, Int, Int, Int) -> Unit)? = null
 
@@ -292,8 +396,15 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
      */
     fun startCoop(emilyLocal: Boolean) {
         coop = true
-        delete(ATTIC_CREATURE_B)
-        delete(ATTIC_CREATURE_A)
+        coopHost = !emilyLocal
+        if (!coopHost) { // the guest's phone does not run the creatures and the lid: it shows what the host's phone sends
+            for (i in PUPPETS) {
+                val g = objects[i]
+                if (g.w.active && i in CREATURES) deactivate(g)
+                g.w.life = -1
+                if (i in CREATURES) { g.w.stage = -1; g.w.room = -1 }
+            }
+        }
         val p = player?.actor ?: return
         val c = companion?.actor ?: return
         if (emilyLocal) {
@@ -421,7 +532,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     /** One tick of the companion in the game: it follows the player (see [Partner.follow]). */
     private fun tickCompanion() {
-        if (coop) { applyRemoteTaken(); applyRemotePlaced(); syncFurniture() }
+        if (coop) { applyRemoteTaken(); applyRemotePlaced(); syncFurniture(); syncWorld() }
         remoteHero?.let { tickRemoteHero(it); return }
         val c = companion ?: return
         val a = c.actor ?: return
@@ -1214,6 +1325,15 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                 val y = a.renderY + hot[1]
                 val z = a.renderZ + hot[2]
                 val r = g.actionRange
+                // co-op, host: a creature's blow that reaches the other hero hurts him (his phone plays the reaction)
+                if (coopHost && g.w.index in CREATURES) {
+                    val zv = companion?.takeIf { it.obj.w.active }?.actor?.zv
+                    if (zv != null && zv[0] < x + r && x - r < zv[1] && zv[2] < y + r && y - r < zv[3] && zv[4] < z + r && z - r < zv[5]) {
+                        coopHurt?.invoke(g.actionForce, g.w.index)
+                        g.actionType = 0
+                        return
+                    }
+                }
                 for (other in objects) {
                     if (other === g || !other.w.active) continue
                     val zv = other.actor?.zv ?: continue
@@ -1460,6 +1580,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     }
 
     override fun gameOver() {
+        if (coop && !diedTold) { diedTold = true; coopDied?.invoke() }
         gameOver = true
         ui.gameOver()
     }
@@ -1863,6 +1984,11 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         /** Positions in the CVars (DEFINES.ITD): the sound of an impact, the weight limit, the object that sends a thrown item back. */
         const val CVAR_CHOOSE_PERSON = 8
         /** The two creatures of the attic (A comes through the window, B out of the trapdoor): objects of OBJETS.ITD. */
+        /** The creatures, and the trapdoor lid they open, are run by the host; the horse and the window change on either phone. */
+        val CREATURES = intArrayOf(9, 21)
+        val PUPPETS = intArrayOf(8, 9, 21)
+        val SHARED_PROPS = intArrayOf(6, 7)
+        val HOST_PROPS = intArrayOf(8, 9, 21, 6, 7)
         const val ATTIC_CREATURE_A = 21
         const val ATTIC_CREATURE_B = 9
         const val MAX_ITEMS = 30

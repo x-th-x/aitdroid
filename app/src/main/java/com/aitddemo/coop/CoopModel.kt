@@ -51,6 +51,12 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
     /** Called on OkHttp's thread when the other player put an item down: (object, stage, room, x, y, z, alpha, beta, gamma). */
     @Volatile var onItemPlaced: ((IntArray) -> Unit)? = null
 
+    /** Called on OkHttp's thread: the other phone's props (entries as in [ServerEvent.Props]), a hit on a creature (guest to host), a hurt (host to guest), the other hero's death. */
+    @Volatile var onProps: ((List<IntArray>) -> Unit)? = null
+    @Volatile var onCreatureHit: ((Int, Int) -> Unit)? = null
+    @Volatile var onHurt: ((Int, Int) -> Unit)? = null
+    @Volatile var onHeroDied: (() -> Unit)? = null
+
     fun changeUrl(value: String) {
         url = value.trim()
         prefs?.edit()?.putString(KEY_URL, url)?.apply()
@@ -99,6 +105,11 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
     /** For the game: tells the other phone that an item was taken. */
     fun sendItemTaken(obj: Int): Boolean = client.send(CoopJson.itemTaken(obj))
 
+    fun sendProps(items: List<IntArray>): Boolean = client.send(CoopJson.props(items))
+    fun sendCreatureHit(obj: Int, force: Int): Boolean = client.send(CoopJson.creatureHit(obj, force))
+    fun sendHurt(force: Int, by: Int): Boolean = client.send(CoopJson.hurt(force, by))
+    fun sendHeroDied(): Boolean = client.send(CoopJson.heroDied())
+
     /** For the game: tells the other phone that an item was put down at this place. */
     fun sendItemPlaced(obj: Int, stage: Int, room: Int, x: Int, y: Int, z: Int, alpha: Int, beta: Int, gamma: Int): Boolean =
         client.send(CoopJson.itemPlaced(obj, stage, room, x, y, z, alpha, beta, gamma))
@@ -129,6 +140,13 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
         if (event is ServerEvent.Remote) {
             onRemoteState?.invoke(event.state)
             return
+        }
+        when (event) {
+            is ServerEvent.Props -> { onProps?.invoke(event.items); return }
+            is ServerEvent.CreatureHit -> { onCreatureHit?.invoke(event.obj, event.force); return }
+            is ServerEvent.Hurt -> { onHurt?.invoke(event.force, event.by); return }
+            is ServerEvent.HeroDied -> { onHeroDied?.invoke(); return }
+            else -> {}
         }
         if (event is ServerEvent.ItemPlaced) {
             onItemPlaced?.invoke(intArrayOf(event.obj, event.stage, event.room, event.x, event.y, event.z, event.alpha, event.beta, event.gamma))
@@ -169,7 +187,7 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
             }
             is ServerEvent.Closed -> { session = null; me = null; start = null; error = "The session ended: ${event.reason}." }
             is ServerEvent.Error -> error = describe(event)
-            is ServerEvent.Remote, is ServerEvent.ItemTaken, is ServerEvent.ItemPlaced, is ServerEvent.ObjectMoved, is ServerEvent.Pong -> {}
+            is ServerEvent.Remote, is ServerEvent.ItemTaken, is ServerEvent.ItemPlaced, is ServerEvent.ObjectMoved, is ServerEvent.Props, is ServerEvent.CreatureHit, is ServerEvent.Hurt, is ServerEvent.HeroDied, is ServerEvent.Pong -> {}
         }
     }
 

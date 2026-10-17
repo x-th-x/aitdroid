@@ -100,6 +100,10 @@ Text frames with one JSON object each, `{"type": ..., ...}`. After connecting th
 {"type":"set_ready","ready":true}
 {"type":"state","seq":42,"t":123456,"hero":"carnby","stage":0,"room":0,"x":3231,"y":0,"z":-1548,"beta":512,"anim":254}
 {"type":"item_placed","obj":12,"stage":0,"room":0,"x":2000,"y":0,"z":3000,"alpha":0,"beta":512,"gamma":0}   // an item put down: lies in the shared world, can be taken again
+{"type":"props","items":[{"obj":21,"stage":0,"room":0,"active":true,"body":24,"anim":23,"alpha":0,"x":100,"y":0,"z":200,"beta":300}]}   // states of objects 21, 9 and 8 (creatures, trapdoor lid) only from the host; objects 6 and 7 (horse, window) from either player; at most 8 entries
+{"type":"creature_hit","obj":21,"force":5}   // guest only: the guest hit a creature; the host's creature takes the hit
+{"type":"hurt","force":1,"by":21}            // host only: a creature hit the guest's hero
+{"type":"hero_died"}                         // either player: the game is over for both
 {"type":"object_moved","obj":4,"x":2100,"y":0,"z":4500}   // furniture pushed: relayed as is, the last push wins
 {"type":"item_taken","obj":12}   // an item left the shared world; the server relays it once to the other player (bags stay personal)
 {"type":"ping","t":123456}
@@ -121,6 +125,10 @@ Text frames with one JSON object each, `{"type": ..., ...}`. After connecting th
 {"type":"remote_state","seq":42,"t":123456,"serverTime":1760000000123,"hero":"carnby","stage":0,"room":0,"x":3231,"y":0,"z":-1548,"beta":512,"anim":254}
 {"type":"item_taken","hero":"carnby","obj":12}
 {"type":"item_placed","hero":"carnby","obj":12,"stage":0,"room":0,"x":2000,"y":0,"z":3000,"alpha":0,"beta":512,"gamma":0}
+{"type":"props","hero":"carnby","items":[{"obj":21,"stage":0,"room":0,"active":true,"body":24,"anim":23,"alpha":0,"x":100,"y":0,"z":200,"beta":300}]}
+{"type":"creature_hit","obj":21,"force":5}
+{"type":"hurt","force":1,"by":21}
+{"type":"hero_died","hero":"emily"}
 {"type":"object_moved","hero":"carnby","obj":4,"x":2100,"y":0,"z":4500}
 {"type":"peer","slot":1,"hero":"carnby","state":"disconnected"}
 {"type":"closed","reason":"the host left the session"}
@@ -172,7 +180,7 @@ behaviour on a real mobile network.
 * In the game, each phone moves its own hero as always; the other hero is the companion figure of the Together mode, put at the position the other phone reports and playing the animation it reports.
   The local hero's state goes out at most 15 times a second and only when it changes (a sign of life each second when standing still). The other hero is shown about 120 ms behind the newest state
   (blending between two buffered states), with a limited catch-up speed after a stall (see `RemoteSnapshots.kt` for how the buffer and the clocks work).
-* The attic is peaceful in a co-op game (the two creatures of the attic are removed: their scripts run on each phone alone and would only attack that phone's hero), and the stairs are closed
+* The creatures of the attic run on the host's phone (Carnby's); the guest's phone shows them as puppets and sends its blows and shots at them to the host. They chase the host's hero; they hurt the guest's hero only when a blow reaches him. If either hero dies, the game is over for both. The stairs are closed
   ("The way down is closed in the co-op prototype."). A save point that is not in the attic ends the co-op game with a notice.
 * Cleartext `ws://` is allowed in debug builds only (`app/src/debug/AndroidManifest.xml`); a release build accepts only `wss://`.
 
@@ -191,7 +199,7 @@ behaviour on a real mobile network.
 
 * Server: `npm test` — 39 automated tests (validation, session logic, disconnect cases, a real WebSocket run with two clients); all passed.
 * JVM tests of the snapshot buffer/smoother and the sending rule (`../coop-tests/`): all checks passed.
-* Peaceful attic on the PC engine (`coop-tests/PeaceTest.kt`): six minutes standing still, life stayed 20, no creature; the stairs stayed closed and the hero kept control.
+* (The earlier peaceful-attic test no longer applies: the creatures run now.) Two engines in one process, wired like the phones (host and guest): the guest's puppet of the creature followed the host's creature (body, animation, place within a few units) from its entrance to its end; a hit sent to the host took 5 off the creature's life and made it flinch; a hurt sent to the guest cost the guest's hero 1 life; a death ended the game on both.
 * On one phone (Huawei PCT-L29 over `adb reverse`, the server on the computer, a scripted client as the second player): create, join, choices, ready, start (new game and a shared save point:
   both clients received the same bytes and the game started in the attic), the lobby when the second player leaves before the start, the scripted Emily shown walking in the attic, Carnby's
   moves arriving at the server (x grew from 3231 to 5330 with animation 255), and the note "The other player left: the game is interrupted."
@@ -208,4 +216,4 @@ behaviour on a real mobile network.
 
 ## Not implemented (out of scope for the prototype)
 
-Combat, monsters, items, doors, puzzles, story events, joining a running game, lag compensation, accounts.
+Creatures chase the host's hero only (the guest's hero is hurt only when a blow reaches him); sound and music of the creatures play on the host only; doors, puzzles, story events, joining a running game, lag compensation, accounts.
