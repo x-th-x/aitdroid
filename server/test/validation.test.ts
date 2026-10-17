@@ -73,3 +73,10 @@ test("item_taken needs an object number in range", () => {
   assert.equal(parseClientMessage('{"type":"item_taken","obj":1.5}').ok, false);
   assert.equal(parseClientMessage('{"type":"item_taken"}').ok, false);
 });
+
+test("object_moved needs an object number and whole coordinates", () => {
+  assert.equal(parseClientMessage('{"type":"object_moved","obj":4,"x":10,"y":0,"z":-5}').ok, true);
+  assert.equal(parseClientMessage('{"type":"object_moved","obj":4,"x":10,"y":0}').ok, false);
+  assert.equal(parseClientMessage('{"type":"object_moved","obj":4,"x":1e9,"y":0,"z":0}').ok, false);
+  assert.equal(parseClientMessage('{"type":"object_moved","obj":-1,"x":1,"y":0,"z":0}').ok, false);
+});

@@ -108,6 +108,8 @@ export class SessionManager {
         return this.setReady(connId, msg.ready);
       case "state":
         return this.state(connId, msg);
+      case "object_moved":
+        return this.objectMoved(connId, msg);
       case "item_taken":
         return this.itemTaken(connId, msg);
     }
@@ -281,6 +283,18 @@ export class SessionManager {
     const other = session.players[player.slot === 1 ? 1 : 0];
     if (!other?.connected) return [];
     return [{ to: other.connId, msg: { type: "item_taken", hero: player.hero, obj: m.obj } }];
+  }
+
+  /** A piece of furniture was pushed: relayed to the other player as it is (the last push wins). */
+  private objectMoved(connId: string, m: Extract<ClientMessage, { type: "object_moved" }>): Outbound[] {
+    const found = this.find(connId);
+    if (!found) return this.error(connId, "not_in_session", "you are not in a session", "object_moved");
+    const { session, player } = found;
+    if (session.status !== "running") return this.error(connId, "wrong_state", "the game is not running", "object_moved");
+    session.lastActivity = this.now();
+    const other = session.players[player.slot === 1 ? 1 : 0];
+    if (!other?.connected) return [];
+    return [{ to: other.connId, msg: { type: "object_moved", hero: player.hero, obj: m.obj, x: m.x, y: m.y, z: m.z } }];
   }
 
   // ------------------------------------------------------------------------------------------ leaving, disconnects, time

@@ -406,3 +406,19 @@ test("a taken item is refused before the game runs", () => {
   const { h } = pair();
   assert.equal(h.errorCode(h.send("A", { type: "item_taken", obj: 3 }), "A"), "wrong_state");
 });
+
+test("a pushed object goes to the other player only, as it is", () => {
+  const { h } = pair();
+  startNew(h);
+  const out = h.send("B", { type: "object_moved", obj: 4, x: 2100, y: 0, z: 4500 });
+  assert.equal(out.length, 1);
+  assert.equal(out[0].to, "A");
+  const r = h.last("A", "object_moved")!;
+  assert.deepEqual([r.hero, r.obj, r.x, r.z], ["emily", 4, 2100, 4500]);
+  assert.equal(h.last("B", "object_moved"), undefined);
+});
+
+test("a pushed object is refused before the game runs", () => {
+  const { h } = pair();
+  assert.equal(h.errorCode(h.send("A", { type: "object_moved", obj: 4, x: 0, y: 0, z: 0 }), "A"), "wrong_state");
+});

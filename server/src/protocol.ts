@@ -43,7 +43,10 @@ export interface Ping { type: "ping"; t: number }
 /** The sender took an item (the number of the item's object in the game) out of the shared world: the other phone marks it as gone, but does not put it into its own bag. */
 export interface ItemTaken { type: "item_taken"; obj: number }
 
-export type ClientMessage = ListSessions | CreateSession | JoinSession | LeaveSession | SelectStart | UploadSave | SetReady | StateMsg | Ping | ItemTaken;
+/** The sender pushed a piece of furniture (an object of the game) to a new place, in the engine's room-relative coordinates. The last push wins on both phones. */
+export interface ObjectMoved { type: "object_moved"; obj: number; x: number; y: number; z: number }
+
+export type ClientMessage = ObjectMoved | ListSessions | CreateSession | JoinSession | LeaveSession | SelectStart | UploadSave | SetReady | StateMsg | Ping | ItemTaken;
 
 // ------------------------------------------------------------------------------------------------ server -> client
 
@@ -75,6 +78,7 @@ export type ServerMessage =
   | { type: "start"; sessionId: string; mode: StartMode; saveId: string | null; saveData: string | null; area: Area; serverTime: number }
   | { type: "remote_state"; seq: number; t: number; serverTime: number; hero: Hero; stage: number; room: number; x: number; y: number; z: number; beta: number; anim: number }
   | { type: "item_taken"; hero: Hero; obj: number }
+  | { type: "object_moved"; hero: Hero; obj: number; x: number; y: number; z: number }
   | { type: "peer"; slot: 1 | 2; hero: Hero; state: "connected" | "disconnected" | "silent" | "active" }
   | { type: "closed"; reason: string }
   | { type: "error"; code: ErrorCode; message: string; requestType?: string }
@@ -184,6 +188,12 @@ export function parseClientMessage(raw: string, limits: Limits = DEFAULT_LIMITS)
     case "item_taken": {
       if (!isInt(m.obj, 0, 1000)) return fail("bad_message", "obj must be an integer from 0 to 1000", type);
       return { ok: true, msg: { type, obj: m.obj } };
+    }
+    case "object_moved": {
+      if (!isInt(m.obj, 0, 1000)) return fail("bad_message", "obj must be an integer from 0 to 1000", type);
+      const c = limits.maxCoord;
+      if (!isInt(m.x, -c, c) || !isInt(m.y, -c, c) || !isInt(m.z, -c, c)) return fail("bad_message", "x, y and z must be integers within +-" + c, type);
+      return { ok: true, msg: { type, obj: m.obj, x: m.x, y: m.y, z: m.z } };
     }
     case "ping": {
       if (!isNum(m.t, 0, 1e15)) return fail("bad_message", "t must be a non-negative number", type);

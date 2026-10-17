@@ -215,6 +215,33 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     /** Co-op: called when the local hero took an item into his bag; the network layer tells the other phone. */
     var coopItemTaken: ((Int) -> Unit)? = null
 
+    /** Co-op: called (at most about ten times a second) with the new place of a piece of furniture the local hero pushed: (object, x, y, z). */
+    var coopObjectMoved: ((Int, Int, Int, Int) -> Unit)? = null
+
+    private val pushedDirty = LinkedHashSet<Int>()
+    private var pushedFlushAt = 0
+    private val remoteMoved = java.util.concurrent.ConcurrentLinkedQueue<IntArray>()
+
+    /** Co-op: the other player pushed [obj] to this place. Safe to call from any thread. */
+    fun remoteObjectMoved(obj: Int, x: Int, y: Int, z: Int) { remoteMoved.add(intArrayOf(obj, x, y, z)) }
+
+    /** Furniture the other player pushed is put where he left it (the last push wins); the pushes of this hero go out about ten times a second. */
+    private fun syncFurniture() {
+        while (true) {
+            val m = remoteMoved.poll() ?: break
+            val g = objects.getOrNull(m[0]) ?: continue
+            val a = g.actor ?: continue
+            if (!g.w.active || g.w.room != room) continue
+            a.teleport(m[1], m[2], m[3], a.beta and 0x3FF)
+            pushedDirty.remove(m[0])
+        }
+        if (pushedDirty.isNotEmpty() && time - pushedFlushAt >= 6) {
+            pushedFlushAt = time
+            for (i in pushedDirty) objects[i].actor?.let { coopObjectMoved?.invoke(i, it.renderX, it.renderY, it.renderZ) }
+            pushedDirty.clear()
+        }
+    }
+
     /** Items the other player took, waiting for the game thread (they arrive on the network thread). */
     private val remoteTaken = java.util.concurrent.ConcurrentLinkedQueue<Int>()
 
@@ -352,7 +379,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     /** One tick of the companion in the game: it follows the player (see [Partner.follow]). */
     private fun tickCompanion() {
-        if (coop) applyRemoteTaken()
+        if (coop) { applyRemoteTaken(); syncFurniture() }
         remoteHero?.let { tickRemoteHero(it); return }
         val c = companion ?: return
         val a = c.actor ?: return
@@ -808,6 +835,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             if (hits(other.zv)) return false
         }
         a.pushBy(dx, dz)
+        if (coop) pushedDirty.add(target.w.index)
         return true
     }
 
