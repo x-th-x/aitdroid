@@ -40,8 +40,10 @@ export interface StateMsg {
   anim: number;
 }
 export interface Ping { type: "ping"; t: number }
+/** The sender took an item (the number of the item's object in the game) out of the shared world: the other phone marks it as gone, but does not put it into its own bag. */
+export interface ItemTaken { type: "item_taken"; obj: number }
 
-export type ClientMessage = ListSessions | CreateSession | JoinSession | LeaveSession | SelectStart | UploadSave | SetReady | StateMsg | Ping;
+export type ClientMessage = ListSessions | CreateSession | JoinSession | LeaveSession | SelectStart | UploadSave | SetReady | StateMsg | Ping | ItemTaken;
 
 // ------------------------------------------------------------------------------------------------ server -> client
 
@@ -72,6 +74,7 @@ export type ServerMessage =
   | ({ type: "session" } & SessionInfo)
   | { type: "start"; sessionId: string; mode: StartMode; saveId: string | null; saveData: string | null; area: Area; serverTime: number }
   | { type: "remote_state"; seq: number; t: number; serverTime: number; hero: Hero; stage: number; room: number; x: number; y: number; z: number; beta: number; anim: number }
+  | { type: "item_taken"; hero: Hero; obj: number }
   | { type: "peer"; slot: 1 | 2; hero: Hero; state: "connected" | "disconnected" | "silent" | "active" }
   | { type: "closed"; reason: string }
   | { type: "error"; code: ErrorCode; message: string; requestType?: string }
@@ -177,6 +180,10 @@ export function parseClientMessage(raw: string, limits: Limits = DEFAULT_LIMITS)
       if (!isInt(m.beta, 0, 1023)) return fail("bad_message", "beta must be an integer from 0 to 1023", type);
       if (!isInt(m.anim, -1, 2000)) return fail("bad_message", "anim must be an integer from -1 to 2000", type);
       return { ok: true, msg: { type, seq: m.seq, t: m.t, hero: m.hero, stage: m.stage, room: m.room, x: m.x, y: m.y, z: m.z, beta: m.beta, anim: m.anim } };
+    }
+    case "item_taken": {
+      if (!isInt(m.obj, 0, 1000)) return fail("bad_message", "obj must be an integer from 0 to 1000", type);
+      return { ok: true, msg: { type, obj: m.obj } };
     }
     case "ping": {
       if (!isNum(m.t, 0, 1e15)) return fail("bad_message", "t must be a non-negative number", type);

@@ -53,6 +53,7 @@ sealed class ServerEvent {
     class Session(val info: SessionInfo) : ServerEvent()
     class Start(val info: StartInfo) : ServerEvent()
     class Remote(val state: RemoteState) : ServerEvent()
+    class ItemTaken(val hero: Hero, val obj: Int) : ServerEvent()
     class Peer(val slot: Int, val hero: Hero, val state: String) : ServerEvent()
     class Closed(val reason: String) : ServerEvent()
     class Error(val code: String, val message: String, val requestType: String?) : ServerEvent()
@@ -78,6 +79,7 @@ object CoopJson {
                 "remote_state" -> ServerEvent.Remote(
                     RemoteState(o.getInt("seq"), o.getDouble("t"), o.getLong("serverTime"), Hero.of(o.getString("hero")) ?: return null, o.getInt("stage"), o.getInt("room"), o.getInt("x"), o.getInt("y"), o.getInt("z"), o.getInt("beta"), o.getInt("anim")),
                 )
+                "item_taken" -> ServerEvent.ItemTaken(Hero.of(o.getString("hero")) ?: return null, o.getInt("obj"))
                 "peer" -> ServerEvent.Peer(o.getInt("slot"), Hero.of(o.getString("hero")) ?: return null, o.getString("state"))
                 "closed" -> ServerEvent.Closed(o.getString("reason"))
                 "error" -> ServerEvent.Error(o.getString("code"), o.getString("message"), o.optStringOrNull("requestType"))
@@ -114,6 +116,7 @@ object CoopJson {
     fun uploadSave(saveId: String, label: String, base64: String) = msg("upload_save") { put("saveId", saveId); put("label", label); put("data", base64) }
     fun setReady(ready: Boolean) = msg("set_ready") { put("ready", ready) }
     fun ping(t: Double) = msg("ping") { put("t", t) }
+    fun itemTaken(obj: Int) = msg("item_taken") { put("obj", obj) }
     fun state(seq: Int, t: Double, hero: Hero, stage: Int, room: Int, x: Int, y: Int, z: Int, beta: Int, anim: Int) = msg("state") {
         put("seq", seq); put("t", t); put("hero", hero.id); put("stage", stage); put("room", room)
         put("x", x); put("y", y); put("z", z); put("beta", beta); put("anim", anim)

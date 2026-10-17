@@ -212,6 +212,29 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     var coopStairsTick = -10000
         private set
 
+    /** Co-op: called when the local hero took an item into his bag; the network layer tells the other phone. */
+    var coopItemTaken: ((Int) -> Unit)? = null
+
+    /** Items the other player took, waiting for the game thread (they arrive on the network thread). */
+    private val remoteTaken = java.util.concurrent.ConcurrentLinkedQueue<Int>()
+
+    /** Co-op: the other player took [item] out of the shared world. Safe to call from any thread; the game picks it up on its next tick. */
+    fun remoteItemTaken(item: Int) { remoteTaken.add(item) }
+
+    /** The other player's item is gone from this world too (he searched or took it first), but it does not go into this hero's bag: the bags stay personal. */
+    private fun applyRemoteTaken() {
+        while (true) {
+            val item = remoteTaken.poll() ?: return
+            val w = vm.objects.getOrNull(item) ?: continue
+            if (item in inventory) continue // both took it at the same moment: each keeps his own
+            if (pendingFound == item) pendingFound = -1
+            objects.getOrNull(item)?.let { if (it.w.active) deactivate(it) }
+            w.foundFlag = (w.foundFlag and 0xBFFF) or 0x8000
+            w.room = -1
+            w.stage = -1
+        }
+    }
+
     /**
      * Begins a co-op game. The local hero is the one that runs script 549 (Carnby, or Emily when [emilyLocal]); the companion is the other player's hero. Both phones must
      * start from the same picture: Carnby at the game's own start place and Emily at the place the companion takes behind him, so the phone of Emily swaps the two.
@@ -329,6 +352,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     /** One tick of the companion in the game: it follows the player (see [Partner.follow]). */
     private fun tickCompanion() {
+        if (coop) applyRemoteTaken()
         remoteHero?.let { tickRemoteHero(it); return }
         val c = companion ?: return
         val a = c.actor ?: return
@@ -931,6 +955,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         w.foundFlag = (w.foundFlag and 0xBFFF) or 0x8000
         w.room = -1
         w.stage = -1
+        if (coop) coopItemTaken?.invoke(item)
     }
 
     /** Runs the found-life script of an item with the given action (executeFoundLife). */

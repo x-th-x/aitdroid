@@ -99,6 +99,7 @@ Text frames with one JSON object each, `{"type": ..., ...}`. After connecting th
 {"type":"upload_save","saveId":"slot1-1a2b3c","label":"Slot 1 - 10.10.2026 14:23","data":"<base64>"}
 {"type":"set_ready","ready":true}
 {"type":"state","seq":42,"t":123456,"hero":"carnby","stage":0,"room":0,"x":3231,"y":0,"z":-1548,"beta":512,"anim":254}
+{"type":"item_taken","obj":12}   // an item left the shared world; the server relays it once to the other player (bags stay personal)
 {"type":"ping","t":123456}
 ```
 
@@ -116,6 +117,7 @@ Text frames with one JSON object each, `{"type": ..., ...}`. After connecting th
   {"slot":2,"hero":"emily","connected":true,"selection":null,"ready":false}],"selectionsMatch":false,"mismatch":null,"offeredSave":null}
 {"type":"start","sessionId":"<uuid>","mode":"new","saveId":null,"saveData":null,"area":{"stage":0,"room":0},"serverTime":1760000000000}
 {"type":"remote_state","seq":42,"t":123456,"serverTime":1760000000123,"hero":"carnby","stage":0,"room":0,"x":3231,"y":0,"z":-1548,"beta":512,"anim":254}
+{"type":"item_taken","hero":"carnby","obj":12}
 {"type":"peer","slot":1,"hero":"carnby","state":"disconnected"}
 {"type":"closed","reason":"the host left the session"}
 {"type":"error","code":"wrong_hero","message":"you control emily, not carnby","requestType":"state"}

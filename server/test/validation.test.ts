@@ -66,3 +66,10 @@ test("extra fields are dropped, not passed on", () => {
   assert.equal(r.ok, true);
   if (r.ok) assert.equal("admin" in r.msg, false);
 });
+
+test("item_taken needs an object number in range", () => {
+  assert.equal(parseClientMessage('{"type":"item_taken","obj":5}').ok, true);
+  assert.equal(parseClientMessage('{"type":"item_taken","obj":-1}').ok, false);
+  assert.equal(parseClientMessage('{"type":"item_taken","obj":1.5}').ok, false);
+  assert.equal(parseClientMessage('{"type":"item_taken"}').ok, false);
+});

@@ -42,6 +42,9 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
     /** Called on OkHttp's thread for every state of the other hero. */
     @Volatile var onRemoteState: ((RemoteState) -> Unit)? = null
 
+    /** Called on OkHttp's thread when the other player took an item out of the shared world (the number of its object). */
+    @Volatile var onItemTaken: ((Int) -> Unit)? = null
+
     fun changeUrl(value: String) {
         url = value.trim()
         prefs?.edit()?.putString(KEY_URL, url)?.apply()
@@ -87,6 +90,9 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
     fun sendState(seq: Int, t: Double, hero: Hero, stage: Int, room: Int, x: Int, y: Int, z: Int, beta: Int, anim: Int): Boolean =
         client.send(CoopJson.state(seq, t, hero, stage, room, x, y, z, beta, anim))
 
+    /** For the game: tells the other phone that an item was taken. */
+    fun sendItemTaken(obj: Int): Boolean = client.send(CoopJson.itemTaken(obj))
+
     private fun send(text: String) {
         error = null
         if (!client.send(text)) error = "There is no connection to the server."
@@ -109,6 +115,10 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
     override fun onEvent(event: ServerEvent) {
         if (event is ServerEvent.Remote) {
             onRemoteState?.invoke(event.state)
+            return
+        }
+        if (event is ServerEvent.ItemTaken) {
+            onItemTaken?.invoke(event.obj)
             return
         }
         main.post { apply(event) }
@@ -138,7 +148,7 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
             }
             is ServerEvent.Closed -> { session = null; me = null; start = null; error = "The session ended: ${event.reason}." }
             is ServerEvent.Error -> error = describe(event)
-            is ServerEvent.Remote, is ServerEvent.Pong -> {}
+            is ServerEvent.Remote, is ServerEvent.ItemTaken, is ServerEvent.Pong -> {}
         }
     }
 

@@ -387,3 +387,22 @@ test("session names stay unique among active sessions", () => {
   }
   assert.equal(names.size, 300);
 });
+
+test("a taken item goes to the other player once, not back to the sender", () => {
+  const { h } = pair();
+  startNew(h);
+  const out = h.send("A", { type: "item_taken", obj: 12 });
+  assert.equal(out.length, 1);
+  assert.equal(out[0].to, "B");
+  const r = h.last("B", "item_taken")!;
+  assert.equal(r.obj, 12);
+  assert.equal(r.hero, "carnby");
+  assert.equal(h.last("A", "item_taken"), undefined);
+  // the same item again (both took it at the same moment): nothing more is relayed
+  assert.equal(h.send("B", { type: "item_taken", obj: 12 }).length, 0);
+});
+
+test("a taken item is refused before the game runs", () => {
+  const { h } = pair();
+  assert.equal(h.errorCode(h.send("A", { type: "item_taken", obj: 3 }), "A"), "wrong_state");
+});

@@ -44,6 +44,7 @@ interface Session {
   lastActivity: number;
   interruptedAt: number | null;
   save: SavedGame | null;
+  takenItems: Set<number>;
 }
 
 const WORDS = ["Raven", "Willow", "Ember", "Lantern", "Cedar", "Hollow", "Thistle", "Marble", "Harbor", "Velvet", "Falcon", "Maple", "Ivory", "Copper", "Meadow", "Pewter", "Sparrow", "Granite", "Amber", "Juniper", "Walnut", "Quartz", "Badger", "Cobalt"];
@@ -107,6 +108,8 @@ export class SessionManager {
         return this.setReady(connId, msg.ready);
       case "state":
         return this.state(connId, msg);
+      case "item_taken":
+        return this.itemTaken(connId, msg);
     }
   }
 
@@ -116,7 +119,7 @@ export class SessionManager {
     if (this.byConn.has(connId)) return this.error(connId, "already_in_session", "you are already in a session; leave it first", "create_session");
     const t = this.now();
     const name = this.freshName();
-    const session: Session = { id: randomUUID(), name, status: "waiting", players: [this.newPlayer(connId, 1, t), null], createdAt: t, lastActivity: t, interruptedAt: null, save: null };
+    const session: Session = { id: randomUUID(), name, status: "waiting", players: [this.newPlayer(connId, 1, t), null], createdAt: t, lastActivity: t, interruptedAt: null, save: null, takenItems: new Set() };
     this.sessions.set(session.id, session);
     this.byName.set(nameKey(name), session.id);
     this.byConn.set(connId, { sessionId: session.id, slot: 1 });
@@ -261,6 +264,23 @@ export class SessionManager {
       out.push({ to: other.connId, msg: { type: "remote_state", seq: m.seq, t: m.t, serverTime: t, hero: player.hero, stage: m.stage, room: m.room, x: m.x, y: m.y, z: m.z, beta: m.beta, anim: m.anim } });
     }
     return out;
+  }
+
+  // ------------------------------------------------------------------------------------------ the shared world
+
+  /** An item was taken: the server remembers it (so that it is relayed once) and tells the other player. */
+  private itemTaken(connId: string, m: Extract<ClientMessage, { type: "item_taken" }>): Outbound[] {
+    const found = this.find(connId);
+    if (!found) return this.error(connId, "not_in_session", "you are not in a session", "item_taken");
+    const { session, player } = found;
+    if (session.status !== "running") return this.error(connId, "wrong_state", "the game is not running", "item_taken");
+    if (session.takenItems.has(m.obj)) return [];
+    if (session.takenItems.size >= 500) return this.error(connId, "bad_message", "too many items", "item_taken");
+    session.takenItems.add(m.obj);
+    session.lastActivity = this.now();
+    const other = session.players[player.slot === 1 ? 1 : 0];
+    if (!other?.connected) return [];
+    return [{ to: other.connId, msg: { type: "item_taken", hero: player.hero, obj: m.obj } }];
   }
 
   // ------------------------------------------------------------------------------------------ leaving, disconnects, time
