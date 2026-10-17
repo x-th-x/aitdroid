@@ -44,7 +44,6 @@ interface Session {
   lastActivity: number;
   interruptedAt: number | null;
   save: SavedGame | null;
-  takenItems: Set<number>;
 }
 
 const WORDS = ["Raven", "Willow", "Ember", "Lantern", "Cedar", "Hollow", "Thistle", "Marble", "Harbor", "Velvet", "Falcon", "Maple", "Ivory", "Copper", "Meadow", "Pewter", "Sparrow", "Granite", "Amber", "Juniper", "Walnut", "Quartz", "Badger", "Cobalt"];
@@ -110,6 +109,7 @@ export class SessionManager {
         return this.state(connId, msg);
       case "props":
       case "effect":
+      case "world_snapshot":
       case "world_var":
       case "creature_hit":
       case "hurt":
@@ -130,7 +130,7 @@ export class SessionManager {
     if (this.byConn.has(connId)) return this.error(connId, "already_in_session", "you are already in a session; leave it first", "create_session");
     const t = this.now();
     const name = this.freshName();
-    const session: Session = { id: randomUUID(), name, status: "waiting", players: [this.newPlayer(connId, 1, t), null], createdAt: t, lastActivity: t, interruptedAt: null, save: null, takenItems: new Set() };
+    const session: Session = { id: randomUUID(), name, status: "waiting", players: [this.newPlayer(connId, 1, t), null], createdAt: t, lastActivity: t, interruptedAt: null, save: null };
     this.sessions.set(session.id, session);
     this.byName.set(nameKey(name), session.id);
     this.byConn.set(connId, { sessionId: session.id, slot: 1 });
@@ -279,15 +279,12 @@ export class SessionManager {
 
   // ------------------------------------------------------------------------------------------ the shared world
 
-  /** An item was taken: the server remembers it (so that it is relayed once) and tells the other player. */
+  /** An item was taken: the other player is told (every time: a repeated message is how a phone repairs a difference between the two worlds). */
   private itemTaken(connId: string, m: Extract<ClientMessage, { type: "item_taken" }>): Outbound[] {
     const found = this.find(connId);
     if (!found) return this.error(connId, "not_in_session", "you are not in a session", "item_taken");
     const { session, player } = found;
     if (session.status !== "running") return this.error(connId, "wrong_state", "the game is not running", "item_taken");
-    if (session.takenItems.has(m.obj)) return [];
-    if (session.takenItems.size >= 500) return this.error(connId, "bad_message", "too many items", "item_taken");
-    session.takenItems.add(m.obj);
     session.lastActivity = this.now();
     const other = session.players[player.slot === 1 ? 1 : 0];
     if (!other?.connected) return [];
@@ -298,14 +295,14 @@ export class SessionManager {
    * The host runs the creatures: the guest sends their states never, the host sends the guest's blows' effects never. Props, creature hits, hurts and deaths go to the
    * other player only, and only while the game runs.
    */
-  private worldRelay(connId: string, m: Extract<ClientMessage, { type: "props" | "effect" | "world_var" | "creature_hit" | "hurt" | "hero_died" }>): Outbound[] {
+  private worldRelay(connId: string, m: Extract<ClientMessage, { type: "props" | "effect" | "world_snapshot" | "world_var" | "creature_hit" | "hurt" | "hero_died" }>): Outbound[] {
     const found = this.find(connId);
     if (!found) return this.error(connId, "not_in_session", "you are not in a session", m.type);
     const { session, player } = found;
     if (session.status !== "running") return this.error(connId, "wrong_state", "the game is not running", m.type);
     const isHost = player.slot === 1;
     if (m.type === "props" && !isHost && m.items.some((i) => HOST_OBJECTS.includes(i.obj))) return this.error(connId, "not_host", "only the host runs the creatures and the trapdoor", m.type);
-    if ((m.type === "effect" || m.type === "world_var") && !isHost) return this.error(connId, "not_host", "only the host runs the creatures", m.type);
+    if ((m.type === "effect" || m.type === "world_var" || m.type === "world_snapshot") && !isHost) return this.error(connId, "not_host", "only the host runs the creatures", m.type);
     if (m.type === "hurt" && !isHost) return this.error(connId, "not_host", "only the host decides who is hurt", m.type);
     if (m.type === "creature_hit" && isHost) return this.error(connId, "wrong_hero", "the host runs the creatures itself", m.type);
     session.lastActivity = this.now();
@@ -322,7 +319,6 @@ export class SessionManager {
     if (!found) return this.error(connId, "not_in_session", "you are not in a session", "item_placed");
     const { session, player } = found;
     if (session.status !== "running") return this.error(connId, "wrong_state", "the game is not running", "item_placed");
-    session.takenItems.delete(m.obj);
     session.lastActivity = this.now();
     const other = session.players[player.slot === 1 ? 1 : 0];
     if (!other?.connected) return [];

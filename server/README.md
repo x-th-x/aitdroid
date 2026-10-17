@@ -101,6 +101,7 @@ Text frames with one JSON object each, `{"type": ..., ...}`. After connecting th
 {"type":"state","seq":42,"t":123456,"hero":"carnby","stage":0,"room":0,"x":3231,"y":0,"z":-1548,"beta":512,"anim":254}
 {"type":"item_placed","obj":12,"stage":0,"room":0,"x":2000,"y":0,"z":3000,"alpha":0,"beta":512,"gamma":0}   // an item put down: lies in the shared world, can be taken again
 {"type":"props","items":[{"obj":21,"stage":0,"room":0,"active":true,"body":24,"anim":23,"alpha":0,"x":100,"y":0,"z":200,"beta":300}]}   // states of objects 21, 9 and 8 (creatures, trapdoor lid) only from the host; objects 6 and 7 (horse, window) from either player; at most 8 entries
+{"type":"world_snapshot","items":[{"obj":12,"stage":0,"room":0,"state":1,"x":10,"y":0,"z":20,"beta":5}]}   // host only, every 10 s: every object that was taken, put down or pushed (state 0 in place, 1 put down, 2 taken); the guest repairs any difference
 {"type":"effect","kind":4,"a":9,"b":0}      // host only: a sound, music or camera change by a creature or the lid (kinds 0 to 6, see protocol.ts); the guest plays it
 {"type":"world_var","index":20,"value":1}   // host only: the creature count (variable 20), the one game variable that is shared
 {"type":"creature_hit","obj":21,"force":5}   // guest only: the guest hit a creature; the host's creature takes the hit
@@ -210,6 +211,7 @@ behaviour on a real mobile network.
 
 ## Known limitations
 
+* Keeping the two worlds in step: every event (item taken or put down, furniture pushed, props) is sent at once, and in addition the host sends a snapshot of every object that was ever taken, put down or pushed every ten seconds (and resends all props). The guest lays it over its own world, except what the guest did itself in the last five seconds and the items in its bag (those it tells the host again). On the PC, with all item and furniture events dropped, the guest's world was equal to the host's after the next snapshot (an item put down, an item taken, a pushed wardrobe); a change made only on the guest was put right 5 to 10 seconds later.
 * Only the attic (`0/0`). Changing the room is not synchronized; the prototype does not support it.
 * The server relays; it does not simulate. Clients are trusted for their own hero's movement, within the plausibility checks above.
 * No reconnection: a lost connection in a running game interrupts it for good.
@@ -218,4 +220,4 @@ behaviour on a real mobile network.
 
 ## Not implemented (out of scope for the prototype)
 
-Doors, puzzles, story events, joining a running game, lag compensation, accounts.
+The attic has no door that matters (the stairs are closed in co-op, the trapdoor lid is part of the host's props), so door states are left for the floors outside the attic. Opening a chest or wardrobe is not shown to the other player (only what comes out of it); puzzles, story events, joining a running game, lag compensation, accounts.

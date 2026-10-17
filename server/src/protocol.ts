@@ -72,7 +72,14 @@ export interface Effect { type: "effect"; kind: number; a: number; b: number }
 export interface WorldVar { type: "world_var"; index: number; value: number }
 export const SHARED_VARS: readonly number[] = [20];
 
-export type ClientMessage = Effect | WorldVar | Props | CreatureHit | Hurt | HeroDied | ItemPlaced | ObjectMoved | ListSessions | CreateSession | JoinSession | LeaveSession | SelectStart | UploadSave | SetReady | StateMsg | Ping | ItemTaken;
+/**
+ * The host's view of the shared world, sent every ten seconds so that a difference between the two phones does not last: one entry per object that was ever taken, put
+ * down or pushed. state: 0 in its place, 1 put down by a hero, 2 taken (in somebody's bag).
+ */
+export interface WorldEntry { obj: number; stage: number; room: number; state: number; x: number; y: number; z: number; beta: number }
+export interface WorldSnapshot { type: "world_snapshot"; items: WorldEntry[] }
+
+export type ClientMessage = WorldSnapshot | Effect | WorldVar | Props | CreatureHit | Hurt | HeroDied | ItemPlaced | ObjectMoved | ListSessions | CreateSession | JoinSession | LeaveSession | SelectStart | UploadSave | SetReady | StateMsg | Ping | ItemTaken;
 
 // ------------------------------------------------------------------------------------------------ server -> client
 
@@ -105,6 +112,7 @@ export type ServerMessage =
   | { type: "remote_state"; seq: number; t: number; serverTime: number; hero: Hero; stage: number; room: number; x: number; y: number; z: number; beta: number; anim: number }
   | { type: "item_taken"; hero: Hero; obj: number }
   | { type: "props"; hero: Hero; items: PropState[] }
+  | { type: "world_snapshot"; items: WorldEntry[] }
   | { type: "effect"; kind: number; a: number; b: number }
   | { type: "world_var"; index: number; value: number }
   | { type: "creature_hit"; obj: number; force: number }
@@ -233,6 +241,19 @@ export function parseClientMessage(raw: string, limits: Limits = DEFAULT_LIMITS)
         if (!isInt(e.body, -1, 2000) || !isInt(e.anim, -1, 2000) || !isInt(e.alpha, 0, 1023) || !isInt(e.beta, 0, 1023)) return fail("bad_message", "body, anim, alpha or beta of an entry is wrong", type);
         if (!isInt(e.x, -c, c) || !isInt(e.y, -c, c) || !isInt(e.z, -c, c)) return fail("bad_message", "x, y and z of an entry must be integers within +-" + c, type);
         items.push({ obj: e.obj, stage: e.stage, room: e.room, active: e.active, body: e.body, anim: e.anim, alpha: e.alpha, x: e.x, y: e.y, z: e.z, beta: e.beta });
+      }
+      return { ok: true, msg: { type, items } };
+    }
+    case "world_snapshot": {
+      if (!Array.isArray(m.items) || m.items.length < 1 || m.items.length > 40) return fail("bad_message", "items must be a list of 1 to 40 entries", type);
+      const c = limits.maxCoord;
+      const items: WorldEntry[] = [];
+      for (const raw of m.items) {
+        if (typeof raw !== "object" || raw === null) return fail("bad_message", "an entry of items is not an object", type);
+        const e = raw as Record<string, unknown>;
+        if (!isInt(e.obj, 0, 1000) || !isInt(e.stage, -1, 20) || !isInt(e.room, -1, 100) || !isInt(e.state, 0, 2) || !isInt(e.beta, 0, 1023)) return fail("bad_message", "an entry has a wrong obj, stage, room, state or beta", type);
+        if (!isInt(e.x, -c, c) || !isInt(e.y, -c, c) || !isInt(e.z, -c, c)) return fail("bad_message", "x, y and z of an entry must be integers within +-" + c, type);
+        items.push({ obj: e.obj, stage: e.stage, room: e.room, state: e.state, x: e.x, y: e.y, z: e.z, beta: e.beta });
       }
       return { ok: true, msg: { type, items } };
     }

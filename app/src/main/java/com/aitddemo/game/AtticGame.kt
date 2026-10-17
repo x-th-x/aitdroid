@@ -231,6 +231,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             val m = remoteMoved.poll() ?: break
             val g = objects.getOrNull(m[0]) ?: continue
             val a = g.actor ?: continue
+            touched.add(m[0])
             if (!g.w.active || g.w.room != room) continue
             a.teleport(m[1], m[2], m[3], a.beta and 0x3FF)
             pushedDirty.remove(m[0])
@@ -260,6 +261,50 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     /** Co-op, host: sounds, music and camera changes made by the creatures' scripts (kind, a, b; see server/src/protocol.ts) and the creature count, for the guest's phone. */
     var coopEffect: ((Int, Int, Int) -> Unit)? = null
     var coopVar: ((Int, Int) -> Unit)? = null
+
+    /** Co-op, host: the view of the shared world for the guest, every ten seconds (entries: obj, stage, room, state, x, y, z, beta). */
+    var coopSnapshot: ((List<IntArray>) -> Unit)? = null
+
+    /** Every object that was taken, put down or pushed in this game (by either hero), and when this phone last did it itself. */
+    private val touched = LinkedHashSet<Int>()
+    private val recentLocal = HashMap<Int, Int>()
+    private var snapshotAt = 0
+    private val remoteSnapshots = java.util.concurrent.ConcurrentLinkedQueue<List<IntArray>>()
+
+    fun remoteSnapshot(items: List<IntArray>) { remoteSnapshots.add(items) }
+
+    private fun touchLocal(obj: Int) { touched.add(obj); recentLocal[obj] = time }
+
+    private fun worldEntry(i: Int): IntArray {
+        val w = vm.objects[i]
+        val a = objects[i].actor
+        val state = if (w.foundFlag and 0x8000 != 0) 2 else if (w.foundFlag and 0x4000 != 0) 1 else 0
+        return intArrayOf(i, w.stage, w.room, state, a?.renderX ?: w.x, a?.renderY ?: w.y, a?.renderZ ?: w.z, (a?.beta ?: w.beta) and 0x3FF)
+    }
+
+    /**
+     * The host's view of one object, laid over this world. What this hero did himself in the last five seconds is left alone (the message about it is still on its way, or the
+     * next view will say so); an item in this hero's bag is told to the host again, so that it leaves the world there too.
+     */
+    private fun applySnapshotEntry(e: IntArray) {
+        val i = e[0]
+        val w = vm.objects.getOrNull(i) ?: return
+        if (i in PUPPETS || i in SHARED_PROPS || i == playerIndex) return
+        if (time - (recentLocal[i] ?: -100000) < 300) return
+        touched.add(i)
+        val mine = worldEntry(i)
+        if (e[3] == 2) { // taken by somebody
+            if (i !in inventory && mine[3] != 2) remoteTaken.add(i)
+            return
+        }
+        if (i in inventory) { coopItemTaken?.invoke(i); return }
+        val far = Math.abs(mine[4] - e[4]) + Math.abs(mine[6] - e[6]) > 8
+        if (w.flags and AF_FOUNDABLE != 0 || e[3] != 0 || mine[3] != 0) { // an item
+            if (mine[3] != e[3] || mine[1] != e[1] || mine[2] != e[2] || far) remotePlaced.add(intArrayOf(i, e[1], e[2], e[4], e[5], e[6], w.alpha and 0x3FF, e[7], w.gamma and 0x3FF))
+        } else if (far && w.active) { // a piece of furniture
+            remoteMoved.add(intArrayOf(i, e[4], e[5], e[6]))
+        }
+    }
 
     /** The object whose life script runs right now (-1 none). */
     private var scriptOwner = -1
@@ -336,6 +381,15 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     /** One tick of the shared world: apply what the other phone sent, move the puppets, send what changed here, carry hits and hurts across, and end the game together. */
     private fun syncWorld() {
+        if (time - snapshotAt >= 600) {
+            snapshotAt = time
+            propSent.clear() // every prop is told again, so that a lost change does not last
+            if (coopHost) {
+                val all = touched.filter { it !in PUPPETS && it !in SHARED_PROPS }.map { worldEntry(it) }
+                for (chunk in all.chunked(40)) coopSnapshot?.invoke(chunk)
+            }
+        }
+        while (true) { val s = remoteSnapshots.poll() ?: break; for (e in s) applySnapshotEntry(e) }
         while (true) applyProp(remoteProps.poll() ?: break)
         for ((i, t) in puppetTarget) {
             val a = objects[i].actor ?: continue
@@ -420,6 +474,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         while (true) {
             val m = remotePlaced.poll() ?: return
             val w = vm.objects.getOrNull(m[0]) ?: continue
+            touched.add(m[0])
             if (m[0] in inventory) continue
             w.stage = m[1]; w.room = m[2]; w.x = m[3]; w.y = m[4]; w.z = m[5]; w.alpha = m[6]; w.beta = m[7]; w.gamma = m[8]
             w.foundFlag = (w.foundFlag and 0x7FFF) or 0x4000
@@ -440,6 +495,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         while (true) {
             val item = remoteTaken.poll() ?: return
             val w = vm.objects.getOrNull(item) ?: continue
+            touched.add(item)
             if (item in inventory) continue // both took it at the same moment: each keeps his own
             if (pendingFound == item) pendingFound = -1
             objects.getOrNull(item)?.let { if (it.w.active) deactivate(it) }
@@ -1065,7 +1121,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             if (hits(other.zv)) return false
         }
         a.pushBy(dx, dz)
-        if (coop) pushedDirty.add(target.w.index)
+        if (coop) { pushedDirty.add(target.w.index); touchLocal(target.w.index) }
         return true
     }
 
@@ -1213,7 +1269,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         w.foundFlag = (w.foundFlag and 0xBFFF) or 0x8000
         w.room = -1
         w.stage = -1
-        if (coop) coopItemTaken?.invoke(item)
+        if (coop) { touchLocal(item); coopItemTaken?.invoke(item) }
     }
 
     /** Runs the found-life script of an item with the given action (executeFoundLife). */
@@ -1563,7 +1619,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         removeFromInventory(item)
         w.foundFlag = w.foundFlag or 0x4000
         moved(item)
-        if (coop) coopItemPlaced?.invoke(item, w.stage, w.room, w.x, w.y, w.z, w.alpha and 0x3FF, w.beta and 0x3FF, w.gamma and 0x3FF)
+        if (coop) { touchLocal(item); coopItemPlaced?.invoke(item, w.stage, w.room, w.x, w.y, w.z, w.alpha and 0x3FF, w.beta and 0x3FF, w.gamma and 0x3FF) }
     }
 
     /** PUT_AT / DROP: an item is placed where another object is (it leaves the inventory and can be picked up again). */
@@ -1576,7 +1632,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         w.flags = w.flags or AF_FOUNDABLE
         w.trackNumber = time.coerceAtLeast(1) // do not offer it again at once
         moved(item)
-        if (coop) coopItemPlaced?.invoke(item, w.stage, w.room, w.x, w.y, w.z, w.alpha and 0x3FF, w.beta and 0x3FF, w.gamma and 0x3FF)
+        if (coop) { touchLocal(item); coopItemPlaced?.invoke(item, w.stage, w.room, w.x, w.y, w.z, w.alpha and 0x3FF, w.beta and 0x3FF, w.gamma and 0x3FF) }
     }
 
     override fun drop(item: Int, from: Int) = putAt(item, from)

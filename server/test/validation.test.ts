@@ -109,3 +109,11 @@ test("effect and world_var are checked", () => {
   assert.equal(parseClientMessage('{"type":"world_var","index":21,"value":2}').ok, false);
   assert.equal(parseClientMessage('{"type":"world_var","index":20,"value":99999}').ok, false);
 });
+
+test("world_snapshot is checked", () => {
+  const e = '{"obj":12,"stage":0,"room":0,"state":1,"x":1,"y":0,"z":2,"beta":5}';
+  assert.equal(parseClientMessage('{"type":"world_snapshot","items":[' + e + ']}').ok, true);
+  assert.equal(parseClientMessage('{"type":"world_snapshot","items":[]}').ok, false);
+  assert.equal(parseClientMessage('{"type":"world_snapshot","items":[' + e.replace('"state":1', '"state":3') + ']}').ok, false);
+  assert.equal(parseClientMessage('{"type":"world_snapshot","items":[' + Array(41).fill(e).join(",") + ']}').ok, false);
+});

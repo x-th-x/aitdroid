@@ -388,7 +388,7 @@ test("session names stay unique among active sessions", () => {
   assert.equal(names.size, 300);
 });
 
-test("a taken item goes to the other player once, not back to the sender", () => {
+test("a taken item goes to the other player, not back to the sender", () => {
   const { h } = pair();
   startNew(h);
   const out = h.send("A", { type: "item_taken", obj: 12 });
@@ -398,8 +398,8 @@ test("a taken item goes to the other player once, not back to the sender", () =>
   assert.equal(r.obj, 12);
   assert.equal(r.hero, "carnby");
   assert.equal(h.last("A", "item_taken"), undefined);
-  // the same item again (both took it at the same moment): nothing more is relayed
-  assert.equal(h.send("B", { type: "item_taken", obj: 12 }).length, 0);
+  // the other player took it at the same moment: that is told too (each phone decides what to do with it)
+  assert.equal(h.send("B", { type: "item_taken", obj: 12 }).length, 1);
 });
 
 test("a taken item is refused before the game runs", () => {
@@ -499,4 +499,13 @@ test("the host's effects and shared variables go to the guest; the guest may not
   assert.equal(h.last("B", "world_var")!.value, 1);
   assert.equal(h.errorCode(h.send("B", { type: "effect", kind: 0, a: 1, b: 0 }), "B"), "not_host");
   assert.equal(h.errorCode(h.send("B", { type: "world_var", index: 20, value: 1 }), "B"), "not_host");
+});
+
+test("the host's world snapshot goes to the guest; the guest may not send one", () => {
+  const { h } = pair();
+  startNew(h);
+  const entry = { obj: 12, stage: 0, room: 0, state: 1, x: 10, y: 0, z: 20, beta: 5 };
+  h.send("A", { type: "world_snapshot", items: [entry] });
+  assert.equal(h.last("B", "world_snapshot")!.items[0].obj, 12);
+  assert.equal(h.errorCode(h.send("B", { type: "world_snapshot", items: [entry] }), "B"), "not_host");
 });

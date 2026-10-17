@@ -55,6 +55,7 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
     @Volatile var onProps: ((List<IntArray>) -> Unit)? = null
     @Volatile var onCreatureHit: ((Int, Int) -> Unit)? = null
     @Volatile var onHurt: ((Int, Int) -> Unit)? = null
+    @Volatile var onSnapshot: ((List<IntArray>) -> Unit)? = null
     @Volatile var onEffect: ((Int, Int, Int) -> Unit)? = null
     @Volatile var onWorldVar: ((Int, Int) -> Unit)? = null
     @Volatile var onHeroDied: (() -> Unit)? = null
@@ -108,6 +109,7 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
     fun sendItemTaken(obj: Int): Boolean = client.send(CoopJson.itemTaken(obj))
 
     fun sendProps(items: List<IntArray>): Boolean = client.send(CoopJson.props(items))
+    fun sendSnapshot(items: List<IntArray>): Boolean = client.send(CoopJson.worldSnapshot(items))
     fun sendEffect(kind: Int, a: Int, b: Int): Boolean = client.send(CoopJson.effect(kind, a, b))
     fun sendWorldVar(index: Int, value: Int): Boolean = client.send(CoopJson.worldVar(index, value))
     fun sendCreatureHit(obj: Int, force: Int): Boolean = client.send(CoopJson.creatureHit(obj, force))
@@ -147,6 +149,7 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
         }
         when (event) {
             is ServerEvent.Props -> { onProps?.invoke(event.items); return }
+            is ServerEvent.WorldSnapshot -> { onSnapshot?.invoke(event.items); return }
             is ServerEvent.Effect -> { onEffect?.invoke(event.kind, event.a, event.b); return }
             is ServerEvent.WorldVar -> { onWorldVar?.invoke(event.index, event.value); return }
             is ServerEvent.CreatureHit -> { onCreatureHit?.invoke(event.obj, event.force); return }
@@ -193,7 +196,7 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
             }
             is ServerEvent.Closed -> { session = null; me = null; start = null; error = "The session ended: ${event.reason}." }
             is ServerEvent.Error -> error = describe(event)
-            is ServerEvent.Remote, is ServerEvent.ItemTaken, is ServerEvent.ItemPlaced, is ServerEvent.ObjectMoved, is ServerEvent.Props, is ServerEvent.Effect, is ServerEvent.WorldVar, is ServerEvent.CreatureHit, is ServerEvent.Hurt, is ServerEvent.HeroDied, is ServerEvent.Pong -> {}
+            is ServerEvent.Remote, is ServerEvent.ItemTaken, is ServerEvent.ItemPlaced, is ServerEvent.ObjectMoved, is ServerEvent.Props, is ServerEvent.WorldSnapshot, is ServerEvent.Effect, is ServerEvent.WorldVar, is ServerEvent.CreatureHit, is ServerEvent.Hurt, is ServerEvent.HeroDied, is ServerEvent.Pong -> {}
         }
     }
 
