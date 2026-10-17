@@ -1314,6 +1314,9 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         g.w.y = floorY
         g.w.z = pz
         g.w.gamma = 0
+        // throwStoppedAt of the original (all.asm 0x6DAF): the item is in the world again (0x4000) and is no longer "thrown" (0x1000); without it the scripts that wait for
+        // object(item) = 1 never go on (the vase of the first floor does not break and leaves no key)
+        g.w.foundFlag = (g.w.foundFlag or 0x4000) and 0xEFFF
     }
 
     // ------------------------------------------------------------------------------------------------------------------ saving
