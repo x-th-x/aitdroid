@@ -413,6 +413,8 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
     val context = androidx.compose.ui.platform.LocalContext.current
     // the intro is the film of stage 7 that the life scripts play (startGame(7, 1) of the original): the car, the driver, his walk through the house up to the attic stairs
     val game = remember(world) { (if (intro) AtticGame(world.game, ui, 7, 1, true, together) else AtticGame(world.game, ui, together = together)).also { g ->
+        // who plays: the scripts choose voices and more by this variable of the game (CHOOSE_PERSO, 0 = Carnby, 1 = Emily); a saved game brings its own value back
+        if (emily) g.vm.cvars[AtticGame.CVAR_CHOOSE_PERSON] = 1
         if (intro) return@also
         devItems.forEach { g.take(it) }
         floorStart?.let { f ->

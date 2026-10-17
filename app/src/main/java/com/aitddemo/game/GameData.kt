@@ -163,6 +163,9 @@ class GameData(
         }
     }
 
+    /** Entry [n] of ITD_RESS.PAK (the pictures, fonts and tile sheets of the interface) or null. */
+    fun resource(n: Int): ByteArray? = resourcePak.get(n)
+
     /** Sound sample [n] (entry n + 1 of LISTSAMP.PAK) or null. */
     fun sample(n: Int): VocSample? = samples.getOrPut(n) {
         try {

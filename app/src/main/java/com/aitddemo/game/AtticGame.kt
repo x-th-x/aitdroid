@@ -871,7 +871,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     /** Is the item too heavy to carry together with what he has? */
     fun tooHeavy(item: Int): Boolean {
         val weight = inventory.sumOf { vm.objects[it].weight }
-        return vm.objects[item].weight + weight > (vm.cvars.getOrElse(MAX_WEIGHT_CVAR) { 0 }.toInt().takeIf { it > 0 } ?: Int.MAX_VALUE)
+        // (the original also refuses when the list, with "Actions", would reach 30 entries)
+        return inventory.size + 1 >= MAX_ITEMS - 0 || vm.objects[item].weight + weight > (vm.cvars.getOrElse(MAX_WEIGHT_CVAR) { 0 }.toInt().takeIf { it > 0 } ?: Int.MAX_VALUE)
     }
 
     private fun takeItem(item: Int) {
@@ -981,7 +982,9 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     }
 
     override fun anim(obj: Int, anim: Int, type: Int, info: Int) {
-        val a = objects.getOrNull(obj)?.actor ?: return
+        val g = objects.getOrNull(obj) ?: return
+        val a = g.actor
+        if (a == null) { g.w.anim = anim; return } // an object without a body keeps what the script says
         a.playAnim(anim, type, info)
     }
 
@@ -1711,6 +1714,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         /** The smoke of a cigar (mode 4) lasts 660 ticks of the 60 per second timer. */
         const val SMOKE_TICKS = 660
         /** Positions in the CVars (DEFINES.ITD): the sound of an impact, the weight limit, the object that sends a thrown item back. */
+        const val CVAR_CHOOSE_PERSON = 8
+        const val MAX_ITEMS = 30
         const val CVAR_SAMPLE_CHOC = 9
         const val CVAR_REVERSE_OBJECT = 11
         const val CVAR_BODY_FLAMME = 1

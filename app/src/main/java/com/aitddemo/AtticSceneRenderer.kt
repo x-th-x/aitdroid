@@ -127,6 +127,12 @@ class AtticSceneRenderer {
     /** One thing to draw: a triangle (kind 0), a line (kind 1, from a to b) or a filled circle (kind 2, centre a, radius in [bx]); sorted by depth with the others. */
     private class Tri(val depth: Float, val ax: Float, val ay: Float, val bx: Float, val by: Float, val cx: Float, val cy: Float, val color: Int, val kind: Int = 0, val pts: FloatArray? = null)
 
+    /** One body alone on a transparent picture (the item windows of the interface): [actor]'s vertices are in the camera's world, drawn through [camera]. */
+    fun renderBody(camera: AtticCameraDef, actor: AtticActor) {
+        bitmap.eraseColor(0)
+        drawActor(AtticProjector(camera), actor)
+    }
+
     /** A plain picture without actors (for example a full-screen picture of the game). */
     fun renderPicture(picture: Bitmap) {
         canvas.drawBitmap(picture, 0f, 0f, null)
@@ -232,8 +238,10 @@ class AtticSceneRenderer {
             for (q in 0 until m) {
                 proj.screen(poly[q * 3], poly[q * 3 + 1], poly[q * 3 + 2], p0)
                 pts[q * 2] = p0[0] * S; pts[q * 2 + 1] = p0[1] * S
-                l = min(l, pts[q * 2]); r = max(r, pts[q * 2]); t = min(t, pts[q * 2 + 1]); b = max(b, pts[q * 2 + 1])
             }
+            // like the original: a polygon that turns its back to the camera is not drawn ((p1 - p0) x (p2 - p0) < 0 in the screen, y down)
+            if (CULL_BACK_FACES && (pts[2] - pts[0]) * (pts[5] - pts[1]) - (pts[3] - pts[1]) * (pts[4] - pts[0]) < 0f) continue
+            for (q in 0 until m) { l = min(l, pts[q * 2]); r = max(r, pts[q * 2]); t = min(t, pts[q * 2 + 1]); b = max(b, pts[q * 2 + 1]) }
             tris.add(Tri(farthest, 0f, 0f, 0f, 0f, 0f, 0f, col, 3, pts))
         }
         // lines: cut at the near plane, drawn two pixels wide (one plate pixel)
@@ -417,6 +425,9 @@ class AtticSceneRenderer {
 
     companion object {
         const val S = 2
+
+        /** The original draws only the polygons that face the camera. */
+        const val CULL_BACK_FACES = true
 
         /** Triangles are cut at this camera depth (units); everything nearer is not drawn. */
         const val CLIP = 30f

@@ -145,6 +145,7 @@ private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: 
             Screen.LOGO_3D -> TatouSpinner(modifier = Modifier.fillMaxSize())
             Screen.TITLE -> StartPictureImage(StartPicture.TITLE)
             Screen.MENU -> MenuScreen(
+                developerMode = developerMode,
                 onSelect = { index ->
                     when (index) {
                         0 -> { floorStart = null; screen = Screen.SELECT }

@@ -29,9 +29,9 @@ private const val GLYPH_CELL = OriginalFontData.CELL
 private const val FALLBACK_ADVANCE = 7
 private const val FALLBACK_FONT_SIZE_UNITS = 11.5f
 
-private fun glyphWidth(ch: Char): Int = StartAssets.font?.widths?.getOrNull(ch.code) ?: 0
+internal fun glyphWidth(ch: Char): Int = StartAssets.font?.widths?.getOrNull(ch.code) ?: 0
 
-private fun glyphAdvance(ch: Char): Int {
+internal fun glyphAdvance(ch: Char): Int {
     if (StartAssets.font == null) return FALLBACK_ADVANCE
     val w = glyphWidth(ch)
     return (if (w == 0) INTER_WORD_SPACE else w) + INTER_LETTER_SPACE
