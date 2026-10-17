@@ -87,6 +87,7 @@ object AtticOriginalReader {
             // DEFINES.ITD: 16 bit values, high byte first
             files.read(DEFINES_FILE)?.let { d -> ShortArray(d.size / 2) { (((d[it * 2].toInt() and 0xFF) shl 8) or (d[it * 2 + 1].toInt() and 0xFF)).toShort() } } ?: ShortArray(0),
             files.read(PRIORITY_FILE),
+            files.read("ENDSEQ.PAK")?.let { Pak(it) },
         )
         game.rooms.room(STAGE, ROOM) // the first room must be readable now (it is cached for the start)
         val music = musicPak.get(ATTIC_MUSIC + 1) ?: throw OriginalFilesException("${MusicOriginalReader.FILE}: Musik $ATTIC_MUSIC fehlt")

@@ -54,6 +54,9 @@ private class AtticUi(private val world: AtticOriginal, private val sounds: Intr
     var gameOverShown by mutableStateOf(false)
     var exitShown by mutableStateOf(false)
     var endShown by mutableStateOf(false)
+    /** The ending animation (the frames as bitmaps) and when it began; null when the file is missing. */
+    var endFrames: List<androidx.compose.ui.graphics.ImageBitmap>? = null
+    var endStartNanos = 0L
 
     /** A full screen picture of the game being shown (from PICTURE) and until when (engine ticks of the screen clock). */
     var picture by mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null)
@@ -151,6 +154,8 @@ private class AtticUi(private val world: AtticOriginal, private val sounds: Intr
     }
 
     override fun endSequence() {
+        endFrames = world.game.endFrames()?.map { StartAssets.picture(it) }
+        endStartNanos = System.nanoTime()
         endShown = true
     }
 
@@ -166,6 +171,9 @@ private class AtticUi(private val world: AtticOriginal, private val sounds: Intr
     }
 }
 
+private const val END_FRAME_MS = 125L // the ending animation: one frame each
+private const val END_HOLD_MS = 1500L // the last frame stays
+private const val END_FADE_MS = 1500L // then it fades to black and the text comes
 private const val INTRO_CAR = 286 // the car of the intro, which the camera follows
 private const val CAMERA_HOLD_TICKS = 90 // how long its last picture stays after the car has stopped (1.5 seconds of the 60 ticks per second)
 
@@ -405,6 +413,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
         if (DevOptions.vars.any { it.first == 19 }) g.objects[9].w.chronoStart = g.time
         DevOptions.vars.firstOrNull { it.first == 995 }?.let { v -> g.objects[4].let { w -> w.actor?.teleport(v.second, 0, 4568, w.w.beta) } } // the wardrobe pushed against the window at that x (for testing)
         if (DevOptions.vars.any { it.first == 999 }) g.special(1, 0) // shows the evaporation effect around the player (for testing)
+        if (DevOptions.vars.any { it.first == 990 }) ui.endSequence() // plays the ending animation at once (for testing)
         if (DevOptions.vars.any { it.first == 996 }) g.player?.actor?.let { g.effects.add(Effect(4, it.renderX, it.renderY, it.renderZ, g.time, null, 0, 0, 0)) } // the smoke of a cigar around the player (for testing)
         if (DevOptions.vars.any { it.first == 997 }) g.player?.actor?.let { g.effects.add(Effect(3, it.renderX, it.renderY - 1000, it.renderZ, g.time + 300, null, 0, 0, 0, g.vm.cvars[1].toInt())) } // the flash of a gun in front of the player for 5 seconds (for testing)
         if (DevOptions.vars.any { it.first == 998 }) g.player?.actor?.let { g.effects.add(Effect(1, it.renderX, it.renderY - 1000, it.renderZ, g.time, null)) } // the dots of a hit in front of the player (for testing)
@@ -777,8 +786,25 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
             }
         }
         if (ui.endShown) {
-            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.85f)).clickable { onExit() }, contentAlignment = Alignment.Center) {
-                BitmapText(text = "The End", scale = 4f, color = Color(0xFFF2E4B8))
+            val frames = ui.endFrames
+            // the ending of the original: the tree burns (ENDSEQ.PAK), a frame every 125 ms, the last one stays; then the text
+            var now by remember { mutableStateOf(System.nanoTime()) }
+            LaunchedEffect(Unit) { while (true) { withFrameNanos { now = System.nanoTime() } } }
+            val elapsedMs = (now - ui.endStartNanos) / 1_000_000L
+            val animMs = (frames?.size ?: 0) * END_FRAME_MS
+            Box(Modifier.fillMaxSize().background(Color.Black).clickable(enabled = frames == null || elapsedMs > animMs) { onExit() }, contentAlignment = Alignment.Center) {
+                if (frames != null) {
+                    Image(bitmap = frames[(elapsedMs / END_FRAME_MS).toInt().coerceIn(0, frames.size - 1)], contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+                    // after the last frame the picture fades to black and "The End" comes up
+                    val fade = ((elapsedMs - animMs - END_HOLD_MS).toFloat() / END_FADE_MS).coerceIn(0f, 1f)
+                    if (fade > 0f) {
+                        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = fade)), contentAlignment = Alignment.Center) {
+                            BitmapText(text = "The End", scale = 4f, color = Color(0xFFF2E4B8).copy(alpha = fade))
+                        }
+                    }
+                } else {
+                    BitmapText(text = "The End", scale = 4f, color = Color(0xFFF2E4B8))
+                }
             }
         }
         if (ui.exitShown && !intro) {
