@@ -1,0 +1,18 @@
+# Render blueprint for the co-op server (see server/README.md). Not deployed yet: this file only describes the service.
+services:
+  - type: web
+    name: aitdroid-coop-server
+    runtime: node
+    # the Android project stays untouched; the server lives in its own directory
+    rootDir: server
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    plan: free
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # which places of the game a client may report (stage/room; 0/0 is the attic)
+      - key: ALLOWED_AREAS
+        value: "0/0"
+    # Render sets PORT itself; the server listens on it
