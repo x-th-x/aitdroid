@@ -18,7 +18,7 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
     private val main = Handler(Looper.getMainLooper())
     private val client = CoopClient(this)
 
-    var url by mutableStateOf(prefs?.getString(KEY_URL, DEFAULT_URL) ?: DEFAULT_URL)
+    var url by mutableStateOf(initialUrl(prefs))
         private set
     var connection by mutableStateOf(Connection.DISCONNECTED)
         private set
@@ -213,6 +213,18 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
     }
 
     companion object {
+        /** An address saved before the production address existed (a test address of the LAN) is dropped once; after that the saved address wins again. */
+        private fun initialUrl(prefs: SharedPreferences?): String {
+            if (prefs == null) return DEFAULT_URL
+            if (prefs.getInt(KEY_URL_VERSION, 0) < URL_VERSION) {
+                prefs.edit().remove(KEY_URL).putInt(KEY_URL_VERSION, URL_VERSION).apply()
+                return DEFAULT_URL
+            }
+            return prefs.getString(KEY_URL, DEFAULT_URL) ?: DEFAULT_URL
+        }
+
+        const val URL_VERSION = 1
+        const val KEY_URL_VERSION = "coop_url_version"
         const val PROTOCOL = 1
         const val KEY_URL = "coop_url"
         // the address of the production service on Render (a phone that has saved another address in the lobby keeps that one)
