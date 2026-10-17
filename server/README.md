@@ -169,7 +169,7 @@ behaviour on a real mobile network.
 1. Push the branch with `server/` and `render.yaml` to GitHub (a private repo works: install Render's GitHub app for it).
 2. In the Render dashboard: **New → Blueprint**, pick the repository and the branch; Render reads `render.yaml` (a web service `aitdroid-coop-server`, root directory `server`,
    build `npm ci && npm run build`, start `npm start`, health check `/health`). Alternatively create a **Web Service** by hand with the same values.
-3. Wait for the first deploy to finish; the URL is `https://aitdroid-coop-server.onrender.com` (or the name Render gives).
+3. Wait for the first deploy to finish; the URL is `https://aitdroid-coop.onrender.com` (or the name Render gives).
 4. Check `https://<service>.onrender.com/health` in a browser.
 5. In the app use `wss://<service>.onrender.com` as the server address.
 6. Note on the free plan: the service sleeps after about 15 minutes without traffic; the first connection after that waits roughly a minute while it wakes up. The sessions are in memory, so a

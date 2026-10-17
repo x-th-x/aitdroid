@@ -215,7 +215,7 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
     companion object {
         const val PROTOCOL = 1
         const val KEY_URL = "coop_url"
-        // the address of the production service on Render; it has to be changed to the real one (and the service deployed) before it works
-        const val DEFAULT_URL = "wss://aitdroid-coop-server.onrender.com"
+        // the address of the production service on Render (a phone that has saved another address in the lobby keeps that one)
+        const val DEFAULT_URL = "wss://aitdroid-coop.onrender.com"
     }
 }
