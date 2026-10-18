@@ -20,6 +20,12 @@ class StartOriginal(
     val pageTurn: VocSample?,
     val storyCarnby: String,
     val storyEmily: String,
+    /** The game's colour table (ITD_RESS.PAK entry 4) */
+    val palette: IntArray,
+    /** The page picture of the books (ITD_RESS.PAK entry 8, 320 x 200 ARGB) */
+    val bookPage: IntArray,
+    /** The credits, a book text of ENGLISH.PAK (entry 20) in the format of the books of the game (#P, #T, #C), or null */
+    val credits: ByteArray?,
 )
 
 object StartOriginalReader {
@@ -37,12 +43,14 @@ object StartOriginalReader {
     private const val SELECT = 11
     private const val MENU = 13
     private const val TITLE = 14
+    private const val BOOK_PAGE = 8
 
     // entries of LISTSAMP.PAK and ENGLISH.PAK
     private const val THUNDER = 7
     private const val PAGE_TURN = 50
     private const val TEXT_CARNBY = 21
     private const val TEXT_EMILY = 22
+    private const val TEXT_CREDITS = 20
 
     fun missingFiles(files: GameFiles): List<String> = REQUIRED.filter { !files.exists(it) }
 
@@ -69,6 +77,9 @@ object StartOriginalReader {
                 pageTurn = samples.get(PAGE_TURN)?.let { VocSample.parse(it) },
                 storyCarnby = story(texts.get(TEXT_CARNBY) ?: throw OriginalFilesException("$TEXT_FILE: Text fehlt")),
                 storyEmily = story(texts.get(TEXT_EMILY) ?: throw OriginalFilesException("$TEXT_FILE: Text fehlt")),
+                palette = palette,
+                bookPage = picture(entry(BOOK_PAGE), palette),
+                credits = texts.get(TEXT_CREDITS),
             )
         } catch (e: OriginalFilesException) {
             throw e

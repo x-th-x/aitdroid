@@ -40,7 +40,7 @@ import androidx.compose.ui.unit.dp
 import com.aitddemo.original.GameFiles
 import kotlinx.coroutines.delay
 
-private enum class Screen { LOGO_STATIC, LOGO_3D, TITLE, MENU, SELECT, LOAD, MODELS, MUSIC, INTRO, ATTIC, OPTIONS, FLOORS }
+private enum class Screen { LOGO_STATIC, LOGO_3D, TITLE, CREDITS, MENU, SELECT, LOAD, MODELS, MUSIC, INTRO, ATTIC, OPTIONS, FLOORS }
 
 private val TEXT_COLOR = Color(0xFFF2E4B8)
 
@@ -120,12 +120,17 @@ private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: 
         when (screen) {
             Screen.LOGO_STATIC -> { delay(1800); advance() }
             Screen.LOGO_3D -> { StartAssets.playThunder(); delay(6000); advance() }
+            // the original shows the title for 300 ticks and then the credits as a book (a tap or key skips them)
+            Screen.TITLE -> { delay(5000); screen = Screen.CREDITS }
             else -> {}
         }
     }
 
     // System back from the character screen returns to the main menu instead of closing the app.
     BackHandler(enabled = screen == Screen.SELECT) {
+        screen = Screen.MENU
+    }
+    BackHandler(enabled = screen == Screen.CREDITS) {
         screen = Screen.MENU
     }
 
@@ -140,6 +145,7 @@ private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: 
             Screen.LOGO_STATIC -> StartPictureImage(StartPicture.LOGO)
             Screen.LOGO_3D -> TatouSpinner(modifier = Modifier.fillMaxSize())
             Screen.TITLE -> StartPictureImage(StartPicture.TITLE)
+            Screen.CREDITS -> CreditsScreen(onDone = { screen = Screen.MENU })
             Screen.MENU -> MenuScreen(
                 developerMode = developerMode,
                 onSelect = { index ->
