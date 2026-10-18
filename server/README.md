@@ -4,7 +4,7 @@ A small WebSocket server for the co-op prototype of the Android port: two player
 It runs the rules of the session (who is in it, which hero belongs to whom, how the game is started, what happens at a disconnect) and relays the state of
 each hero to the other player. It does **not** simulate the game: every phone moves its own hero and the server passes the result on. It is not an anti-cheat.
 
-Node.js 20 or newer, TypeScript, the `ws` library. Status: written and tested locally (see "Tests"); **not deployed to Render**.
+Node.js 20 or newer, TypeScript, the `ws` library. Status: tested locally (see "Tests"); deployed to Render as `aitdroid-coop` (`https://aitdroid-coop.onrender.com`, Frankfurt, free plan, Auto-Deploy from the branch `feature/coop`). The live server was checked with two scripted clients: every room of the game is accepted (`ALLOWED_AREAS=*`).
 
 ## Layout
 
@@ -168,7 +168,7 @@ clients (create, join, third rejected, start, simultaneous states, impersonation
 Needs two real Android devices (or emulators) and is **not** covered by the automated tests: the lobby screens, the shared start of the game itself, how smooth the remote hero looks, and the
 behaviour on a real mobile network.
 
-## Deploy to Render (not done yet)
+## Deploy to Render (done; the service is `aitdroid-coop`)
 
 1. Push the branch with `server/` and `render.yaml` to GitHub (a private repo works: install Render's GitHub app for it).
 2. In the Render dashboard: **New → Blueprint**, pick the repository and the branch; Render reads `render.yaml` (a web service `aitdroid-coop`, root directory `server`,
@@ -176,7 +176,8 @@ behaviour on a real mobile network.
 3. Wait for the first deploy to finish; the URL is `https://aitdroid-coop.onrender.com` (or the name Render gives).
 4. Check `https://<service>.onrender.com/health` in a browser.
 5. In the app use `wss://<service>.onrender.com` as the server address.
-6. Note on the free plan: the service sleeps after about 15 minutes without traffic; the first connection after that waits roughly a minute while it wakes up. The sessions are in memory, so a
+6. `ALLOWED_AREAS` must be `*` (or unset) in the service's environment; a value set in the dashboard overrides `render.yaml` (it was `0/0` once and blocked every room outside the attic with `area_not_allowed`).
+7. Note on the free plan: the service sleeps after about 15 minutes without traffic; the first connection after that waits roughly a minute while it wakes up. The sessions are in memory, so a
    restart or a new deploy ends all sessions (on purpose).
 
 ## The Android app (co-op prototype)
@@ -210,7 +211,7 @@ behaviour on a real mobile network.
 * On one phone (Huawei PCT-L29 over `adb reverse`, the server on the computer, a scripted client as the second player): create, join, choices, ready, start (new game and a shared save point:
   both clients received the same bytes and the game started in the attic), the lobby when the second player leaves before the start, the scripted Emily shown walking in the attic, Carnby's
   moves arriving at the server (x grew from 3231 to 5330 with animation 255), and the note "The other player left: the game is interrupted."
-* **Not tested:** two real phones at once, a real mobile network, Render (not deployed), how smooth the remote hero looks over a real network with jitter (the buffer is tested only with simulated jitter),
+* **Not tested:** two real phones at once, a real mobile network, a real game on the Render server with two phones, how smooth the remote hero looks over a real network with jitter (the buffer is tested only with simulated jitter),
   Emily as the local hero on a phone (the code path swaps the start places; only Carnby was played on a phone).
 
 ## Known limitations
@@ -219,7 +220,7 @@ behaviour on a real mobile network.
 * Keeping the two worlds in step: every event (item taken or put down, furniture pushed, props) is sent at once, and in addition the host sends a snapshot of every object that was ever taken, put down or pushed every ten seconds (and resends all props). The guest lays it over its own world, except what the guest did itself in the last five seconds and the items in its bag (those it tells the host again). On the PC, with all item and furniture events dropped, the guest's world was equal to the host's after the next snapshot (an item put down, an item taken, a pushed wardrobe); a change made only on the guest was put right 5 to 10 seconds later.
 * Rooms: every room is allowed by default; the server only checks that a state is in range and that the hero does not move too fast inside one room (a change of room is not a jump).
 * The server relays; it does not simulate. Clients are trusted for their own hero's movement, within the plausibility checks above.
-* No reconnection: a lost connection in a running game interrupts it for good.
+* A connection lost for more than 2 minutes ends the game (see "Losing the connection" above).
 * Sessions live in memory only.
 * No accounts, no matchmaking, no TLS inside the process (Render provides it).
 
