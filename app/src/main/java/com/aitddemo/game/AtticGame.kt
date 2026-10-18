@@ -648,6 +648,9 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             vm.objects[o].room = -1
         }
         personalVars = com.aitddemo.life.LifeScan.varsWrittenFrom(vm.objects[playerIndex].life) { data.script(it) }
+        // the four containers of rooms 3/12 and 3/13 stay closed ("It's closed!") until the ghosts of the room have been beaten: variable 130 is set by the script of object 175,
+        // which is removed with the creatures of the floors. In co-op the containers are open from the start (found by running the room: with 130 = 1 they open as in the original).
+        vm.vars[CONTAINERS_OPEN_VAR] = 1
         latchBase = IntArray(vm.vars.size) { vm.vars[it].toInt() }
         latchLast = IntArray(vm.vars.size) { vm.vars[it].toInt() }
         latchChanges = IntArray(vm.vars.size)
@@ -2313,6 +2316,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         /** The two creatures of the attic (A comes through the window, B out of the trapdoor): objects of OBJETS.ITD. */
         /** The creatures, and the trapdoor lid they open, are run by the host; the horse and the window change on either phone. */
         const val CREATURE_COUNT_VAR = 20
+        const val CONTAINERS_OPEN_VAR = 130
         /** Co-op latch: a variable is looked at every 10 ticks and is sent when it has kept its new value for 60 ticks (1 s) */
         const val LATCH_SAMPLE = 10
         const val LATCH_HOLD = 60
