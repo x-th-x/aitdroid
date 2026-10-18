@@ -304,26 +304,27 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     /**
      * World variables (a door unlocked, a puzzle step done) are shared as changes that stayed: a variable whose value changed and kept the new value for three seconds is sent with
-     * the value it replaces, and the other phone takes it over only if it still holds that old value (so the two phones never overwrite each other's progress). A variable that
-     * flips back and forth, or counts all the time, is not shared.
+     * the value it replaces, and the other phone takes it over if it still holds that old value. When both phones changed the same variable the host's value wins: the host ignores a
+     * change that does not fit, the guest takes the host's value anyway, so the two phones end up with the same value. A variable that flips back and forth, or counts all the time,
+     * is not shared.
      */
     private fun syncLatches() {
         while (true) {
             val l = remoteLatches.poll() ?: break
             val i = l[0]
-            if (i in vm.vars.indices && i !in personalVars && i != CREATURE_COUNT_VAR && vm.vars[i].toInt() == l[2]) {
+            if (i in vm.vars.indices && i !in personalVars && i != CREATURE_COUNT_VAR && (!coopHost || vm.vars[i].toInt() == l[2])) {
                 vm.vars[i] = l[1].toShort()
                 latchBase[i] = l[1]; latchLast[i] = l[1]
             }
         }
-        if (time % 30 != 0) return
+        if (time % LATCH_SAMPLE != 0) return
         for (i in vm.vars.indices) {
             if (i in personalVars || i == CREATURE_COUNT_VAR) continue
             val v = vm.vars[i].toInt()
             if (v != latchLast[i]) { latchLast[i] = v; latchChanges[i]++; latchSince[i] = time }
             if (time % 600 == 0 && latchChanges[i] > 0) latchChanges[i]--
             if (latchChanges[i] > 8 || v == latchBase[i]) continue
-            if (time - latchSince[i] >= 180) { val old = latchBase[i]; latchBase[i] = v; coopLatch?.invoke(i, v, old) }
+            if (time - latchSince[i] >= LATCH_HOLD) { val old = latchBase[i]; latchBase[i] = v; coopLatch?.invoke(i, v, old) }
         }
     }
 
@@ -2305,6 +2306,9 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         /** The two creatures of the attic (A comes through the window, B out of the trapdoor): objects of OBJETS.ITD. */
         /** The creatures, and the trapdoor lid they open, are run by the host; the horse and the window change on either phone. */
         const val CREATURE_COUNT_VAR = 20
+        /** Co-op latch: a variable is looked at every 10 ticks and is sent when it has kept its new value for 60 ticks (1 s) */
+        const val LATCH_SAMPLE = 10
+        const val LATCH_HOLD = 60
         val CREATURES = intArrayOf(9, 21)
         val PUPPETS = intArrayOf(8, 9, 21)
         val SHARED_PROPS = intArrayOf(6, 7)
