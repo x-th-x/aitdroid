@@ -1321,6 +1321,15 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     // ------------------------------------------------------------------------------------------------------------------ saving
 
+    /** Where an object is right now, in the frame of its own room: the actor's position when it has one (the copy in the world object is only brought up to date when the object is updated, so right after a room change it can still be the one of the old room). */
+    private fun savedPosition(g: GameObject): IntArray {
+        val w = g.w
+        val a = g.actor
+        if (!w.active || a == null) return intArrayOf(w.x, w.y, w.z, w.beta)
+        val d = frameDelta(w.room)
+        return if (d != null) intArrayOf(a.renderX + d[0], a.renderY - d[1], a.renderZ - d[2], a.beta and 0x3FF) else intArrayOf(a.renderX, a.renderY, a.renderZ, a.beta and 0x3FF)
+    }
+
     /** Writes everything that makes up the state of the game: variables, world objects, inventory, the room the player is in and what moves in it. */
     fun saveState(out: java.io.DataOutputStream) {
         out.writeInt(stage); out.writeInt(room)
@@ -1331,7 +1340,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         out.writeInt(objects.size)
         for (g in objects) {
             val w = g.w
-            for (v in intArrayOf(w.body, w.flags, w.typeZv, w.foundBody, w.foundName, w.foundFlag, w.foundLife, w.x, w.y, w.z, w.alpha, w.beta, w.gamma, w.stage, w.room,
+            val pos = savedPosition(g)
+            for (v in intArrayOf(w.body, w.flags, w.typeZv, w.foundBody, w.foundName, w.foundFlag, w.foundLife, pos[0], pos[1], pos[2], w.alpha, pos[3], w.gamma, w.stage, w.room,
                 w.lifeMode, w.life, w.floorLife, w.anim, w.frame, w.animType, w.animInfo, w.trackMode, w.trackNumber, w.weight, w.mark, w.hitForce, w.falling,
                 time - w.chronoStart, time - w.roomChronoStart)) out.writeInt(v)
             out.writeBoolean(w.active)
