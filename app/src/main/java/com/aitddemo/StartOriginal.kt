@@ -20,12 +20,21 @@ class StartOriginal(
     val pageTurn: VocSample?,
     val storyCarnby: String,
     val storyEmily: String,
+    /** The game's colour table (ITD_RESS.PAK entry 4) */
+    val palette: IntArray,
+    /** The page picture of the books (ITD_RESS.PAK entry 8, 320 x 200 ARGB) */
+    val bookPage: IntArray,
+    /** The credits, a book text of ENGLISH.PAK (entry 20) in the format of the books of the game (#P, #T, #C), or null */
+    val credits: ByteArray?,
+    /** The pictures of PRESENT.PAK as they are in the file (770 bytes of header, 64000 pixels): the slide show of the attract mode; empty when the file is missing */
+    val present: List<ByteArray>,
 )
 
 object StartOriginalReader {
     const val RESOURCE_FILE = "ITD_RESS.PAK"
     const val SAMPLE_FILE = "LISTSAMP.PAK"
     const val TEXT_FILE = "ENGLISH.PAK"
+    const val PRESENT_FILE = "PRESENT.PAK"
     val REQUIRED = listOf(RESOURCE_FILE, SAMPLE_FILE, TEXT_FILE)
 
     // entries of ITD_RESS.PAK
@@ -37,12 +46,14 @@ object StartOriginalReader {
     private const val SELECT = 11
     private const val MENU = 13
     private const val TITLE = 14
+    private const val BOOK_PAGE = 8
 
     // entries of LISTSAMP.PAK and ENGLISH.PAK
     private const val THUNDER = 7
     private const val PAGE_TURN = 50
     private const val TEXT_CARNBY = 21
     private const val TEXT_EMILY = 22
+    private const val TEXT_CREDITS = 20
 
     fun missingFiles(files: GameFiles): List<String> = REQUIRED.filter { !files.exists(it) }
 
@@ -69,6 +80,10 @@ object StartOriginalReader {
                 pageTurn = samples.get(PAGE_TURN)?.let { VocSample.parse(it) },
                 storyCarnby = story(texts.get(TEXT_CARNBY) ?: throw OriginalFilesException("$TEXT_FILE: Text fehlt")),
                 storyEmily = story(texts.get(TEXT_EMILY) ?: throw OriginalFilesException("$TEXT_FILE: Text fehlt")),
+                palette = palette,
+                bookPage = picture(entry(BOOK_PAGE), palette),
+                credits = texts.get(TEXT_CREDITS),
+                present = files.read(PRESENT_FILE)?.let { b -> Pak(b).let { p -> (1..14).mapNotNull { p.get(it) }.filter { it.size >= 64770 } } } ?: emptyList(),
             )
         } catch (e: OriginalFilesException) {
             throw e

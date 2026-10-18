@@ -82,9 +82,29 @@ class GameData(
     /** Together mode: the bodies and animations of the other hero (Emily's when Carnby plays and the other way round), same numbers as the player's own lists. */
     private val companionBodyPak: Pak? = null,
     private val companionAnimPak: Pak? = null,
+    /** ENDSEQ.PAK, the ending animation, or null when the file is missing (the ending then shows only its text). */
+    private val endPak: Pak? = null,
 ) {
     /** Does this game have the other hero's bodies and animations (Together mode)? */
     val hasCompanion: Boolean get() = companionBodyPak != null && companionAnimPak != null
+
+    private var endFramesCache: List<IntArray>? = null
+    private var endFramesRead = false
+
+    /** The frames of the ending animation (each 320 x 200 ARGB), or null when the file is missing or not as expected. Decoded once. */
+    fun endFrames(): List<IntArray>? {
+        if (!endFramesRead) {
+            endFramesRead = true
+            val pak = endPak
+            if (pak != null) endFramesCache = try {
+                val entries = ArrayList<ByteArray>()
+                var i = 1
+                while (true) { entries.add(pak.get(i) ?: break); i++ }
+                EndSequence.decode(entries)
+            } catch (_: Exception) { null }
+        }
+        return endFramesCache
+    }
 
     /** The priority of sample [n] (0 when the file is missing). */
     fun samplePriority(n: Int): Int = priorities?.getOrNull(n)?.toInt()?.and(0xFF) ?: 0

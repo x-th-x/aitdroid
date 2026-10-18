@@ -92,6 +92,7 @@ object AtticOriginalReader {
             files.read(PRIORITY_FILE),
             if (together) Pak(files.read(if (emily) BODY_FILE else EMILY_BODY_FILE)!!) else null,
             if (together) Pak(files.read(if (emily) ANIM_FILE else EMILY_ANIM_FILE)!!) else null,
+            files.read("ENDSEQ.PAK")?.let { Pak(it) },
         )
         game.rooms.room(STAGE, ROOM) // the first room must be readable now (it is cached for the start)
         val music = musicPak.get(ATTIC_MUSIC + 1) ?: throw OriginalFilesException("${MusicOriginalReader.FILE}: Musik $ATTIC_MUSIC fehlt")

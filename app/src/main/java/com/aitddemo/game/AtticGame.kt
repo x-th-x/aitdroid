@@ -1567,6 +1567,9 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         return intArrayOf((x * c - z * sn).toInt(), posed[v * 3 + 1].toInt(), (x * sn + z * c).toInt())
     }
 
+    /** The box that blows, shots and thrown items test: the one of the actor, or the box of the wall that an invisible object (ZV type 4) stands for (the table of the original holds it as the ZV of the object). */
+    private fun hitBox(o: GameObject): IntArray? = o.fixedZv ?: o.actor?.zv
+
     /** GereFrappe: the state machine of blows and shots of one object, once per tick after its animation. */
     private fun processAction(g: GameObject) {
         val w = g.w
@@ -1600,7 +1603,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                 }
                 for (other in objects) {
                     if (other === g || !other.w.active) continue
-                    val zv = other.actor?.zv ?: continue
+                    val zv = hitBox(other) ?: continue
                     if (!(zv[0] < x + r && x - r < zv[1] && zv[2] < y + r && y - r < zv[3] && zv[4] < z + r && z - r < zv[5])) continue
                     w.hit = other.w.index
                     other.w.hitBy = w.index
@@ -1608,6 +1611,22 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                     if (other.actor?.animated == true) {
                         g.actionType = 0
                         return
+                    }
+                }
+            }
+            8 -> {
+                // HIT_OBJECT (all.asm 0xC3B0): every tick the box of the object itself, 10 units wider on every side, hits what it touches: the other gets HIT_BY and the force, this one HIT;
+                // it goes on until STOP_HIT_OBJECT (the list of the original holds three objects at most)
+                val mine = hitBox(g) ?: return
+                var n = 0
+                for (other in objects) {
+                    if (other === g || !other.w.active) continue
+                    val zv = hitBox(other) ?: continue
+                    if (zv[0] < mine[1] + 10 && mine[0] - 10 < zv[1] && zv[2] < mine[3] + 10 && mine[2] - 10 < zv[3] && zv[4] < mine[5] + 10 && mine[4] - 10 < zv[5]) {
+                        w.hit = other.w.index
+                        other.w.hitBy = w.index
+                        other.w.hitForce = g.actionForce
+                        if (++n == 3) break
                     }
                 }
             }
@@ -1665,7 +1684,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             if (roomView.hardcols.any { h -> h.x1 < x + p && x - p < h.x2 && h.y1 < y + p && y - p < h.y2 && h.z1 < z + p && z - p < h.z2 }) { impact(prevX, prevZ); return } // a wall stops the shot
             for (other in objects) {
                 if (other === g || !other.w.active || other.w.flags and AF_SPECIAL != 0) continue // (effects cannot be hit)
-                val zv = other.actor?.zv ?: continue
+                val zv = hitBox(other) ?: continue
                 if (zv[0] < x + p && x - p < zv[1] && zv[2] < y + p && y - p < zv[3] && zv[4] < z + p && z - p < zv[5]) {
                     g.w.hit = other.w.index
                     other.w.hitBy = g.w.index
@@ -2068,13 +2087,15 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     }
 
     /**
-     * A thrown item flies 3000 units in 60 ticks along the heading of the thrower. A wall, or an object that is hit (it gets HIT_BY and the force), stops it; the
-     * object named by the CVar REVERSE_OBJECT sends it back. It lands at floor height on the last place that is free of walls (throwStoppedAt of the original).
+     * A thrown item flies along the heading of the thrower, 50 units a tick: the exe starts the move value 0 -> 3000 over 60 ticks again every time it has run out (all.asm
+     * 0x80C1: an actor without animation and with a move target), so it goes on until something stops it. A wall, or an object that is hit (it gets HIT_BY and the force),
+     * stops it; the object named by the CVar REVERSE_OBJECT sends it back. It lands at floor height on the last place that is free of walls (throwStoppedAt of the original).
+     * (An arrow shot along the hallway of the paintings reaches the painting at the far end, 10000 units away; the end of the room stops what would leave it.)
      */
     private fun processFlight(g: GameObject) {
         val a = g.actor ?: run { g.flightTicks = -1; return }
         g.flightTicks++
-        val dist = 3000 * minOf(g.flightTicks, 60) / 60
+        val dist = 50 * g.flightTicks
         val ang = (g.flightBeta and 0x3FF) * 2.0 * Math.PI / 1024.0
         val nx = g.flightX + (dist * Math.sin(ang)).toInt()
         val nz = g.flightZ - (dist * Math.cos(ang)).toInt()
@@ -2085,7 +2106,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         var stop = roomView.hardcols.any { h -> hits(intArrayOf(h.x1, h.x2, h.y1, h.y2, h.z1, h.z2)) }
         for (o in objects) {
             if (o === g || !o.w.active || o.w.index == g.flightThrower) continue
-            val zo = o.actor?.zv ?: continue
+            val zo = hitBox(o) ?: continue
             if (!hits(zo)) continue
             if (o.w.index == vm.cvars[CVAR_REVERSE_OBJECT].toInt()) {
                 // it flies back from where it is, and the thrower is now the one that sent it back
@@ -2101,7 +2122,9 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             o.w.hitForce = g.actionForce
             stop = true
         }
-        if (stop || g.flightTicks >= 60) {
+        val b = roomView.bounds
+        if (nx < b[0] - 400 || nx > b[1] + 400 || nz < b[2] - 400 || nz > b[3] + 400) stop = true // it would leave the room (a doorway): it comes down here
+        if (stop || g.flightTicks >= 1200) {
             ui.playSample(vm.cvars[CVAR_SAMPLE_CHOC].toInt())
             if (g.flightThrower == playerIndex) heroSoundNow(vm.cvars[CVAR_SAMPLE_CHOC].toInt()) // the impact of what the local hero threw
             landThrown(g, g.w.x, g.w.z)
@@ -2137,9 +2160,21 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         g.w.y = floorY
         g.w.z = pz
         g.w.gamma = 0
+        // throwStoppedAt of the original (all.asm 0x6DAF): the item is in the world again (0x4000) and is no longer "thrown" (0x1000); without it the scripts that wait for
+        // object(item) = 1 never go on (the vase of the first floor does not break and leaves no key)
+        g.w.foundFlag = (g.w.foundFlag or 0x4000) and 0xEFFF
     }
 
     // ------------------------------------------------------------------------------------------------------------------ saving
+
+    /** Where an object is right now, in the frame of its own room: the actor's position when it has one (the copy in the world object is only brought up to date when the object is updated, so right after a room change it can still be the one of the old room). */
+    private fun savedPosition(g: GameObject): IntArray {
+        val w = g.w
+        val a = g.actor
+        if (!w.active || a == null) return intArrayOf(w.x, w.y, w.z, w.beta)
+        val d = frameDelta(w.room)
+        return if (d != null) intArrayOf(a.renderX + d[0], a.renderY - d[1], a.renderZ - d[2], a.beta and 0x3FF) else intArrayOf(a.renderX, a.renderY, a.renderZ, a.beta and 0x3FF)
+    }
 
     /** Writes everything that makes up the state of the game: variables, world objects, inventory, the room the player is in and what moves in it. */
     fun saveState(out: java.io.DataOutputStream) {
@@ -2151,7 +2186,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         out.writeInt(objects.size)
         for (g in objects) {
             val w = g.w
-            for (v in intArrayOf(w.body, w.flags, w.typeZv, w.foundBody, w.foundName, w.foundFlag, w.foundLife, w.x, w.y, w.z, w.alpha, w.beta, w.gamma, w.stage, w.room,
+            val pos = savedPosition(g)
+            for (v in intArrayOf(w.body, w.flags, w.typeZv, w.foundBody, w.foundName, w.foundFlag, w.foundLife, pos[0], pos[1], pos[2], w.alpha, pos[3], w.gamma, w.stage, w.room,
                 w.lifeMode, w.life, w.floorLife, w.anim, w.frame, w.animType, w.animInfo, w.trackMode, w.trackNumber, w.weight, w.mark, w.hitForce, w.falling,
                 time - w.chronoStart, time - w.roomChronoStart)) out.writeInt(v)
             out.writeBoolean(w.active)

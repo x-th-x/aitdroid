@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -113,19 +114,40 @@ fun BookReader(game: AtticGame, index: Int, type: Int, onClose: () -> Unit) {
     }
     val picture = remember(type) { game.data.bookPicture(type)?.let { StartAssets.picture(it) } }
     var page by remember(index, type) { mutableIntStateOf(0) }
+    var turnTo by remember(index, type) { mutableIntStateOf(-1) } // the page that is being turned to (books only)
+    var edge by remember(index, type) { mutableIntStateOf(0) }
     val color = Color(game.data.palette.getOrElse(26) { 0xFF000000.toInt() })
+    fun go(to: Int) {
+        if (turnTo >= 0 || to == page || to !in pages.indices) return
+        StartAssets.playPageTurn() // the exe plays the page-turn sample at every change of the page
+        if (type == 1) turnTo = to else page = to
+    }
+    LaunchedEffect(turnTo) {
+        if (turnTo >= 0) {
+            val to = turnTo
+            runPageTurn(to > page) { edge = it }
+            page = to
+            turnTo = -1
+        }
+    }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         GameCanvas(Modifier.fillMaxSize()) {
-            if (picture != null) {
-                androidx.compose.foundation.Image(bitmap = picture, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.FillBounds, modifier = Modifier.fillMaxSize())
-            }
-            pages.getOrNull(page)?.forEach { line ->
-                line.words.forEach { w ->
-                    Box(Modifier.offset(x = gx(w.x), y = gy(line.y))) { BitmapText(text = w.text, scale = unit.value, color = color) }
+            @Composable
+            fun layer(i: Int) {
+                Box(Modifier.size(gx(320), gy(200))) {
+                    if (picture != null) {
+                        androidx.compose.foundation.Image(bitmap = picture, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.FillBounds, modifier = Modifier.fillMaxSize())
+                    }
+                    pages.getOrNull(i)?.forEach { line ->
+                        line.words.forEach { w ->
+                            Box(Modifier.offset(x = gx(w.x), y = gy(line.y))) { BitmapText(text = w.text, scale = unit.value, color = color) }
+                        }
+                    }
                 }
             }
-            if (page > 0) Choice("<", 22, 182, false) { page-- }
-            if (page < pages.size - 1) Choice(">", 298, 182, false) { page++ }
+            if (turnTo >= 0) PageTurn(edge, turnTo > page, game.data.palette, { layer(page) }, { layer(turnTo) }) else layer(page)
+            if (turnTo < 0 && page > 0) Choice("<", 22, 182, false) { go(page - 1) }
+            if (turnTo < 0 && page < pages.size - 1) Choice(">", 298, 182, false) { go(page + 1) }
         }
         Box(
             Modifier.align(Alignment.BottomStart).padding(12.dp).background(Color.Black.copy(alpha = 0.5f)).clickable(onClick = onClose).padding(horizontal = 10.dp, vertical = 6.dp),
