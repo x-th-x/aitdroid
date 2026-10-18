@@ -709,10 +709,12 @@ class Actor(
             local[4] += sz
             local[5] += sz
             // walls of the room (AsmCheckListCol + GereCollision)
-            if (wallCollision) for (h in hardcols) {
-                if (!hits(local, h.x1, h.x2, h.y1, h.y2, h.z1, h.z2)) continue
+            // the list of the boxes that the move runs into is made first (AsmCheckListCol, 1027:0083); then each of them is dealt with in turn: a box that an earlier push
+            // has already left (a search box set into a wall, like the hole behind the clock) still gives its HARD_COL
+            if (wallCollision) for (h in hardcols.filter { hits(local, it.x1, it.x2, it.y1, it.y2, it.z1, it.z2) }) {
                 if (h.type == 9) hardCol = h.parameter
                 if (h.type == 3) hardCol = 255
+                if (!hits(local, h.x1, h.x2, h.y1, h.y2, h.z1, h.z2)) continue
                 val r = collide(zv, local, h, sx, sz)
                 animNegX += r[0] - sx
                 animNegZ += r[1] - sz

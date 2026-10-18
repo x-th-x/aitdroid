@@ -775,6 +775,9 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         return intArrayOf((x * c - z * sn).toInt(), posed[v * 3 + 1].toInt(), (x * sn + z * c).toInt())
     }
 
+    /** The box that blows, shots and thrown items test: the one of the actor, or the box of the wall that an invisible object (ZV type 4) stands for (the table of the original holds it as the ZV of the object). */
+    private fun hitBox(o: GameObject): IntArray? = o.fixedZv ?: o.actor?.zv
+
     /** GereFrappe: the state machine of blows and shots of one object, once per tick after its animation. */
     private fun processAction(g: GameObject) {
         val w = g.w
@@ -799,7 +802,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                 val r = g.actionRange
                 for (other in objects) {
                     if (other === g || !other.w.active) continue
-                    val zv = other.actor?.zv ?: continue
+                    val zv = hitBox(other) ?: continue
                     if (!(zv[0] < x + r && x - r < zv[1] && zv[2] < y + r && y - r < zv[3] && zv[4] < z + r && z - r < zv[5])) continue
                     w.hit = other.w.index
                     other.w.hitBy = w.index
@@ -807,6 +810,22 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
                     if (other.actor?.animated == true) {
                         g.actionType = 0
                         return
+                    }
+                }
+            }
+            8 -> {
+                // HIT_OBJECT (all.asm 0xC3B0): every tick the box of the object itself, 10 units wider on every side, hits what it touches: the other gets HIT_BY and the force, this one HIT;
+                // it goes on until STOP_HIT_OBJECT (the list of the original holds three objects at most)
+                val mine = hitBox(g) ?: return
+                var n = 0
+                for (other in objects) {
+                    if (other === g || !other.w.active) continue
+                    val zv = hitBox(other) ?: continue
+                    if (zv[0] < mine[1] + 10 && mine[0] - 10 < zv[1] && zv[2] < mine[3] + 10 && mine[2] - 10 < zv[3] && zv[4] < mine[5] + 10 && mine[4] - 10 < zv[5]) {
+                        w.hit = other.w.index
+                        other.w.hitBy = w.index
+                        other.w.hitForce = g.actionForce
+                        if (++n == 3) break
                     }
                 }
             }
@@ -864,7 +883,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             if (roomView.hardcols.any { h -> h.x1 < x + p && x - p < h.x2 && h.y1 < y + p && y - p < h.y2 && h.z1 < z + p && z - p < h.z2 }) { impact(prevX, prevZ); return } // a wall stops the shot
             for (other in objects) {
                 if (other === g || !other.w.active || other.w.flags and AF_SPECIAL != 0) continue // (effects cannot be hit)
-                val zv = other.actor?.zv ?: continue
+                val zv = hitBox(other) ?: continue
                 if (zv[0] < x + p && x - p < zv[1] && zv[2] < y + p && y - p < zv[3] && zv[4] < z + p && z - p < zv[5]) {
                     g.w.hit = other.w.index
                     other.w.hitBy = g.w.index
@@ -1263,7 +1282,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         var stop = roomView.hardcols.any { h -> hits(intArrayOf(h.x1, h.x2, h.y1, h.y2, h.z1, h.z2)) }
         for (o in objects) {
             if (o === g || !o.w.active || o.w.index == g.flightThrower) continue
-            val zo = o.actor?.zv ?: continue
+            val zo = hitBox(o) ?: continue
             if (!hits(zo)) continue
             if (o.w.index == vm.cvars[CVAR_REVERSE_OBJECT].toInt()) {
                 // it flies back from where it is, and the thrower is now the one that sent it back
