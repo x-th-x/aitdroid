@@ -24,7 +24,10 @@ import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -40,7 +43,7 @@ import androidx.compose.ui.unit.dp
 import com.aitddemo.original.GameFiles
 import kotlinx.coroutines.delay
 
-private enum class Screen { LOGO_STATIC, LOGO_3D, TITLE, CREDITS, MENU, SELECT, LOAD, MODELS, MUSIC, INTRO, ATTIC, OPTIONS, FLOORS }
+private enum class Screen { LOGO_STATIC, LOGO_3D, TITLE, CREDITS, ATTRACT, MENU, SELECT, LOAD, MODELS, MUSIC, INTRO, ATTIC, OPTIONS, FLOORS }
 
 private val TEXT_COLOR = Color(0xFFF2E4B8)
 
@@ -130,8 +133,14 @@ private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: 
     BackHandler(enabled = screen == Screen.SELECT) {
         screen = Screen.MENU
     }
-    BackHandler(enabled = screen == Screen.CREDITS) {
+    BackHandler(enabled = screen == Screen.CREDITS || screen == Screen.ATTRACT) {
         screen = Screen.MENU
+    }
+
+    // the original starts its attract mode (title, credits, slide show) when the menu has been left alone for 900 ticks (15 s); every touch starts the time again
+    var menuTouches by remember { mutableIntStateOf(0) }
+    LaunchedEffect(screen, menuTouches) {
+        if (screen == Screen.MENU) { delay(15000); screen = Screen.ATTRACT }
     }
 
     Box(
@@ -146,7 +155,10 @@ private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: 
             Screen.LOGO_3D -> TatouSpinner(modifier = Modifier.fillMaxSize())
             Screen.TITLE -> StartPictureImage(StartPicture.TITLE)
             Screen.CREDITS -> CreditsScreen(onDone = { screen = Screen.MENU })
-            Screen.MENU -> MenuScreen(
+            Screen.ATTRACT -> AttractScreen(onDone = { screen = Screen.MENU })
+            Screen.MENU -> Box(Modifier.fillMaxSize().pointerInput(Unit) {
+                awaitPointerEventScope { while (true) { awaitPointerEvent(PointerEventPass.Initial); menuTouches++ } }
+            }) { MenuScreen(
                 developerMode = developerMode,
                 onSelect = { index ->
                     when (index) {
@@ -159,7 +171,7 @@ private fun DemoApp(devAutoAttic: Boolean, devAutoIntro: Boolean, devAutoMusic: 
                         6 -> (context as? Activity)?.finish()
                     }
                 }
-            )
+            ) }
             Screen.SELECT -> SelectScreen(
                 onBack = { screen = Screen.MENU },
                 // both start the intro and then the attic; Emily plays with her own bodies and animations (LISTBOD2.PAK, LISTANI2.PAK)

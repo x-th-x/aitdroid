@@ -26,12 +26,15 @@ class StartOriginal(
     val bookPage: IntArray,
     /** The credits, a book text of ENGLISH.PAK (entry 20) in the format of the books of the game (#P, #T, #C), or null */
     val credits: ByteArray?,
+    /** The pictures of PRESENT.PAK as they are in the file (770 bytes of header, 64000 pixels): the slide show of the attract mode; empty when the file is missing */
+    val present: List<ByteArray>,
 )
 
 object StartOriginalReader {
     const val RESOURCE_FILE = "ITD_RESS.PAK"
     const val SAMPLE_FILE = "LISTSAMP.PAK"
     const val TEXT_FILE = "ENGLISH.PAK"
+    const val PRESENT_FILE = "PRESENT.PAK"
     val REQUIRED = listOf(RESOURCE_FILE, SAMPLE_FILE, TEXT_FILE)
 
     // entries of ITD_RESS.PAK
@@ -80,6 +83,7 @@ object StartOriginalReader {
                 palette = palette,
                 bookPage = picture(entry(BOOK_PAGE), palette),
                 credits = texts.get(TEXT_CREDITS),
+                present = files.read(PRESENT_FILE)?.let { b -> Pak(b).let { p -> (1..14).mapNotNull { p.get(it) }.filter { it.size >= 64770 } } } ?: emptyList(),
             )
         } catch (e: OriginalFilesException) {
             throw e
