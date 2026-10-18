@@ -1265,13 +1265,15 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     }
 
     /**
-     * A thrown item flies 3000 units in 60 ticks along the heading of the thrower. A wall, or an object that is hit (it gets HIT_BY and the force), stops it; the
-     * object named by the CVar REVERSE_OBJECT sends it back. It lands at floor height on the last place that is free of walls (throwStoppedAt of the original).
+     * A thrown item flies along the heading of the thrower, 50 units a tick: the exe starts the move value 0 -> 3000 over 60 ticks again every time it has run out (all.asm
+     * 0x80C1: an actor without animation and with a move target), so it goes on until something stops it. A wall, or an object that is hit (it gets HIT_BY and the force),
+     * stops it; the object named by the CVar REVERSE_OBJECT sends it back. It lands at floor height on the last place that is free of walls (throwStoppedAt of the original).
+     * (An arrow shot along the hallway of the paintings reaches the painting at the far end, 10000 units away; the end of the room stops what would leave it.)
      */
     private fun processFlight(g: GameObject) {
         val a = g.actor ?: run { g.flightTicks = -1; return }
         g.flightTicks++
-        val dist = 3000 * minOf(g.flightTicks, 60) / 60
+        val dist = 50 * g.flightTicks
         val ang = (g.flightBeta and 0x3FF) * 2.0 * Math.PI / 1024.0
         val nx = g.flightX + (dist * Math.sin(ang)).toInt()
         val nz = g.flightZ - (dist * Math.cos(ang)).toInt()
@@ -1298,7 +1300,9 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             o.w.hitForce = g.actionForce
             stop = true
         }
-        if (stop || g.flightTicks >= 60) {
+        val b = roomView.bounds
+        if (nx < b[0] - 400 || nx > b[1] + 400 || nz < b[2] - 400 || nz > b[3] + 400) stop = true // it would leave the room (a doorway): it comes down here
+        if (stop || g.flightTicks >= 1200) {
             ui.playSample(vm.cvars[CVAR_SAMPLE_CHOC].toInt())
             landThrown(g, g.w.x, g.w.z)
             g.flightTicks = -1
