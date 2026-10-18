@@ -111,6 +111,7 @@ Text frames with one JSON object each, `{"type": ..., ...}`. After connecting th
 {"type":"creature_hit","obj":21,"force":5}   // guest only: the guest hit a creature; the host's creature takes the hit
 {"type":"hurt","force":1,"by":21}            // host only: a creature hit the guest's hero
 {"type":"hero_died"}                         // either player: the game is over for both
+{"type":"game_end"}                          // either player: the hero reached the ending (the burning tree); the other phone shows it, too
 {"type":"object_moved","obj":4,"x":2100,"y":0,"z":4500}   // furniture pushed: relayed as is, the last push wins
 {"type":"item_taken","obj":12}   // an item left the shared world; the server relays it once to the other player (bags stay personal)
 {"type":"ping","t":123456}
@@ -136,6 +137,7 @@ Text frames with one JSON object each, `{"type": ..., ...}`. After connecting th
 {"type":"creature_hit","obj":21,"force":5}
 {"type":"hurt","force":1,"by":21}
 {"type":"hero_died","hero":"emily"}
+{"type":"game_end","hero":"carnby"}
 {"type":"object_moved","hero":"carnby","obj":4,"x":2100,"y":0,"z":4500}
 {"type":"peer","slot":1,"hero":"carnby","state":"disconnected"}
 {"type":"closed","reason":"the host left the session"}

@@ -64,6 +64,8 @@ export interface CreatureHit { type: "creature_hit"; obj: number; force: number 
 export interface Hurt { type: "hurt"; force: number; by: number }
 /** The sender's hero died: the game is over for both. */
 export interface HeroDied { type: "hero_died" }
+/** The sender's hero reached the end of the game (the burning tree): the ending is shown on both phones. */
+export interface GameEnd { type: "game_end" }
 
 /**
  * What the host's creatures and trapdoor do that the guest should see and hear: kind 0 sample (a), 1 sample then another (a, b), 2 music (a), 3 next music (a),
@@ -89,7 +91,7 @@ export interface Latch { type: "latch"; index: number; value: number; old: numbe
 /** A sound of the sender's hero (a footstep, a door, a find): the other phone plays it when it shows that hero in the same room. */
 export interface HeroSound { type: "sound"; n: number; then: number; loop: boolean }
 
-export type ClientMessage = HeroSound | Latch | Resume | WorldSnapshot | Effect | WorldVar | Props | CreatureHit | Hurt | HeroDied | ItemPlaced | ObjectMoved | ListSessions | CreateSession | JoinSession | LeaveSession | SelectStart | UploadSave | SetReady | StateMsg | Ping | ItemTaken;
+export type ClientMessage = HeroSound | Latch | Resume | WorldSnapshot | Effect | WorldVar | Props | CreatureHit | Hurt | HeroDied | GameEnd | ItemPlaced | ObjectMoved | ListSessions | CreateSession | JoinSession | LeaveSession | SelectStart | UploadSave | SetReady | StateMsg | Ping | ItemTaken;
 
 // ------------------------------------------------------------------------------------------------ server -> client
 
@@ -130,6 +132,7 @@ export type ServerMessage =
   | { type: "creature_hit"; obj: number; force: number }
   | { type: "hurt"; force: number; by: number }
   | { type: "hero_died"; hero: Hero }
+  | { type: "game_end"; hero: Hero }
   | { type: "item_placed"; hero: Hero; obj: number; stage: number; room: number; x: number; y: number; z: number; alpha: number; beta: number; gamma: number }
   | { type: "object_moved"; hero: Hero; obj: number; x: number; y: number; z: number }
   | { type: "peer"; slot: 1 | 2; hero: Hero; state: "connected" | "disconnected" | "left" | "silent" | "active" }
@@ -314,6 +317,7 @@ export function parseClientMessage(raw: string, limits: Limits = DEFAULT_LIMITS)
       return { ok: true, msg: { type, force: m.force, by: m.by } };
     }
     case "hero_died":
+    case "game_end":
       return { ok: true, msg: { type } };
     case "item_placed": {
       if (!isInt(m.obj, 0, 1000)) return fail("bad_message", "obj must be an integer from 0 to 1000", type);

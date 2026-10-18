@@ -257,6 +257,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     var coopHurt: ((Int, Int) -> Unit)? = null
     /** Co-op: the local hero died. */
     var coopDied: (() -> Unit)? = null
+    /** Co-op: the local hero reached the ending (the other phone shows it, too). */
+    var coopEnd: (() -> Unit)? = null
 
     /** Co-op, host: sounds, music and camera changes made by the creatures' scripts (kind, a, b; see server/src/protocol.ts) and the creature count, for the guest's phone. */
     var coopEffect: ((Int, Int, Int) -> Unit)? = null
@@ -463,7 +465,9 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     private val remoteCreatureHits = java.util.concurrent.ConcurrentLinkedQueue<IntArray>()
     private val remoteHurts = java.util.concurrent.ConcurrentLinkedQueue<IntArray>()
     @Volatile private var remoteDied = false
+    @Volatile private var remoteEnded = false
     private var diedTold = false
+    private var endTold = false
     private val propSent = HashMap<Int, IntArray>()
     private val puppetTarget = HashMap<Int, IntArray>()
     private var propsAt = 0
@@ -472,6 +476,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     fun remoteCreatureHit(obj: Int, force: Int) { remoteCreatureHits.add(intArrayOf(obj, force)) }
     fun remoteHurt(force: Int, by: Int) { remoteHurts.add(intArrayOf(force, by)) }
     fun remoteHeroDied() { remoteDied = true }
+    fun remoteGameEnd() { remoteEnded = true }
 
     private fun propEntry(i: Int): IntArray {
         val g = objects[i]
@@ -536,6 +541,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             while (true) playRemoteEffect(remoteEffects.poll() ?: break)
         }
         if (remoteDied && !gameOver) { diedTold = true; gameOver() }
+        if (remoteEnded && !exited) { endTold = true; endSequence() }
     }
 
     private fun applyRemoteVar(v: IntArray) { if (v[0] == CREATURE_COUNT_VAR) vm.vars[v[0]] = v[1].toShort() }
@@ -1920,6 +1926,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     }
 
     override fun endSequence() {
+        if (coop && !endTold) { endTold = true; coopEnd?.invoke() }
         exited = true
         ui.endSequence()
     }

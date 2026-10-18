@@ -122,6 +122,7 @@ export class SessionManager {
       case "creature_hit":
       case "hurt":
       case "hero_died":
+      case "game_end":
         return this.worldRelay(connId, msg);
       case "item_placed":
         return this.itemPlaced(connId, msg);
@@ -343,7 +344,7 @@ export class SessionManager {
    * The host runs the creatures: the guest sends their states never, the host sends the guest's blows' effects never. Props, creature hits, hurts and deaths go to the
    * other player only, and only while the game runs.
    */
-  private worldRelay(connId: string, m: Extract<ClientMessage, { type: "sound" | "latch" | "props" | "effect" | "world_snapshot" | "world_var" | "creature_hit" | "hurt" | "hero_died" }>): Outbound[] {
+  private worldRelay(connId: string, m: Extract<ClientMessage, { type: "sound" | "latch" | "props" | "effect" | "world_snapshot" | "world_var" | "creature_hit" | "hurt" | "hero_died" | "game_end" }>): Outbound[] {
     const found = this.find(connId);
     if (!found) return this.error(connId, "not_in_session", "you are not in a session", m.type);
     const { session, player } = found;
@@ -358,6 +359,7 @@ export class SessionManager {
     if (!other?.connected) return [];
     if (m.type === "props") return [{ to: other.connId, msg: { type: "props", hero: player.hero, items: m.items } }];
     if (m.type === "hero_died") return [{ to: other.connId, msg: { type: "hero_died", hero: player.hero } }];
+    if (m.type === "game_end") return [{ to: other.connId, msg: { type: "game_end", hero: player.hero } }];
     return [{ to: other.connId, msg: m }];
   }
 

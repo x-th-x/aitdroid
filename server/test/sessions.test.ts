@@ -484,10 +484,20 @@ test("a death is told to the other player, from either side", () => {
   assert.equal(h.last("B", "hero_died")!.hero, "carnby");
 });
 
+test("the end of the game is told to the other player, from either side", () => {
+  const { h } = pair();
+  startNew(h);
+  h.send("A", { type: "game_end" });
+  assert.equal(h.last("B", "game_end")!.hero, "carnby");
+  h.send("B", { type: "game_end" });
+  assert.equal(h.last("A", "game_end")!.hero, "emily");
+});
+
 test("props, creature hits, hurts and deaths are refused before the game runs", () => {
   const { h } = pair();
   assert.equal(h.errorCode(h.send("A", { type: "props", items: [prop(6)] }), "A"), "wrong_state");
   assert.equal(h.errorCode(h.send("A", { type: "hero_died" }), "A"), "wrong_state");
+  assert.equal(h.errorCode(h.send("A", { type: "game_end" }), "A"), "wrong_state");
 });
 
 test("the host's effects and shared variables go to the guest; the guest may not send them", () => {
