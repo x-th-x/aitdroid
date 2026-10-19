@@ -153,6 +153,9 @@ class LifeVm(
 ) {
     val vars: ShortArray = initialVars.copyOf(maxOf(initialVars.size, 512))
     val cvars = ShortArray(64)
+    /** Co-op: objects whose scripts must not change the creature count (variable 20): search spots that also send a creature in, which is left out in co-op. */
+    var countIgnored: Set<Int> = emptySet()
+    private val COUNT_VAR = 20
     val objects: Array<WorldObject> = Array(objectData.u16(0)) { WorldObject(it, objectData) }
 
     /** The action key (bit mask of the chosen action, as `action` in the original), the click flag and the joystick bits of this frame. */
@@ -338,8 +341,8 @@ class LifeVm(
                         return
                     }
                     "VAR" -> { val i = s16(); val v = eval(); if (i in vars.indices) vars[i] = v.toShort() }
-                    "INC" -> { val i = s16(); if (i in vars.indices) vars[i]++ }
-                    "DEC" -> { val i = s16(); if (i in vars.indices) vars[i]-- }
+                    "INC" -> { val i = s16(); if (i in vars.indices && !(i == COUNT_VAR && owner in countIgnored)) vars[i]++ }
+                    "DEC" -> { val i = s16(); if (i in vars.indices && !(i == COUNT_VAR && owner in countIgnored)) vars[i]-- }
                     "ADD" -> { val i = s16(); val v = eval(); if (i in vars.indices) vars[i] = (vars[i] + v).toShort() }
                     "SUB" -> { val i = s16(); val v = eval(); if (i in vars.indices) vars[i] = (vars[i] - v).toShort() }
                     "C_VAR" -> { val i = s16(); val v = eval(); if (i in cvars.indices) cvars[i] = v.toShort() }

@@ -6,7 +6,7 @@ package com.aitddemo.life
  */
 object LifeScan {
     /** [lifeSets]: pairs (object the life goes to, or -1 for the script's own object; script number). [varWrites]: the variables the script changes. */
-    class Facts(val lifeSets: List<IntArray>, val varWrites: Set<Int>, val varReads: Set<Int> = emptySet())
+    class Facts(val lifeSets: List<IntArray>, val varWrites: Set<Int>, val varReads: Set<Int> = emptySet(), val findsItems: Boolean = false)
 
     /** Reads a script to its end; null when it does not decode exactly to the end (an op that is not known). */
     fun decode(w: ShortArray): Facts? {
@@ -14,6 +14,7 @@ object LifeScan {
         val lifeSets = ArrayList<IntArray>()
         val writes = HashSet<Int>()
         val reads = HashSet<Int>()
+        var finds = false
         fun s16(): Int = if (p < w.size) w[p++].toInt() else { p = Int.MAX_VALUE / 2; 0 }
         fun skipEval() {
             val v = s16()
@@ -45,9 +46,10 @@ object LifeScan {
             when (name) {
                 "VAR", "INC", "DEC", "ADD", "SUB" -> writes.add(operands[0])
                 "LIFE" -> lifeSets.add(intArrayOf(target, operands[0]))
+                "FOUND", "FOUND_NAME", "FOUND_BODY", "FOUND_FLAG", "FOUND_LIFE" -> finds = true
             }
         }
-        return if (p == w.size) Facts(lifeSets, writes, reads) else null
+        return if (p == w.size) Facts(lifeSets, writes, reads, finds) else null
     }
 
     /**
@@ -79,6 +81,37 @@ object LifeScan {
                 for (l in f.lifeSets) if (l[0] < 0) queue.add(l[1])
             }
             if (touches) out.add(o.index)
+        }
+        return out
+    }
+
+    /**
+     * Of the [candidates] (objects whose scripts also spawn creatures) those that give the player something to find (FOUND, FOUND_NAME ...): a search spot, not a creature. Removing them
+     * with the creatures would take the item away (the box of shoes and the water jug of room 3/10).
+     */
+    fun objectsThatFind(objects: List<WorldObject>, script: (Int) -> ShortArray?, candidates: Set<Int>): Set<Int> {
+        val facts = HashMap<Int, Facts>()
+        var n = 0
+        while (true) {
+            val w = script(n) ?: break
+            decode(w)?.let { facts[n] = it }
+            n++
+        }
+        val handedTo = HashMap<Int, MutableSet<Int>>()
+        for ((_, f) in facts) for (s in f.lifeSets) if (s[0] >= 0) handedTo.getOrPut(s[0]) { HashSet() }.add(s[1])
+        val out = HashSet<Int>()
+        for (o in candidates) {
+            val seen = HashSet<Int>()
+            val queue = ArrayDeque<Int>()
+            if (objects[o].life >= 0) queue.add(objects[o].life)
+            handedTo[o]?.let { queue.addAll(it) }
+            while (queue.isNotEmpty()) {
+                val s = queue.removeFirst()
+                if (!seen.add(s)) continue
+                val f = facts[s] ?: continue
+                if (f.findsItems) { out.add(o); break }
+                for (l in f.lifeSets) if (l[0] < 0) queue.add(l[1])
+            }
         }
         return out
     }

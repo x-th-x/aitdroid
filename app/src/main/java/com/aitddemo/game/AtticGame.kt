@@ -640,7 +640,11 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         coopHost = !emilyLocal
         for (i in VISUAL_PROPS) closedBody[i] = objects[i].w.body
         // the creatures of the other floors are removed (the attic's two run on the host's phone); the variables the player's own script writes are his own and not shared
-        hostile = com.aitddemo.life.LifeScan.creatureObjects(vm.objects.toList(), { data.script(it) }, CREATURE_COUNT_VAR).filter { vm.objects[it].stage != 0 && it !in CREATURES }.toSet()
+        val creatureLike = com.aitddemo.life.LifeScan.creatureObjects(vm.objects.toList(), { data.script(it) }, CREATURE_COUNT_VAR).filter { vm.objects[it].stage != 0 && it !in CREATURES }.toSet()
+        // a search spot that also sends a creature in (the shelf of room 3/10: the box of shoes, the water jug) stays; only the creature it sends is left out and it does not count it
+        val keepers = com.aitddemo.life.LifeScan.objectsThatFind(vm.objects.toList(), { data.script(it) }, creatureLike)
+        vm.countIgnored = keepers
+        hostile = creatureLike - keepers
         for (o in hostile) {
             delete(o)
             vm.objects[o].life = -1
