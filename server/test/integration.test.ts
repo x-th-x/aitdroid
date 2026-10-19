@@ -145,3 +145,67 @@ test("a flood of messages is told off", async () => {
   assert.equal(e.code, "rate_limited");
   a.close();
 });
+
+async function startedPair(c: { open: () => Promise<Client> }): Promise<{ a: Client; b: Client; name: string; tokenB: string }> {
+  const a = await c.open();
+  const b = await c.open();
+  a.send({ type: "create_session" });
+  const joinedA = await a.next("joined");
+  b.send({ type: "join_session", name: joinedA.name });
+  const joinedB = await b.next("joined");
+  a.send({ type: "select_start", mode: "new" });
+  b.send({ type: "select_start", mode: "new" });
+  await a.until("session", (s) => s.selectionsMatch);
+  await b.until("session", (s) => s.selectionsMatch);
+  a.send({ type: "set_ready", ready: true });
+  b.send({ type: "set_ready", ready: true });
+  await a.next("start");
+  await b.next("start");
+  return { a, b, name: joinedA.name, tokenB: joinedB.token };
+}
+
+test("a dropped player comes back over a new connection with his token and the game runs on", async () => {
+  const { a, b, name, tokenB } = await startedPair(Client);
+  b.ws.terminate(); // the connection is lost without a goodbye
+  assert.equal((await a.until("session", (s) => s.status === "interrupted")).status, "interrupted");
+  const b2 = await Client.open();
+  b2.send({ type: "resume", name, token: tokenB });
+  assert.equal((await b2.next("joined")).hero, "emily");
+  assert.equal((await a.until("session", (s) => s.status === "running")).status, "running");
+  b2.send(state("emily", 1, 3000, -1000));
+  assert.equal((await a.next("remote_state")).x, 3000);
+  a.send(state("carnby", 1, 3300, -1500));
+  assert.equal((await b2.next("remote_state")).x, 3300);
+  a.close();
+  b2.close();
+});
+
+test("a wrong token does not take the place, and after the keep time the interrupted game is gone", async () => {
+  const quick = createServer(testConfig({ interruptedKeepMs: 1500 }));
+  const quickPort = await quick.listen(0);
+  const open = async (): Promise<Client> => {
+    const ws = new WebSocket("ws://127.0.0.1:" + quickPort);
+    const c = new (Client as unknown as { new (w: WebSocket): Client })(ws);
+    await new Promise<void>((resolve, reject) => { ws.once("open", () => resolve()); ws.once("error", reject); });
+    await c.next("welcome");
+    return c;
+  };
+  try {
+    const { a, b, name, tokenB } = await startedPair({ open });
+    b.ws.terminate();
+    await a.until("session", (s) => s.status === "interrupted");
+    const thief = await open();
+    thief.send({ type: "resume", name, token: "not-the-token" });
+    assert.equal((await thief.next("error")).code, "bad_token");
+    // nobody comes back: the game is closed after the keep time
+    const closed = await a.next("closed", 6000);
+    const late = await open();
+    late.send({ type: "resume", name, token: tokenB });
+    const err = await late.next("error", 3000);
+    assert.equal(err.code, "unknown_session");
+    assert.equal(closed.reason, "the interrupted game was closed");
+    a.close(); thief.close(); late.close();
+  } finally {
+    await quick.close();
+  }
+});
