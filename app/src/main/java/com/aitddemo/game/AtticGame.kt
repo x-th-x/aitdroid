@@ -541,6 +541,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             while (true) playRemoteEffect(remoteEffects.poll() ?: break)
         }
         if (remoteDied && !gameOver) { diedTold = true; gameOver() }
+        // the other phone is told at the lethal blow, not 30 seconds later when the death scene of the original has run to its GAME_OVER (the game is over for both)
+        if (!diedTold && !gameOver && vm.vars[LIFE_VAR].toInt() <= 0) { diedTold = true; coopDied?.invoke() }
         if (remoteEnded && !exited) { endTold = true; endSequence() }
     }
 
@@ -2320,6 +2322,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         /** The two creatures of the attic (A comes through the window, B out of the trapdoor): objects of OBJETS.ITD. */
         /** The creatures, and the trapdoor lid they open, are run by the host; the horse and the window change on either phone. */
         const val CREATURE_COUNT_VAR = 20
+        const val LIFE_VAR = 21
         const val CONTAINERS_OPEN_VAR = 130
         /** Co-op latch: a variable is looked at every 10 ticks and is sent when it has kept its new value for 60 ticks (1 s) */
         const val LATCH_SAMPLE = 10
