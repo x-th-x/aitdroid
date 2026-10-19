@@ -77,7 +77,7 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
     @Volatile var onSnapshot: ((List<IntArray>) -> Unit)? = null
     @Volatile var onEffect: ((Int, Int, Int) -> Unit)? = null
     @Volatile var onWorldVar: ((Int, Int) -> Unit)? = null
-    @Volatile var onHeroDied: (() -> Unit)? = null
+    @Volatile var onHeroDied: ((Hero, Int, Int) -> Unit)? = null
     @Volatile var onGameEnd: (() -> Unit)? = null
 
     fun changeUrl(value: String) {
@@ -148,7 +148,7 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
     fun sendWorldVar(index: Int, value: Int): Boolean = client.send(CoopJson.worldVar(index, value))
     fun sendCreatureHit(obj: Int, force: Int): Boolean = client.send(CoopJson.creatureHit(obj, force))
     fun sendHurt(force: Int, by: Int): Boolean = client.send(CoopJson.hurt(force, by))
-    fun sendHeroDied(): Boolean = client.send(CoopJson.heroDied())
+    fun sendHeroDied(cause: Int, by: Int): Boolean = client.send(CoopJson.heroDied(cause, by))
     fun sendGameEnd(): Boolean = client.send(CoopJson.gameEnd())
 
     /** For the game: tells the other phone that an item was put down at this place. */
@@ -228,7 +228,7 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
             is ServerEvent.WorldVar -> { onWorldVar?.invoke(event.index, event.value); return }
             is ServerEvent.CreatureHit -> { onCreatureHit?.invoke(event.obj, event.force); return }
             is ServerEvent.Hurt -> { onHurt?.invoke(event.force, event.by); return }
-            is ServerEvent.HeroDied -> { onHeroDied?.invoke(); return }
+            is ServerEvent.HeroDied -> { onHeroDied?.invoke(event.hero, event.cause, event.by); return }
             is ServerEvent.GameEnd -> { onGameEnd?.invoke(); return }
             else -> {}
         }

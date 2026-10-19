@@ -358,7 +358,7 @@ export class SessionManager {
     const other = session.players[isHost ? 1 : 0];
     if (!other?.connected) return [];
     if (m.type === "props") return [{ to: other.connId, msg: { type: "props", hero: player.hero, items: m.items } }];
-    if (m.type === "hero_died") return [{ to: other.connId, msg: { type: "hero_died", hero: player.hero } }];
+    if (m.type === "hero_died") return [{ to: other.connId, msg: { type: "hero_died", hero: player.hero, cause: m.cause ?? 0, by: m.by ?? 0 } }];
     if (m.type === "game_end") return [{ to: other.connId, msg: { type: "game_end", hero: player.hero } }];
     return [{ to: other.connId, msg: m }];
   }

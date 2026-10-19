@@ -62,8 +62,8 @@ export interface Props { type: "props"; items: PropState[] }
 export interface CreatureHit { type: "creature_hit"; obj: number; force: number }
 /** The host's creature hit the guest's hero. */
 export interface Hurt { type: "hurt"; force: number; by: number }
-/** The sender's hero died: the game is over for both. */
-export interface HeroDied { type: "hero_died" }
+/** The sender's hero died; the other player is told (and plays on). [cause]: 0 unknown, 1 a creature, 2 an object ([by] is its number); [by] only counts for cause 2. */
+export interface HeroDied { type: "hero_died"; cause?: number; by?: number }
 /** The sender's hero reached the end of the game (the burning tree): the ending is shown on both phones. */
 export interface GameEnd { type: "game_end" }
 
@@ -131,7 +131,7 @@ export type ServerMessage =
   | { type: "world_var"; index: number; value: number }
   | { type: "creature_hit"; obj: number; force: number }
   | { type: "hurt"; force: number; by: number }
-  | { type: "hero_died"; hero: Hero }
+  | { type: "hero_died"; hero: Hero; cause: number; by: number }
   | { type: "game_end"; hero: Hero }
   | { type: "item_placed"; hero: Hero; obj: number; stage: number; room: number; x: number; y: number; z: number; alpha: number; beta: number; gamma: number }
   | { type: "object_moved"; hero: Hero; obj: number; x: number; y: number; z: number }
@@ -316,7 +316,12 @@ export function parseClientMessage(raw: string, limits: Limits = DEFAULT_LIMITS)
       if (!isInt(m.force, 0, 200) || !isInt(m.by, 0, 1000)) return fail("bad_message", "force (0 to 200) and by (an object) are needed", type);
       return { ok: true, msg: { type, force: m.force, by: m.by } };
     }
-    case "hero_died":
+    case "hero_died": {
+      const cause = m.cause === undefined ? 0 : m.cause;
+      const by = m.by === undefined ? 0 : m.by;
+      if (!isInt(cause, 0, 9) || !isInt(by, 0, 1000)) return fail("bad_message", "cause (0 to 9) and by (an object) must be small integers", type);
+      return { ok: true, msg: { type, cause, by } };
+    }
     case "game_end":
       return { ok: true, msg: { type } };
     case "item_placed": {

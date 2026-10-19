@@ -110,7 +110,7 @@ Text frames with one JSON object each, `{"type": ..., ...}`. After connecting th
 {"type":"world_var","index":20,"value":1}   // host only: the creature count (variable 20), the one game variable that is shared
 {"type":"creature_hit","obj":21,"force":5}   // guest only: the guest hit a creature; the host's creature takes the hit
 {"type":"hurt","force":1,"by":21}            // host only: a creature hit the guest's hero
-{"type":"hero_died"}                         // either player: the game is over for both (sent at the lethal blow, when the life reaches 0; the dying hero's own death scene of the original needs about 30 seconds more)
+{"type":"hero_died","cause":1,"by":21}      // either player: his hero died (sent at the lethal blow). cause 0 unknown, 1 a creature, 2 an object (by = its number). The other phone shows "<Hero> died: <reason>" and plays on alone (no figure follows); the dying hero's own phone runs its death scene (about 30 s) and ends
 {"type":"game_end"}                          // either player: the hero reached the ending (the burning tree); the other phone shows it, too
 {"type":"object_moved","obj":4,"x":2100,"y":0,"z":4500}   // furniture pushed: relayed as is, the last push wins
 {"type":"item_taken","obj":12}   // an item left the shared world; the server relays it once to the other player (bags stay personal)
@@ -136,7 +136,7 @@ Text frames with one JSON object each, `{"type": ..., ...}`. After connecting th
 {"type":"props","hero":"carnby","items":[{"obj":21,"stage":0,"room":0,"active":true,"body":24,"anim":23,"alpha":0,"x":100,"y":0,"z":200,"beta":300}]}
 {"type":"creature_hit","obj":21,"force":5}
 {"type":"hurt","force":1,"by":21}
-{"type":"hero_died","hero":"emily"}
+{"type":"hero_died","hero":"emily","cause":1,"by":21}
 {"type":"game_end","hero":"carnby"}
 {"type":"object_moved","hero":"carnby","obj":4,"x":2100,"y":0,"z":4500}
 {"type":"peer","slot":1,"hero":"carnby","state":"disconnected"}

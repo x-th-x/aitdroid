@@ -468,7 +468,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
             g.coopSnapshot = { items -> coop.sendSnapshot(items) }
             g.coopEffect = { kind, a, b -> coop.sendEffect(kind, a, b) }
             g.coopVar = { index, value -> coop.sendWorldVar(index, value) }
-            g.coopDied = { coop.sendHeroDied() }
+            g.coopDied = { cause, by -> coop.sendHeroDied(cause, by) }
             g.coopEnd = { coop.sendGameEnd() }
             g.coopObjectMoved = { obj, x, y, z -> coop.sendObjectMoved(obj, x, y, z) }
             var lastMs = System.nanoTime() / 1_000_000.0
@@ -490,7 +490,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
         coop?.onProps = { items -> game.remoteProps(items) }
         coop?.onCreatureHit = { obj, force -> game.remoteCreatureHit(obj, force) }
         coop?.onHurt = { force, by -> game.remoteHurt(force, by) }
-        coop?.onHeroDied = { game.remoteHeroDied() }
+        coop?.onHeroDied = { hero, cause, by -> game.remoteHeroDied(hero.title, cause, by) }
         coop?.onGameEnd = { game.remoteGameEnd() }
         coop?.onLatch = { index, value, old -> game.remoteLatch(index, value, old) }
         coop?.onSound = { n, then, loop -> game.remoteSound(n, then, loop) }

@@ -63,7 +63,7 @@ sealed class ServerEvent {
     class WorldVar(val index: Int, val value: Int) : ServerEvent()
     class CreatureHit(val obj: Int, val force: Int) : ServerEvent()
     class Hurt(val force: Int, val by: Int) : ServerEvent()
-    class HeroDied(val hero: Hero) : ServerEvent()
+    class HeroDied(val hero: Hero, val cause: Int, val by: Int) : ServerEvent()
     class GameEnd(val hero: Hero) : ServerEvent()
     class ItemPlaced(val obj: Int, val stage: Int, val room: Int, val x: Int, val y: Int, val z: Int, val alpha: Int, val beta: Int, val gamma: Int) : ServerEvent()
     class ObjectMoved(val obj: Int, val x: Int, val y: Int, val z: Int) : ServerEvent()
@@ -111,7 +111,7 @@ object CoopJson {
                 "world_var" -> ServerEvent.WorldVar(o.getInt("index"), o.getInt("value"))
                 "creature_hit" -> ServerEvent.CreatureHit(o.getInt("obj"), o.getInt("force"))
                 "hurt" -> ServerEvent.Hurt(o.getInt("force"), o.getInt("by"))
-                "hero_died" -> ServerEvent.HeroDied(Hero.of(o.getString("hero")) ?: return null)
+                "hero_died" -> ServerEvent.HeroDied(Hero.of(o.getString("hero")) ?: return null, o.optInt("cause", 0), o.optInt("by", 0))
                 "game_end" -> ServerEvent.GameEnd(Hero.of(o.getString("hero")) ?: return null)
                 "item_placed" -> ServerEvent.ItemPlaced(o.getInt("obj"), o.getInt("stage"), o.getInt("room"), o.getInt("x"), o.getInt("y"), o.getInt("z"), o.getInt("alpha"), o.getInt("beta"), o.getInt("gamma"))
                 "object_moved" -> ServerEvent.ObjectMoved(o.getInt("obj"), o.getInt("x"), o.getInt("y"), o.getInt("z"))
@@ -169,7 +169,7 @@ object CoopJson {
     fun worldVar(index: Int, value: Int) = msg("world_var") { put("index", index); put("value", value) }
     fun creatureHit(obj: Int, force: Int) = msg("creature_hit") { put("obj", obj); put("force", force) }
     fun hurt(force: Int, by: Int) = msg("hurt") { put("force", force); put("by", by) }
-    fun heroDied() = msg("hero_died")
+    fun heroDied(cause: Int, by: Int) = msg("hero_died") { put("cause", cause); put("by", by) }
     fun gameEnd() = msg("game_end")
     fun itemPlaced(obj: Int, stage: Int, room: Int, x: Int, y: Int, z: Int, alpha: Int, beta: Int, gamma: Int) = msg("item_placed") {
         put("obj", obj); put("stage", stage); put("room", room); put("x", x); put("y", y); put("z", z); put("alpha", alpha); put("beta", beta); put("gamma", gamma)

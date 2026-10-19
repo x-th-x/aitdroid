@@ -256,7 +256,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     /** Co-op, host: a creature hit the other hero: (force, creature). */
     var coopHurt: ((Int, Int) -> Unit)? = null
     /** Co-op: the local hero died. */
-    var coopDied: (() -> Unit)? = null
+    var coopDied: ((Int, Int) -> Unit)? = null
     /** Co-op: the local hero reached the ending (the other phone shows it, too). */
     var coopEnd: (() -> Unit)? = null
 
@@ -281,6 +281,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         coopSolo = true
         remoteHero = null
         for (i in CREATURES) { puppetTarget.remove(i); if (!coopHost) objects[i].let { if (it.w.active) deactivate(it) } }
+        if (partnerDead) return // he died: nobody follows the player
         companion?.let { it.obj.w.active = true; it.obj.w.stage = stage; it.obj.w.room = room }
         placeCompanion()
     }
@@ -475,7 +476,40 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     fun remoteProps(items: List<IntArray>) { remoteProps.addAll(items) }
     fun remoteCreatureHit(obj: Int, force: Int) { remoteCreatureHits.add(intArrayOf(obj, force)) }
     fun remoteHurt(force: Int, by: Int) { remoteHurts.add(intArrayOf(force, by)) }
-    fun remoteHeroDied() { remoteDied = true }
+    @Volatile private var remoteDeath: Triple<String, Int, Int>? = null
+    fun remoteHeroDied(name: String, cause: Int, by: Int) { remoteDeath = Triple(name, cause, by); remoteDied = true }
+
+    /** The other hero died: he is gone (no figure), the game goes on for this player alone, and he is told who died and why. */
+    var partnerDead = false
+        private set
+
+    private fun partnerDied() {
+        val d = remoteDeath ?: return
+        if (partnerDead) return
+        partnerDead = true
+        coopSolo()
+        companion?.let { it.obj.w.active = false }
+        ui.message(d.first + " died: " + deathReason(d.second, d.third))
+    }
+
+    private var lastHitter = -1
+    private var lastHitAt = -100000
+
+    /** Why the local hero died, for the other phone: (cause, object): 1 a creature, 2 another object, 0 unknown. Taken from whatever hit him last. */
+    private fun deathCause(): IntArray {
+        val h = if (time - lastHitAt < 240) lastHitter else -1
+        return when {
+            h < 0 -> intArrayOf(0, 0)
+            h in CREATURES || h in hostile -> intArrayOf(1, h)
+            else -> intArrayOf(2, h)
+        }
+    }
+
+    private fun deathReason(cause: Int, by: Int): String = when (cause) {
+        1 -> "killed by a creature"
+        2 -> "hit by " + (data.texts[vm.objects.getOrNull(by)?.foundName ?: -1]?.takeIf { it.isNotBlank() && it != "null" } ?: "something")
+        else -> "cause unknown (a fall, a trap or something else)"
+    }
     fun remoteGameEnd() { remoteEnded = true }
 
     private fun propEntry(i: Int): IntArray {
@@ -540,9 +574,10 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             while (true) applyRemoteVar(remoteVars.poll() ?: break)
             while (true) playRemoteEffect(remoteEffects.poll() ?: break)
         }
-        if (remoteDied && !gameOver) { diedTold = true; gameOver() }
+        player?.w?.let { if (it.hitBy >= 0) { lastHitter = it.hitBy; lastHitAt = time } }
+        if (remoteDied) { remoteDied = false; partnerDied() }
         // the other phone is told at the lethal blow, not 30 seconds later when the death scene of the original has run to its GAME_OVER (the game is over for both)
-        if (!diedTold && !gameOver && vm.vars[LIFE_VAR].toInt() <= 0) { diedTold = true; coopDied?.invoke() }
+        if (!diedTold && !gameOver && vm.vars[LIFE_VAR].toInt() <= 0) { diedTold = true; deathCause().let { coopDied?.invoke(it[0], it[1]) } }
         if (remoteEnded && !exited) { endTold = true; endSequence() }
     }
 
@@ -797,6 +832,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     /** One tick of the companion in the game: it follows the player (see [Partner.follow]). */
     private fun tickCompanion() {
+        if (partnerDead) { companion?.obj?.w?.active = false; return }
         if (coop && !coopSolo) { applyRemoteTaken(); applyRemotePlaced(); syncFurniture(); syncWorld(); syncLatches(); noteInteractions(); playRemoteSounds() }
         remoteHero?.let { tickRemoteHero(it); return }
         val c = companion ?: return
@@ -1897,7 +1933,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     }
 
     override fun gameOver() {
-        if (coop && !diedTold) { diedTold = true; coopDied?.invoke() }
+        if (coop && !diedTold) { diedTold = true; deathCause().let { coopDied?.invoke(it[0], it[1]) } }
         gameOver = true
         ui.gameOver()
     }

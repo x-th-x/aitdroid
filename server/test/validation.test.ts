@@ -100,6 +100,9 @@ test("props, creature_hit, hurt and hero_died are checked", () => {
   assert.equal(parseClientMessage('{"type":"hurt","force":1,"by":21}').ok, true);
   assert.equal(parseClientMessage('{"type":"hurt","force":-1,"by":21}').ok, false);
   assert.equal(parseClientMessage('{"type":"hero_died"}').ok, true);
+  assert.equal(parseClientMessage('{"type":"hero_died","cause":2,"by":44}').ok, true);
+  assert.equal(parseClientMessage('{"type":"hero_died","cause":99}').ok, false);
+  assert.equal(parseClientMessage('{"type":"hero_died","cause":1,"by":-3}').ok, false);
   assert.equal(parseClientMessage('{"type":"game_end"}').ok, true);
 });
 

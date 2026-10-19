@@ -480,8 +480,11 @@ test("a death is told to the other player, from either side", () => {
   startNew(h);
   h.send("B", { type: "hero_died" });
   assert.equal(h.last("A", "hero_died")!.hero, "emily");
-  h.send("A", { type: "hero_died" });
+  assert.equal(h.last("A", "hero_died")!.cause, 0);
+  h.send("A", { type: "hero_died", cause: 1, by: 21 });
   assert.equal(h.last("B", "hero_died")!.hero, "carnby");
+  assert.equal(h.last("B", "hero_died")!.cause, 1);
+  assert.equal(h.last("B", "hero_died")!.by, 21);
 });
 
 test("the end of the game is told to the other player, from either side", () => {
