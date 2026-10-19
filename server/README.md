@@ -111,6 +111,7 @@ Text frames with one JSON object each, `{"type": ..., ...}`. After connecting th
 {"type":"creature_hit","obj":21,"force":5}   // guest only: the guest hit a creature; the host's creature takes the hit
 {"type":"hurt","force":1,"by":21}            // host only: a creature hit the guest's hero
 {"type":"hero_died","cause":1,"by":21}      // either player: his hero died (sent at the lethal blow). cause 0 unknown, 1 a creature, 2 another object that hit him (by = its number), 3 the surroundings (a trap or a fall; by = 1 to 3, the kind of death scene), 4 a trap object whose script took the life (by = its number). The other phone shows "<Hero> died: <reason>" and plays on alone (no figure follows); the dying hero's own phone runs its death scene (about 30 s) and ends
+{"type":"item_gone","obj":12}                // either player: an item was used up (deleted from his bag); the other phone drops it from the list of items it counts as his
 {"type":"game_end"}                          // either player: the hero reached the ending (the burning tree); the other phone shows it, too
 {"type":"object_moved","obj":4,"x":2100,"y":0,"z":4500}   // furniture pushed: relayed as is, the last push wins
 {"type":"item_taken","obj":12}   // an item left the shared world; the server relays it once to the other player (bags stay personal)

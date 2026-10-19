@@ -470,6 +470,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
             g.coopVar = { index, value -> coop.sendWorldVar(index, value) }
             g.coopDied = { cause, by -> coop.sendHeroDied(cause, by) }
             g.coopEnd = { coop.sendGameEnd() }
+            g.coopItemGone = { item -> coop.sendItemGone(item) }
             g.coopObjectMoved = { obj, x, y, z -> coop.sendObjectMoved(obj, x, y, z) }
             var lastMs = System.nanoTime() / 1_000_000.0
             g.remoteHero = RemoteHeroSource {
@@ -492,6 +493,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
         coop?.onHurt = { force, by -> game.remoteHurt(force, by) }
         coop?.onHeroDied = { hero, cause, by -> game.remoteHeroDied(hero.title, cause, by) }
         coop?.onGameEnd = { game.remoteGameEnd() }
+        coop?.onItemGone = { item -> game.remoteItemGone(item) }
         coop?.onLatch = { index, value, old -> game.remoteLatch(index, value, old) }
         coop?.onSound = { n, then, loop -> game.remoteSound(n, then, loop) }
         coop?.onSnapshot = { items -> game.remoteSnapshot(items) }
@@ -499,7 +501,7 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
         coop?.onWorldVar = { index, value -> game.remoteVar(index, value) }
         coop?.onItemPlaced = { m -> game.remoteItemPlaced(m) }
         coop?.onObjectMoved = { obj, x, y, z -> game.remoteObjectMoved(obj, x, y, z) }
-        onDispose { coop?.onRemoteState = null; coop?.onItemTaken = null; coop?.onProps = null; coop?.onCreatureHit = null; coop?.onHurt = null; coop?.onHeroDied = null; coop?.onGameEnd = null; coop?.onLatch = null; coop?.onSound = null; coop?.onSnapshot = null; coop?.onEffect = null; coop?.onWorldVar = null; coop?.onItemPlaced = null; coop?.onObjectMoved = null }
+        onDispose { coop?.onRemoteState = null; coop?.onItemTaken = null; coop?.onProps = null; coop?.onCreatureHit = null; coop?.onHurt = null; coop?.onHeroDied = null; coop?.onGameEnd = null; coop?.onItemGone = null; coop?.onLatch = null; coop?.onSound = null; coop?.onSnapshot = null; coop?.onEffect = null; coop?.onWorldVar = null; coop?.onItemPlaced = null; coop?.onObjectMoved = null }
     }
     // co-op: when the other player is gone for good, the game goes on alone with the game's own companion
     LaunchedEffect(coop?.partnerGone) {

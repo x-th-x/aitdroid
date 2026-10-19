@@ -79,6 +79,7 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
     @Volatile var onWorldVar: ((Int, Int) -> Unit)? = null
     @Volatile var onHeroDied: ((Hero, Int, Int) -> Unit)? = null
     @Volatile var onGameEnd: (() -> Unit)? = null
+    @Volatile var onItemGone: ((Int) -> Unit)? = null
 
     fun changeUrl(value: String) {
         url = value.trim()
@@ -150,6 +151,7 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
     fun sendHurt(force: Int, by: Int): Boolean = client.send(CoopJson.hurt(force, by))
     fun sendHeroDied(cause: Int, by: Int): Boolean = client.send(CoopJson.heroDied(cause, by))
     fun sendGameEnd(): Boolean = client.send(CoopJson.gameEnd())
+    fun sendItemGone(obj: Int): Boolean = client.send(CoopJson.itemGone(obj))
 
     /** For the game: tells the other phone that an item was put down at this place. */
     fun sendItemPlaced(obj: Int, stage: Int, room: Int, x: Int, y: Int, z: Int, alpha: Int, beta: Int, gamma: Int): Boolean =
@@ -230,6 +232,7 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
             is ServerEvent.Hurt -> { onHurt?.invoke(event.force, event.by); return }
             is ServerEvent.HeroDied -> { onHeroDied?.invoke(event.hero, event.cause, event.by); return }
             is ServerEvent.GameEnd -> { onGameEnd?.invoke(); return }
+            is ServerEvent.ItemGone -> { onItemGone?.invoke(event.obj); return }
             else -> {}
         }
         if (event is ServerEvent.ItemPlaced) {
@@ -278,7 +281,7 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
             }
             is ServerEvent.Closed -> { if (start != null) partnerGone = true; reconnecting = false; token = null; main.removeCallbacks(retry); session = null; me = null; start = null; error = "The session ended: ${event.reason}." }
             is ServerEvent.Error -> if (resuming) giveUp() else error = describe(event)
-            is ServerEvent.Remote, is ServerEvent.ItemTaken, is ServerEvent.ItemPlaced, is ServerEvent.ObjectMoved, is ServerEvent.Props, is ServerEvent.Latch, is ServerEvent.HeroSound, is ServerEvent.WorldSnapshot, is ServerEvent.Effect, is ServerEvent.WorldVar, is ServerEvent.CreatureHit, is ServerEvent.Hurt, is ServerEvent.HeroDied, is ServerEvent.GameEnd, is ServerEvent.Pong -> {}
+            is ServerEvent.Remote, is ServerEvent.ItemTaken, is ServerEvent.ItemPlaced, is ServerEvent.ObjectMoved, is ServerEvent.Props, is ServerEvent.Latch, is ServerEvent.HeroSound, is ServerEvent.WorldSnapshot, is ServerEvent.Effect, is ServerEvent.WorldVar, is ServerEvent.CreatureHit, is ServerEvent.Hurt, is ServerEvent.HeroDied, is ServerEvent.GameEnd, is ServerEvent.ItemGone, is ServerEvent.Pong -> {}
         }
     }
 

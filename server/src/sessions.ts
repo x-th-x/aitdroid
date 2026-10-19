@@ -129,6 +129,7 @@ export class SessionManager {
       case "object_moved":
         return this.objectMoved(connId, msg);
       case "item_taken":
+      case "item_gone":
         return this.itemTaken(connId, msg);
     }
   }
@@ -329,15 +330,15 @@ export class SessionManager {
   // ------------------------------------------------------------------------------------------ the shared world
 
   /** An item was taken: the other player is told (every time: a repeated message is how a phone repairs a difference between the two worlds). */
-  private itemTaken(connId: string, m: Extract<ClientMessage, { type: "item_taken" }>): Outbound[] {
+  private itemTaken(connId: string, m: Extract<ClientMessage, { type: "item_taken" | "item_gone" }>): Outbound[] {
     const found = this.find(connId);
-    if (!found) return this.error(connId, "not_in_session", "you are not in a session", "item_taken");
+    if (!found) return this.error(connId, "not_in_session", "you are not in a session", m.type);
     const { session, player } = found;
-    if (session.status !== "running") return this.error(connId, "wrong_state", "the game is not running", "item_taken");
+    if (session.status !== "running") return this.error(connId, "wrong_state", "the game is not running", m.type);
     session.lastActivity = this.now();
     const other = session.players[player.slot === 1 ? 1 : 0];
     if (!other?.connected) return [];
-    return [{ to: other.connId, msg: { type: "item_taken", hero: player.hero, obj: m.obj } }];
+    return [{ to: other.connId, msg: { type: m.type, hero: player.hero, obj: m.obj } }];
   }
 
   /**

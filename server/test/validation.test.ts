@@ -104,6 +104,8 @@ test("props, creature_hit, hurt and hero_died are checked", () => {
   assert.equal(parseClientMessage('{"type":"hero_died","cause":99}').ok, false);
   assert.equal(parseClientMessage('{"type":"hero_died","cause":1,"by":-3}').ok, false);
   assert.equal(parseClientMessage('{"type":"game_end"}').ok, true);
+  assert.equal(parseClientMessage('{"type":"item_gone","obj":12}').ok, true);
+  assert.equal(parseClientMessage('{"type":"item_gone","obj":-1}').ok, false);
 });
 
 test("effect and world_var are checked", () => {

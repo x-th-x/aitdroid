@@ -259,6 +259,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     var coopDied: ((Int, Int) -> Unit)? = null
     /** Co-op: the local hero reached the ending (the other phone shows it, too). */
     var coopEnd: (() -> Unit)? = null
+    /** Co-op: an item was used up (a script deleted it from the local hero's bag). */
+    var coopItemGone: ((Int) -> Unit)? = null
 
     /** Co-op, host: sounds, music and camera changes made by the creatures' scripts (kind, a, b; see server/src/protocol.ts) and the creature count, for the guest's phone. */
     var coopEffect: ((Int, Int, Int) -> Unit)? = null
@@ -659,6 +661,11 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     /** Co-op: the items the other hero holds (taken since the start, not put down again). A save point written here includes them: the file is the start of the next shared game and
      *  the other hero's bag is not in it otherwise, so those items would be gone from the world and from both bags. */
     private val partnerItems = LinkedHashSet<Int>()
+    private val remoteGone = java.util.concurrent.ConcurrentLinkedQueue<Int>()
+
+    /** Co-op: the other hero used an item up: it is not his any more (a save point must not bring it back). Safe to call from any thread. */
+    fun remoteItemGone(item: Int) { remoteGone.add(item) }
+    private fun applyRemoteGone() { while (true) partnerItems.remove(remoteGone.poll() ?: return) }
 
     /** Co-op: the other player took [item] out of the shared world. Safe to call from any thread; the game picks it up on its next tick. */
     fun remoteItemTaken(item: Int) { remoteTaken.add(item) }
@@ -846,7 +853,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     /** One tick of the companion in the game: it follows the player (see [Partner.follow]). */
     private fun tickCompanion() {
         if (partnerDead) { companion?.obj?.w?.active = false; return }
-        if (coop && !coopSolo) { applyRemoteTaken(); applyRemotePlaced(); syncFurniture(); syncWorld(); syncLatches(); noteInteractions(); playRemoteSounds() }
+        if (coop && !coopSolo) { applyRemoteTaken(); applyRemotePlaced(); applyRemoteGone(); syncFurniture(); syncWorld(); syncLatches(); noteInteractions(); playRemoteSounds() }
         remoteHero?.let { tickRemoteHero(it); return }
         val c = companion ?: return
         val a = c.actor ?: return
@@ -1814,7 +1821,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
 
     override fun delete(obj: Int) {
         objects.getOrNull(obj)?.let { if (it.w.active) deactivate(it) }
-        if (inventory.remove(obj)) { /* an item that is destroyed leaves the inventory */ }
+        if (inventory.remove(obj)) { if (coop) coopItemGone?.invoke(obj) } // an item that is destroyed leaves the inventory (and is no one's any more)
         if (vm.inHand == obj) vm.inHand = -1
     }
 

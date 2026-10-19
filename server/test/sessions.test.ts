@@ -496,6 +496,18 @@ test("the end of the game is told to the other player, from either side", () => 
   assert.equal(h.last("A", "game_end")!.hero, "emily");
 });
 
+test("an item that was used up is told to the other player, from either side, and only while the game runs", () => {
+  const { h } = pair();
+  assert.equal(h.errorCode(h.send("A", { type: "item_gone", obj: 12 }), "A"), "wrong_state");
+  startNew(h);
+  h.send("A", { type: "item_gone", obj: 12 });
+  assert.equal(h.last("B", "item_gone")!.obj, 12);
+  assert.equal(h.last("B", "item_gone")!.hero, "carnby");
+  h.send("B", { type: "item_gone", obj: 40 });
+  assert.equal(h.last("A", "item_gone")!.hero, "emily");
+  assert.equal(h.last("A", "item_gone")!.obj, 40);
+});
+
 test("props, creature hits, hurts and deaths are refused before the game runs", () => {
   const { h } = pair();
   assert.equal(h.errorCode(h.send("A", { type: "props", items: [prop(6)] }), "A"), "wrong_state");

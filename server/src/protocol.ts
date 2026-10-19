@@ -45,6 +45,9 @@ export interface Ping { type: "ping"; t: number }
 /** The sender took an item (the number of the item's object in the game) out of the shared world: the other phone marks it as gone, but does not put it into its own bag. */
 export interface ItemTaken { type: "item_taken"; obj: number }
 
+/** The sender used an item up (a script deleted it from his bag): the other phone must not count it as his any more (a save point would bring it back). */
+export interface ItemGone { type: "item_gone"; obj: number }
+
 /** The sender pushed a piece of furniture (an object of the game) to a new place, in the engine's room-relative coordinates. The last push wins on both phones. */
 export interface ObjectMoved { type: "object_moved"; obj: number; x: number; y: number; z: number }
 
@@ -91,7 +94,7 @@ export interface Latch { type: "latch"; index: number; value: number; old: numbe
 /** A sound of the sender's hero (a footstep, a door, a find): the other phone plays it when it shows that hero in the same room. */
 export interface HeroSound { type: "sound"; n: number; then: number; loop: boolean }
 
-export type ClientMessage = HeroSound | Latch | Resume | WorldSnapshot | Effect | WorldVar | Props | CreatureHit | Hurt | HeroDied | GameEnd | ItemPlaced | ObjectMoved | ListSessions | CreateSession | JoinSession | LeaveSession | SelectStart | UploadSave | SetReady | StateMsg | Ping | ItemTaken;
+export type ClientMessage = HeroSound | Latch | Resume | WorldSnapshot | Effect | WorldVar | Props | CreatureHit | Hurt | HeroDied | GameEnd | ItemPlaced | ObjectMoved | ListSessions | CreateSession | JoinSession | LeaveSession | SelectStart | UploadSave | SetReady | StateMsg | Ping | ItemTaken | ItemGone;
 
 // ------------------------------------------------------------------------------------------------ server -> client
 
@@ -123,6 +126,7 @@ export type ServerMessage =
   | { type: "start"; sessionId: string; mode: StartMode; saveId: string | null; saveData: string | null; area: Area; serverTime: number }
   | { type: "remote_state"; seq: number; t: number; serverTime: number; hero: Hero; stage: number; room: number; x: number; y: number; z: number; beta: number; anim: number }
   | { type: "item_taken"; hero: Hero; obj: number }
+  | { type: "item_gone"; hero: Hero; obj: number }
   | { type: "props"; hero: Hero; items: PropState[] }
   | { type: "latch"; index: number; value: number; old: number }
   | { type: "sound"; n: number; then: number; loop: boolean }
@@ -248,7 +252,8 @@ export function parseClientMessage(raw: string, limits: Limits = DEFAULT_LIMITS)
       if (!isInt(m.anim, -1, 2000)) return fail("bad_message", "anim must be an integer from -1 to 2000", type);
       return { ok: true, msg: { type, seq: m.seq, t: m.t, hero: m.hero, stage: m.stage, room: m.room, x: m.x, y: m.y, z: m.z, beta: m.beta, anim: m.anim } };
     }
-    case "item_taken": {
+    case "item_taken":
+    case "item_gone": {
       if (!isInt(m.obj, 0, 1000)) return fail("bad_message", "obj must be an integer from 0 to 1000", type);
       return { ok: true, msg: { type, obj: m.obj } };
     }
