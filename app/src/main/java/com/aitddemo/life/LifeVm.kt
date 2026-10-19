@@ -156,6 +156,12 @@ class LifeVm(
     /** Co-op: objects whose scripts must not change the creature count (variable 20): search spots that also send a creature in, which is left out in co-op. */
     var countIgnored: Set<Int> = emptySet()
     private val COUNT_VAR = 20
+    private val LIFE_VAR = 21
+    /** The last script that took life away from the player (variable 21 went down): the object whose script it was, and when (game ticks). Co-op uses it to tell why a hero died. */
+    var lastLifeLossOwner = -1
+        private set
+    var lastLifeLossAt = -100000
+        private set
     val objects: Array<WorldObject> = Array(objectData.u16(0)) { WorldObject(it, objectData) }
 
     /** The action key (bit mask of the chosen action, as `action` in the original), the click flag and the joystick bits of this frame. */
@@ -340,11 +346,11 @@ class LifeVm(
                         host.gameOver()
                         return
                     }
-                    "VAR" -> { val i = s16(); val v = eval(); if (i in vars.indices) vars[i] = v.toShort() }
+                    "VAR" -> { val i = s16(); val v = eval(); if (i in vars.indices) { if (i == LIFE_VAR && v < vars[i]) { lastLifeLossOwner = owner; lastLifeLossAt = host.time }; vars[i] = v.toShort() } }
                     "INC" -> { val i = s16(); if (i in vars.indices && !(i == COUNT_VAR && owner in countIgnored)) vars[i]++ }
-                    "DEC" -> { val i = s16(); if (i in vars.indices && !(i == COUNT_VAR && owner in countIgnored)) vars[i]-- }
+                    "DEC" -> { val i = s16(); if (i in vars.indices && !(i == COUNT_VAR && owner in countIgnored)) { if (i == LIFE_VAR) { lastLifeLossOwner = owner; lastLifeLossAt = host.time }; vars[i]-- } }
                     "ADD" -> { val i = s16(); val v = eval(); if (i in vars.indices) vars[i] = (vars[i] + v).toShort() }
-                    "SUB" -> { val i = s16(); val v = eval(); if (i in vars.indices) vars[i] = (vars[i] - v).toShort() }
+                    "SUB" -> { val i = s16(); val v = eval(); if (i in vars.indices) { if (i == LIFE_VAR && v > 0) { lastLifeLossOwner = owner; lastLifeLossAt = host.time }; vars[i] = (vars[i] - v).toShort() } }
                     "C_VAR" -> { val i = s16(); val v = eval(); if (i in cvars.indices) cvars[i] = v.toShort() }
                     "MESSAGE" -> host.message(s16())
                     "MESSAGE_VALUE" -> { val m = s16(); s16(); host.message(m) }

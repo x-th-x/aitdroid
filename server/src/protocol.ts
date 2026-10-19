@@ -62,7 +62,7 @@ export interface Props { type: "props"; items: PropState[] }
 export interface CreatureHit { type: "creature_hit"; obj: number; force: number }
 /** The host's creature hit the guest's hero. */
 export interface Hurt { type: "hurt"; force: number; by: number }
-/** The sender's hero died; the other player is told (and plays on). [cause]: 0 unknown, 1 a creature, 2 an object ([by] is its number); [by] only counts for cause 2. */
+/** The sender's hero died; the other player is told (and plays on). [cause]: 0 unknown, 1 a creature, 2 another object that hit him, 3 the surroundings (a trap or a fall), 4 a trap object whose script took the life; [by] is the object (cause 1, 2, 4) or the kind of death scene (cause 3). */
 export interface HeroDied { type: "hero_died"; cause?: number; by?: number }
 /** The sender's hero reached the end of the game (the burning tree): the ending is shown on both phones. */
 export interface GameEnd { type: "game_end" }

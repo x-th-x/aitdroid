@@ -498,16 +498,23 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     /** Why the local hero died, for the other phone: (cause, object): 1 a creature, 2 another object, 0 unknown. Taken from whatever hit him last. */
     private fun deathCause(): IntArray {
         val h = if (time - lastHitAt < 240) lastHitter else -1
+        // an object's own script took the life (a trap that hurts whoever touches it): not the hero's hit script, which has the one that hit him in [lastHitter]
+        val owner = vm.lastLifeLossOwner.takeIf { time - vm.lastLifeLossAt < 240 && it != playerIndex && it >= 0 } ?: -1
+        val scene = vm.vars[SCENE_DEATH_VAR].toInt() // the death scenes of the surroundings (a trap, a fall): the script that starts one sets this variable
         return when {
-            h < 0 -> intArrayOf(0, 0)
-            h in CREATURES || h in hostile -> intArrayOf(1, h)
-            else -> intArrayOf(2, h)
+            h >= 0 && (h in CREATURES || h in hostile) -> intArrayOf(1, h)
+            h >= 0 -> intArrayOf(2, h)
+            owner >= 0 -> intArrayOf(if (owner in CREATURES || owner in hostile) 1 else 4, owner)
+            scene in 1..3 -> intArrayOf(3, scene)
+            else -> intArrayOf(0, 0)
         }
     }
 
     private fun deathReason(cause: Int, by: Int): String = when (cause) {
         1 -> "killed by a creature"
         2 -> "hit by " + (data.texts[vm.objects.getOrNull(by)?.foundName ?: -1]?.takeIf { it.isNotBlank() && it != "null" } ?: "something")
+        3 -> "caught by a trap or a fall"
+        4 -> "hurt by " + (data.texts[vm.objects.getOrNull(by)?.foundName ?: -1]?.takeIf { it.isNotBlank() && it != "null" } ?: "a trap")
         else -> "cause unknown (a fall, a trap or something else)"
     }
     fun remoteGameEnd() { remoteEnded = true }
@@ -2366,6 +2373,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         /** The creatures, and the trapdoor lid they open, are run by the host; the horse and the window change on either phone. */
         const val CREATURE_COUNT_VAR = 20
         const val LIFE_VAR = 21
+        /** Set to 1, 2 or 3 by the scripts that start a death scene of the surroundings (a trap in room 1/1, a fall, the walls of room 3/1) */
+        const val SCENE_DEATH_VAR = 29
         const val CONTAINERS_OPEN_VAR = 130
         /** Co-op latch: a variable is looked at every 10 ticks and is sent when it has kept its new value for 60 ticks (1 s) */
         const val LATCH_SAMPLE = 10
