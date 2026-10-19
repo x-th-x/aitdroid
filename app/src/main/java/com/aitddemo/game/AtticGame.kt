@@ -702,6 +702,11 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         val keepers = com.aitddemo.life.LifeScan.objectsThatFind(vm.objects.toList(), { data.script(it) }, creatureLike)
         vm.countIgnored = keepers
         hostile = creatureLike - keepers
+        // what a creature drops when it is destroyed (the sword of the armour in room 2/2) is put down at its place now, as its script would: the creature is not there to be destroyed
+        for (d in com.aitddemo.life.LifeScan.itemDrops(vm.objects.toList(), { data.script(it) }, hostile)) {
+            val w = vm.objects[d[0]]
+            if (w.stage == -1 && d[0] !in inventory && w.foundFlag and 0x8000 == 0) putAt(d[0], d[1])
+        }
         for (o in hostile) {
             delete(o)
             vm.objects[o].life = -1
