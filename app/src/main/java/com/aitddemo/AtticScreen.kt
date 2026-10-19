@@ -876,8 +876,9 @@ private fun AtticRoom(world: AtticOriginal, onExit: () -> Unit, controlMode: Con
         if (menuOpen) {
             GameMenu(
                 slotLabel = { SaveStore.label(context, it) },
-                canLoad = { SaveStore.savedAt(context, it) != null },
-                message = menuMessage,
+                // in co-op a load would change only this phone (the other one goes on in the present): a shared save point is chosen when the game starts
+                canLoad = { coop == null && SaveStore.savedAt(context, it) != null },
+                message = menuMessage ?: if (coop != null) "Co-op: a save point is chosen when the game starts" else null,
             ) { action, slot ->
                 when (action) {
                     GameMenuAction.RESUME -> menuOpen = false

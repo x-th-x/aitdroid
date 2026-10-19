@@ -636,6 +636,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             val m = remotePlaced.poll() ?: return
             val w = vm.objects.getOrNull(m[0]) ?: continue
             touched.add(m[0])
+            partnerItems.remove(m[0])
             if (m[0] in inventory) continue
             w.stage = m[1]; w.room = m[2]; w.x = m[3]; w.y = m[4]; w.z = m[5]; w.alpha = m[6]; w.beta = m[7]; w.gamma = m[8]
             w.foundFlag = (w.foundFlag and 0x7FFF) or 0x4000
@@ -648,6 +649,10 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
     /** Items the other player took, waiting for the game thread (they arrive on the network thread). */
     private val remoteTaken = java.util.concurrent.ConcurrentLinkedQueue<Int>()
 
+    /** Co-op: the items the other hero holds (taken since the start, not put down again). A save point written here includes them: the file is the start of the next shared game and
+     *  the other hero's bag is not in it otherwise, so those items would be gone from the world and from both bags. */
+    private val partnerItems = LinkedHashSet<Int>()
+
     /** Co-op: the other player took [item] out of the shared world. Safe to call from any thread; the game picks it up on its next tick. */
     fun remoteItemTaken(item: Int) { remoteTaken.add(item) }
 
@@ -657,6 +662,7 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
             val item = remoteTaken.poll() ?: return
             val w = vm.objects.getOrNull(item) ?: continue
             touched.add(item)
+            partnerItems.add(item)
             if (item in inventory) continue // both took it at the same moment: each keeps his own
             if (pendingFound == item) pendingFound = -1
             objects.getOrNull(item)?.let { if (it.w.active) deactivate(it) }
@@ -2234,7 +2240,8 @@ class AtticGame(val data: GameData, private val ui: GameUi, private var stage: I
         out.writeInt(stage); out.writeInt(room)
         out.writeInt(vm.vars.size); for (v in vm.vars) out.writeShort(v.toInt())
         out.writeInt(vm.cvars.size); for (v in vm.cvars) out.writeShort(v.toInt())
-        out.writeInt(inventory.size); for (i in inventory) out.writeInt(i)
+        val saved = if (coop) inventory + partnerItems.filter { it !in inventory } else inventory
+        out.writeInt(saved.size); for (i in saved) out.writeInt(i)
         out.writeInt(vm.inHand); out.writeInt(cameraTarget); out.writeBoolean(allowInventory); out.writeBoolean(lightOff); out.writeInt(vm.currentMusic)
         out.writeInt(objects.size)
         for (g in objects) {
