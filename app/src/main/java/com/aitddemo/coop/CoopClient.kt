@@ -25,6 +25,30 @@ class CoopClient(private val listener: Listener) {
         .readTimeout(0, TimeUnit.MILLISECONDS) // the socket stays open; the ping above watches it
         .build()
 
+    /** Only for [warmUp]: a sleeping server (Render's free plan) answers the first request after about a minute. */
+    private val waker = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(100, TimeUnit.SECONDS)
+        .callTimeout(110, TimeUnit.SECONDS)
+        .build()
+
+    /**
+     * Wakes a sleeping server: asks for its health page (http or https at the host of the WebSocket address). [done] is called on OkHttp's thread when the server has answered or the
+     * attempt failed; false when the address cannot be used. Nothing is sent but the request for the page.
+     */
+    fun warmUp(url: String, done: (Boolean) -> Unit): Boolean {
+        val request = try {
+            Request.Builder().url(healthUrl(url) ?: return false).build()
+        } catch (_: IllegalArgumentException) {
+            return false
+        }
+        waker.newCall(request).enqueue(object : okhttp3.Callback {
+            override fun onFailure(call: okhttp3.Call, e: java.io.IOException) = done(false)
+            override fun onResponse(call: okhttp3.Call, response: Response) { response.use { done(it.isSuccessful) } }
+        })
+        return true
+    }
+
     @Volatile private var socket: WebSocket? = null
     @Volatile private var closing = false
 

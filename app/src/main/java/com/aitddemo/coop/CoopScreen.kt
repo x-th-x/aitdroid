@@ -61,6 +61,7 @@ fun CoopScreen(model: CoopModel, onBack: () -> Unit, onStarted: (StartInfo) -> U
 
     val start = model.start
     LaunchedEffect(start) { if (start != null) onStarted(start) }
+    LaunchedEffect(Unit) { model.wake() } // a sleeping server starts now, while the player looks at the lobby
 
     // the host offers one of his saved games: the bytes of the file go to the server, which hands them to both phones at the start
     val offerSlot = { slot: Int ->
@@ -115,6 +116,7 @@ private fun buildRows(model: CoopModel, joinName: String, onEdit: (String) -> Un
             rows.add(Row("Server: " + shortUrl(model.url), DIM) { onEdit("url") })
             if (model.connection == CoopModel.Connection.CONNECTING) rows.add(Row("Connecting...", BRIGHT))
             else rows.add(Row("Connect", BRIGHT) { model.connect() })
+            if (model.waking) rows.add(Row("Waking up the server (up to a minute)", DIM))
         }
         me == null || session == null -> {
             rows.add(Row("Connected", DIM))

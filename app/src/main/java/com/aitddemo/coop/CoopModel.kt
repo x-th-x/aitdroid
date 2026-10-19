@@ -22,6 +22,9 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
         private set
     var connection by mutableStateOf(Connection.DISCONNECTED)
         private set
+    /** The server is being woken up (a sleeping server answers the first request after about a minute). */
+    var waking by mutableStateOf(false)
+        private set
     /** The last error or notice for the player (null = none). */
     var error by mutableStateOf<String?>(null)
         private set
@@ -85,6 +88,13 @@ class CoopModel(private val prefs: SharedPreferences? = null) : CoopClient.Liste
     fun clearError() { error = null }
 
     // ------------------------------------------------------------------------------------------ what the player does
+
+    /** Wakes the server while the player is still choosing: one request for its health page. Only when not connected, and not twice at the same time. */
+    fun wake() {
+        if (waking || connection != Connection.DISCONNECTED) return
+        val asked = url
+        waking = client.warmUp(asked) { main.post { waking = false } }
+    }
 
     fun connect() {
         if (connection != Connection.DISCONNECTED) return
